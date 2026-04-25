@@ -6,8 +6,9 @@
 > verifiable assertion. Report the results back as `PASS` / `FAIL` / `SKIP` per number —
 > do **not** describe what you saw in prose. Pass/fail per line is the contract.
 >
-> **v1.1 note:** Apple Watch companion is **deferred to v1.2** — mark all Watch lines as
-> SKIP for the v1.1 first-run validation. Watch lines: S2, C4, R3, R4, P5, F4, SC2, SC3, SC4.
+> **v0.2 note:** Watch companion is still deferred. Capture-loop tests (the LV1–LV12
+> series) are **new in v0.2** — they validate the workout-logging layer end-to-end.
+> Mark all Watch lines as SKIP. Watch lines: S2, C4, R3, R4, P5, F4, SC2, SC3, SC4.
 
 ---
 
@@ -109,3 +110,50 @@ isolated to specific assertions.
 If C3, R1/R2, F1/F2, or P1–P4 fail, the protocol golden tests in
 `VoltraLiveTests/ProtocolGoldenTests.swift` should have caught it in CI — file a bug
 that the test coverage missed the regression.
+
+---
+
+## Logging capture loop (v0.2 — NEW)
+
+> Verifies the v0.2 workout-logging flow on top of the working v0.1 telemetry. After
+> connecting to your VOLTRA, the home screen should now show four day-type tiles plus
+> Custom — NOT the live dashboard.
+
+### First-launch seed
+
+- [ ] **LV1.** On first launch after upgrading from v0.1, the app does NOT crash and shows the new home screen within 5 seconds.
+- [ ] **LV2.** Tapping **Leg** shows a list of exercises (e.g. Belt Squats, Smith Machine Squat, Front Squat). The list is non-empty — confirms `seed/history.md` was bundled and the importer ran.
+- [ ] **LV3.** Tapping **Back** shows back-day exercises (e.g. Pull-Ups, Chest-Supported Rows, Seated Lat Pulldown).
+- [ ] **LV4.** Each exercise row shows a relative date (e.g. “2 wk”) under the name — confirms `lastUsedAt` was populated from history.
+
+### Day pick → exercise pick → capture
+
+- [ ] **LV5.** Picking a day type, then picking an exercise, navigates to the LiveCaptureView with the exercise name + day type shown at top.
+- [ ] **LV6.** Live tile row (REPS / FORCE / PHASE) updates while you pull the cable, identical to the v0.1 dashboard.
+- [ ] **LV7.** “Start lifting — sets auto-detect after a 4s rest” hint shows when no sets are logged yet.
+
+### Auto-detected set + log sheet
+
+> Do **5 reps**, then put the cable down and wait 5 seconds.
+
+- [ ] **LV8.** Within ~5 seconds of putting the cable down, the **Log set sheet** appears automatically.
+- [ ] **LV9.** The DETECTED REPS field shows **5** and PEAK FORCE shows a non-zero pounds value.
+- [ ] **LV10.** Weight, eccentric, and reps fields are pre-filled from your last set on this exercise (or empty if first ever set).
+- [ ] **LV11.** Tapping **Log set** dismisses the sheet and the set appears in the LOGGED SETS list with the right reps + weight.
+- [ ] **LV12.** The set number indicator advances (“Set 1” → “Set 2 coming up”).
+
+### Manual logging + chains
+
+- [ ] **LV13.** Tapping **Log set manually** opens the same sheet without an auto-detected set, and you can enter weight/reps/chains by hand.
+- [ ] **LV14.** Chains field accepts a number (e.g. 30) and the saved row shows “+30 chains” alongside the weight.
+
+### Session end + export
+
+- [ ] **LV15.** Tapping **End session** prompts a confirm dialog.
+- [ ] **LV16.** After confirming, the export sheet shows a markdown view of the session with each exercise + set rendered.
+- [ ] **LV17.** The Share button on the export sheet successfully shares the markdown to Notes / Mail (system share sheet appears).
+
+### iCloud sync
+
+- [ ] **LV18.** With another iPhone signed into the same iCloud account, install v0.2 — the seeded exercises and any logged sessions appear within ~30 seconds (skip if you only have one device).
+- [ ] **LV19.** Reinstalling the app on the same device preserves logged sessions (CloudKit restores them) — first-launch import does NOT duplicate sessions.

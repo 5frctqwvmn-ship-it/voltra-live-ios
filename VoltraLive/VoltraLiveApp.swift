@@ -1,5 +1,6 @@
 // VoltraLiveApp.swift
-// @main entry point. Sets up SwiftData modelContainer and injects environment objects.
+// @main entry point. Sets up SwiftData modelContainer with CloudKit sync and
+// injects environment objects.
 
 import SwiftUI
 import SwiftData
@@ -8,14 +9,35 @@ import SwiftData
 struct VoltraLiveApp: App {
     @StateObject private var bleManager = VoltraBLEManager()
     @StateObject private var sessionStore = SessionStore()
+    @StateObject private var loggingStore = LoggingStore()
 
     let modelContainer: ModelContainer = {
-        let schema = Schema([PastSession.self, PastSet.self])
-        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        // v0.1 dashboard models + v0.2 logging models in one container so
+        // cross-queries (e.g. "last leg-day session") work and CloudKit syncs
+        // everything together.
+        var allModels: [any PersistentModel.Type] = [PastSession.self, PastSet.self]
+        allModels.append(contentsOf: LoggingSchema.models)
+        let schema = Schema(allModels)
+
+        // CloudKit-backed config — automatic mode means SwiftData picks the
+        // default container "iCloud.<bundle-id>" if entitlements include it.
+        let config = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .automatic
+        )
         do {
             return try ModelContainer(for: schema, configurations: config)
         } catch {
-            fatalError("[VoltraLive] Failed to create SwiftData ModelContainer: \(error)")
+            // Fallback: try local-only if CloudKit fails (e.g. user not signed
+            // in to iCloud). Logging still works; sync just won't happen.
+            print("[VoltraLive] CloudKit init failed: \(error). Falling back to local-only.")
+            let localConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+            do {
+                return try ModelContainer(for: schema, configurations: localConfig)
+            } catch {
+                fatalError("[VoltraLive] Failed to create SwiftData ModelContainer: \(error)")
+            }
         }
     }()
 
@@ -24,9 +46,15 @@ struct VoltraLiveApp: App {
             ContentView()
                 .environmentObject(bleManager)
                 .environmentObject(sessionStore)
+                .environmentObject(loggingStore)
                 .onAppear {
-                    // Wire model context and BLE → session callback on first appear
-                    sessionStore.modelContext = modelContainer.mainContext
+                    let ctx = modelContainer.mainContext
+
+                    // Wire SwiftData context into both stores.
+                    sessionStore.modelContext = ctx
+                    loggingStore.wire(context: ctx, sessionStore: sessionStore)
+
+                    // BLE → SessionStore (existing telemetry path is the same).
                     bleManager.onTelemetry = { [weak sessionStore] telem in
                         guard let ss = sessionStore else { return }
                         let phase    = telem.phase    ?? .idle
@@ -36,6 +64,10 @@ struct VoltraLiveApp: App {
                             ss.handleLiveSample(phase: phase, forceLb: forceLb, repCount: repCount)
                         }
                     }
+
+                    // First-launch: seed Exercise/WorkoutSession rows from
+                    // the bundled history.md.
+                    HistoryImporter.runIfNeeded(context: ctx)
                 }
         }
         .modelContainer(modelContainer)
