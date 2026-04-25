@@ -1,8 +1,10 @@
 // VoltraLiveApp.swift
 // @main entry point. Sets up SwiftData modelContainer and injects environment objects.
+// Also activates the Watch companion bridge (PhoneWatchBridge).
 
 import SwiftUI
 import SwiftData
+import WatchConnectivity
 
 @main
 struct VoltraLiveApp: App {
@@ -36,6 +38,13 @@ struct VoltraLiveApp: App {
                             ss.handleLiveSample(phase: phase, forceLb: forceLb, repCount: repCount)
                         }
                     }
+
+                    // Activate and wire the Watch companion bridge
+                    PhoneWatchBridge.shared.activate()
+                    PhoneWatchBridge.shared.wire(
+                        sessionStore: sessionStore,
+                        bleManager: bleManager
+                    )
                 }
         }
         .modelContainer(modelContainer)

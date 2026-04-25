@@ -1,0 +1,167 @@
+name: Release to TestFlight
+
+# Runs only on version tags (e.g., v0.1.0) or manual dispatch.
+# Leaves the existing build.yml unsigned dev builds untouched.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run — build & sign but skip TestFlight upload and GitHub release'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select latest Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Print Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # Inject Team ID into environment so XcodeGen sees ${APPLE_TEAM_ID:-}
+      - name: Generate Xcode project (with Team ID)
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          export APPLE_TEAM_ID="${APPLE_TEAM_ID}"
+          xcodegen generate
+
+      # Write the .p8 key file where xcodebuild expects it
+      - name: Install App Store Connect API key
+        env:
+          API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "${API_PRIVATE_KEY}" > ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8
+          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8
+
+      # Run protocol unit tests BEFORE we burn signing credentials.
+      # If the wire format regressed, fail fast — don't ship a broken IPA to TestFlight.
+      - name: Run protocol unit tests
+        run: |
+          xcodebuild test \
+            -project VoltraLive.xcodeproj \
+            -scheme VoltraLive \
+            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -only-testing:VoltraLiveTests \
+            CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+
+      # Archive — xcodebuild handles certificate + profile creation automatically
+      # via -allowProvisioningUpdates + ASC API key
+      - name: Build and archive (signed)
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          xcodebuild \
+            -project VoltraLive.xcodeproj \
+            -scheme VoltraLive \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/VoltraLive.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8 \
+            -authenticationKeyID "${API_KEY_ID}" \
+            -authenticationKeyIssuerID "${API_ISSUER_ID}" \
+            DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
+            CODE_SIGN_STYLE=Automatic \
+            archive
+
+      # Generate ExportOptions.plist at runtime so APPLE_TEAM_ID stays a secret
+      - name: Export IPA for App Store Connect
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>uploadSymbols</key><true/>
+            <key>signingStyle</key><string>automatic</string>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath build/VoltraLive.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8 \
+            -authenticationKeyID "${API_KEY_ID}" \
+            -authenticationKeyIssuerID "${API_ISSUER_ID}"
+
+      # Verify IPA exists before doing anything destructive — fails fast if signing/export broke
+      - name: Verify signed IPA
+        run: |
+          set -euo pipefail
+          ls -la build/export/
+          test -f build/export/VoltraLive.ipa
+          echo "Signed IPA size: $(du -h build/export/VoltraLive.ipa | cut -f1)"
+
+      # Upload to TestFlight using the App Store Connect API key (no Apple ID password needed)
+      # Skipped on dry-run dispatch — lets us validate the signing pipeline without burning a build number.
+      - name: Upload to TestFlight via altool
+        if: github.event_name == 'push' || github.event.inputs.dry_run == 'false'
+        env:
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          xcrun altool --upload-app \
+            --type ios \
+            --file build/export/VoltraLive.ipa \
+            --apiKey "${API_KEY_ID}" \
+            --apiIssuer "${API_ISSUER_ID}"
+
+      # On dry-run, surface the IPA as a workflow artifact instead of uploading
+      - name: Upload IPA as workflow artifact (dry-run only)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoltraLive-dryrun-ipa
+          path: build/export/VoltraLive.ipa
+          retention-days: 7
+
+      # Also attach the signed IPA to the GitHub release for the tag (skipped on dry-run)
+      - name: Publish signed IPA to GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME:-manual}"
+          gh release create "${TAG}" build/export/VoltraLive.ipa \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "VOLTRA Live ${TAG}" \
+            --notes "Signed build ${TAG} — also submitted to TestFlight. Build commit: ${GITHUB_SHA}." \
+            2>/dev/null || \
+          gh release upload "${TAG}" build/export/VoltraLive.ipa \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
