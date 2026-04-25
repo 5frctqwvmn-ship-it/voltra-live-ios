@@ -63,7 +63,7 @@ jobs:
           xcodebuild test \
             -project VoltraLive.xcodeproj \
             -scheme VoltraLive \
-            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -destination 'platform=iOS Simulator,name=iPad (10th generation),OS=latest' \
             -only-testing:VoltraLiveTests \
             CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 
