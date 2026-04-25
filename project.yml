@@ -9,7 +9,6 @@ options:
 
 settings:
   base:
-    PRODUCT_NAME: "VOLTRA Live"
     PRODUCT_BUNDLE_IDENTIFIER: com.voltralive.app
     SWIFT_VERSION: "5.9"
     TARGETED_DEVICE_FAMILY: "1,2"
@@ -40,6 +39,7 @@ targets:
       - path: VoltraLive/Assets.xcassets
     settings:
       base:
+        PRODUCT_NAME: "VOLTRA Live"
         INFOPLIST_FILE: VoltraLive/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.voltralive.app
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -105,8 +105,6 @@ targets:
       - path: VoltraWatch
         excludes:
           - "**/*.md"
-    resources:
-      - path: VoltraWatch/Assets.xcassets
     settings:
       base:
         PRODUCT_NAME: "VOLTRA Live Watch"
@@ -115,7 +113,10 @@ targets:
         WATCHOS_DEPLOYMENT_TARGET: "10.0"
         TARGETED_DEVICE_FAMILY: "4"
         SWIFT_VERSION: "5.9"
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # No app icon yet — Xcode 16 watchOS asset catalogs need role-specific
+        # rendered sizes (88x88, 100x100, 102x102, 108x108, 117x117, etc.) which
+        # we'll add in a follow-up. For now, no ASSETCATALOG_COMPILER_APPICON_NAME
+        # so actool doesn't require any icon to be present.
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_STYLE: Automatic
         CODE_SIGNING_REQUIRED: NO
