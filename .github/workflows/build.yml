@@ -61,3 +61,16 @@ jobs:
           name: VoltraLive-unsigned
           path: VoltraLive.ipa
           retention-days: 30
+
+      - name: Publish rolling "latest" release with IPA
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Delete any prior "latest" release so we always have a fresh download.
+          gh release delete latest --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create latest VoltraLive.ipa \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "VoltraLive (latest unsigned IPA)" \
+            --notes "Unsigned IPA built by CI from commit $GITHUB_SHA. Sideload via AltStore / SideStore. Re-signed on-device by your free Apple ID; refresh weekly."
