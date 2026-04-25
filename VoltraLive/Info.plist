@@ -19,13 +19,16 @@
     <key>CFBundleShortVersionString</key>
     <string>1.0.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>VOLTRA Live needs Bluetooth to connect to your VOLTRA device and receive live workout telemetry.</string>
     <key>NSBluetoothPeripheralUsageDescription</key>
     <string>VOLTRA Live needs Bluetooth to connect to your VOLTRA device.</string>
-    <key>UILaunchStoryboardName</key>
-    <string></string>
+    <key>UILaunchScreen</key>
+    <dict>
+        <key>UIColorName</key>
+        <string></string>
+    </dict>
     <key>UIRequiresFullScreen</key>
     <false/>
     <key>UIStatusBarStyle</key>
