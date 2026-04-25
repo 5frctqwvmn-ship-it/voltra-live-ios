@@ -40,6 +40,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: "VOLTRA Live"
+        PRODUCT_MODULE_NAME: VoltraLive
         INFOPLIST_FILE: VoltraLive/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.voltralive.app
         TARGETED_DEVICE_FAMILY: "1,2"
