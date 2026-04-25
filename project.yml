@@ -92,6 +92,8 @@ targets:
         CODE_SIGN_IDENTITY: ""
         SWIFT_VERSION: "5.9"
         DEVELOPMENT_TEAM: "${APPLE_TEAM_ID:-}"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/VOLTRA Live.app/VOLTRA Live"
+        BUNDLE_LOADER: "$(TEST_HOST)"
     dependencies:
       - target: VoltraLive
 
