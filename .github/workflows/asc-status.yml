@@ -1,0 +1,96 @@
+name: ASC Build Status
+
+on:
+  workflow_dispatch:
+
+jobs:
+  query:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query App Store Connect for build status
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APP_ID: "6763798738"
+        run: |
+          set -e
+          python3 -m pip install --quiet pyjwt cryptography requests
+
+          python3 <<'PY'
+          import os, time, json, requests, jwt
+
+          key_id = os.environ["APPLE_API_KEY_ID"]
+          issuer_id = os.environ["APPLE_API_ISSUER_ID"]
+          private_key = os.environ["APPLE_API_PRIVATE_KEY"]
+          app_id = os.environ["APP_ID"]
+
+          now = int(time.time())
+          payload = {
+              "iss": issuer_id,
+              "iat": now,
+              "exp": now + 1200,
+              "aud": "appstoreconnect-v1",
+          }
+          token = jwt.encode(payload, private_key, algorithm="ES256",
+                             headers={"kid": key_id, "typ": "JWT"})
+
+          headers = {"Authorization": f"Bearer {token}"}
+
+          # Get all builds for the app, sorted by upload time desc
+          url = f"https://api.appstoreconnect.apple.com/v1/builds"
+          params = {
+              "filter[app]": app_id,
+              "sort": "-uploadedDate",
+              "limit": 10,
+              "include": "preReleaseVersion,buildBetaDetail",
+          }
+          r = requests.get(url, headers=headers, params=params)
+          print(f"Status: {r.status_code}")
+          if r.status_code != 200:
+              print(r.text)
+              raise SystemExit(1)
+
+          data = r.json()
+
+          # index included resources
+          included = {}
+          for inc in data.get("included", []):
+              included[(inc["type"], inc["id"])] = inc
+
+          print("\n=== Recent Builds ===\n")
+          for b in data.get("data", []):
+              attrs = b["attributes"]
+              version = attrs.get("version", "?")
+              processing = attrs.get("processingState", "?")
+              uploaded = attrs.get("uploadedDate", "?")
+              expired = attrs.get("expired", False)
+              uses_non_exempt = attrs.get("usesNonExemptEncryption")
+
+              # pre-release version (CFBundleShortVersionString)
+              prv_rel = b.get("relationships", {}).get("preReleaseVersion", {}).get("data")
+              short_ver = "?"
+              if prv_rel:
+                  prv = included.get((prv_rel["type"], prv_rel["id"]))
+                  if prv:
+                      short_ver = prv["attributes"].get("version", "?")
+
+              # buildBetaDetail
+              bbd_rel = b.get("relationships", {}).get("buildBetaDetail", {}).get("data")
+              internal_state = "?"
+              external_state = "?"
+              if bbd_rel:
+                  bbd = included.get((bbd_rel["type"], bbd_rel["id"]))
+                  if bbd:
+                      internal_state = bbd["attributes"].get("internalBuildState", "?")
+                      external_state = bbd["attributes"].get("externalBuildState", "?")
+
+              print(f"  v{short_ver} (build {version})")
+              print(f"    uploaded:        {uploaded}")
+              print(f"    processingState: {processing}")
+              print(f"    expired:         {expired}")
+              print(f"    encryption:      {uses_non_exempt}")
+              print(f"    internalState:   {internal_state}")
+              print(f"    externalState:   {external_state}")
+              print()
+          PY
