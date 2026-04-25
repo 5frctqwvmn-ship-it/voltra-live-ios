@@ -41,8 +41,16 @@ jobs:
 
       - name: Package unsigned IPA
         run: |
+          set -euo pipefail
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app bundle found. Listing build products:"
+            ls -la build/Build/Products/Release-iphoneos/ || true
+            exit 1
+          fi
+          echo "Found app bundle: $APP_PATH"
           mkdir -p Payload
-          cp -r build/Build/Products/Release-iphoneos/VoltraLive.app Payload/
+          cp -R "$APP_PATH" Payload/
           zip -qry VoltraLive.ipa Payload
           rm -rf Payload
           echo "IPA size: $(du -sh VoltraLive.ipa | cut -f1)"
