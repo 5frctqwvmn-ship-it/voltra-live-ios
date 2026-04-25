@@ -11,13 +11,13 @@ Real-time workout telemetry for VOLTRA BLE devices. Native SwiftUI app for iPhon
 - **Session history** — persisted via SwiftData, last 50 sessions retained
 - **Compare strip** — current session vs last session rep delta
 - **Read-only BLE** — only the 10 handshake writes; no control commands
-- **Apple Watch companion** — live rep/phase/force mirrored to Watch via WatchConnectivity
+- **Apple Watch companion** — deferred (planned v1.2 — see AGENTS.md)
 
 ## Requirements
 
 - iPhone or iPad running iOS 17+
 - VOLTRA BLE device
-- Apple Watch (Series 4+, watchOS 10+) — optional, for wrist telemetry
+- *(Apple Watch companion deferred to v1.2)*
 
 ## Installing via AltStore (sideload)
 

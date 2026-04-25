@@ -11,17 +11,17 @@
 
 ## What this is
 
-VOLTRA Live is a **read-only** native iOS + watchOS app that mirrors live workout telemetry
-from a Beyond Power VOLTRA cable machine over BLE. It does **not** issue any control writes
+VOLTRA Live is a **read-only** native iOS app that mirrors live workout telemetry from a
+Beyond Power VOLTRA cable machine over BLE. It does **not** issue any control writes
 (no load, no unload, no mode change). Telemetry only.
 
-- iOS bundle ID: `com.voltralive.app` (PRODUCT_NAME: "VOLTRA Live" → `VOLTRA Live.app`)
-- Watch bundle ID: `com.voltralive.app.watchkitapp` (PRODUCT_NAME: "VOLTRA Live Watch" → `VOLTRA Live Watch.app`)
+- iOS bundle ID: `com.voltralive.app` (PRODUCT_NAME: "VOLTRA Live")
 - Test bundle ID: `com.voltralive.app.tests` (PRODUCT_NAME: "VoltraLiveTests")
-- The two app PRODUCT_NAMEs MUST be distinct — if both produce `VOLTRA Live.app`, Xcode fails with `Multiple commands produce 'VOLTRA Live.app'`.
-- Min iOS: 17.0 · Min watchOS: 10.0
+- Min iOS: 17.0
 - Connected GitHub user: `5frctqwvmn-ship-it`
 - Repo: <https://github.com/5frctqwvmn-ship-it/voltra-live-ios>
+
+**Watch companion is deferred to v1.2** — see "Deferred / known follow-ups" section.
 
 ## The hard constraint (do not violate)
 
@@ -66,15 +66,9 @@ Key wire facts:
 voltra-ios/
 ├── VoltraLive/                   # iOS app (SwiftUI)
 │   ├── Protocol/                 # SACRED — wire format
-│   ├── Bridge/                   # PhoneWatchBridge (5Hz force throttle, 1Hz rest tick)
 │   ├── Views/
 │   ├── Assets.xcassets/          # App icon (3 nested teal triangles, #00d4aa on #0a0e0c)
 │   └── Info.plist
-├── VoltraWatch/                  # watchOS companion (paired, NOT standalone)
-│   ├── WatchSessionDelegate.swift
-│   ├── WatchTelemetryStore.swift
-│   ├── Views/
-│   └── Assets.xcassets/
 ├── VoltraLiveTests/              # Protocol golden-fixture tests
 │   └── ProtocolGoldenTests.swift # MUST stay green or release.yml fails
 ├── .github/workflows/
@@ -122,8 +116,27 @@ API key role: **App Manager**.
 ## Known caveats / future migrations
 
 - **`altool` is being deprecated** by Apple. Still works in Xcode 16; migrate to `xcrun notarytool` before Apple removes support.
-- **`WatchTelemetryMessage` duplication** — see rule 8 above. If/when we add a shared Swift package, collapse these.
 - **Web prototype is abandoned** — `voltra-live/` (sibling dir) exists but is no longer the path forward. Native is canonical.
+
+## Deferred / known follow-ups
+
+### Apple Watch companion (v1.2)
+
+Attempted in commit `fd89ea4`, rolled back in commit `<watch-rollback>` after 4 CI failures.
+Root cause: XcodeGen's `dependencies: - target: VoltraWatch, embed: true` on the iOS target
+compiled the watchOS sources as part of the iOS build phase (`error: no such module 'WatchKit'`),
+not just embedding the pre-built artifact.
+
+**To revisit cleanly:**
+1. Use a **separate Xcode project** for VoltraWatch (`xcodegen` per-platform), not a separate target in the same project. iOS host references the Watch project as an external dependency.
+2. OR use Xcode's native "Add Watch App" wizard (don't try to xcodegen this) and commit the generated `.xcodeproj` directly.
+3. Either way, do it in a clean PR with a green CI baseline. The hardening done in this commit (`AGENTS.md`, `VALIDATION.md`, protocol tests, dry-run path) survives the rollback and helps for the retry.
+
+**What's already done (and re-usable when Watch returns):**
+- `WatchTelemetryMessage` JSON schema design (5Hz force throttle, 1Hz rest tick)
+- `PhoneWatchBridge` Combine wiring (saved in git history at `fd89ea4`)
+- VALIDATION.md Watch lines (S2, C4, R3, R4, P5, F4, SC2, SC3, SC4) — mark SKIP until Watch ships
+- App icon design (re-usable for Watch with role-sized renders: 88x88, 100x100, 102x102, 108x108, 117x117 @2x)
 
 ## How to know your changes are good
 

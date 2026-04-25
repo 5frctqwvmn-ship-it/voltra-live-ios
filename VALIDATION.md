@@ -5,6 +5,9 @@
 > This is a **declarative success criteria** checklist (Karpathy-style). Each line is a
 > verifiable assertion. Report the results back as `PASS` / `FAIL` / `SKIP` per number —
 > do **not** describe what you saw in prose. Pass/fail per line is the contract.
+>
+> **v1.1 note:** Apple Watch companion is **deferred to v1.2** — mark all Watch lines as
+> SKIP for the v1.1 first-run validation. Watch lines: S2, C4, R3, R4, P5, F4, SC2, SC3, SC4.
 
 ---
 
