@@ -28,10 +28,10 @@ enum VoltraColor {
 
     static func phase(_ p: VoltraPhase) -> Color {
         switch p {
-        case .pull:       return .pull
-        case .return:     return .returnPhase
-        case .transition: return .transition
-        case .idle:       return .idle
+        case .pull:       return Self.pull
+        case .return:     return Self.returnPhase
+        case .transition: return Self.transition
+        case .idle:       return Self.idle
         }
     }
 }
