@@ -45,7 +45,12 @@ jobs:
       - name: Package unsigned IPA
         run: |
           set -euo pipefail
-          APP_PATH=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' -print -quit)
+          # Pin to the iOS app bundle by exact name; the Watch companion produces
+          # 'VOLTRA Live Watch.app' which is NOT a valid iOS IPA payload.
+          APP_PATH="build/Build/Products/Release-iphoneos/VOLTRA Live.app"
+          if [ ! -d "$APP_PATH" ]; then
+            APP_PATH=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name 'VOLTRA Live.app' -print -quit)
+          fi
           if [ -z "$APP_PATH" ]; then
             echo "No .app bundle found. Listing build products:"
             ls -la build/Build/Products/Release-iphoneos/ || true

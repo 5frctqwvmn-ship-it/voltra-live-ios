@@ -15,9 +15,10 @@ VOLTRA Live is a **read-only** native iOS + watchOS app that mirrors live workou
 from a Beyond Power VOLTRA cable machine over BLE. It does **not** issue any control writes
 (no load, no unload, no mode change). Telemetry only.
 
-- iOS bundle ID: `com.voltralive.app`
-- Watch bundle ID: `com.voltralive.app.watchkitapp`
-- Test bundle ID: `com.voltralive.app.tests`
+- iOS bundle ID: `com.voltralive.app` (PRODUCT_NAME: "VOLTRA Live" → `VOLTRA Live.app`)
+- Watch bundle ID: `com.voltralive.app.watchkitapp` (PRODUCT_NAME: "VOLTRA Live Watch" → `VOLTRA Live Watch.app`)
+- Test bundle ID: `com.voltralive.app.tests` (PRODUCT_NAME: "VoltraLiveTests")
+- The two app PRODUCT_NAMEs MUST be distinct — if both produce `VOLTRA Live.app`, Xcode fails with `Multiple commands produce 'VOLTRA Live.app'`.
 - Min iOS: 17.0 · Min watchOS: 10.0
 - Connected GitHub user: `5frctqwvmn-ship-it`
 - Repo: <https://github.com/5frctqwvmn-ship-it/voltra-live-ios>
@@ -40,7 +41,7 @@ coding. The user has been clear: this app must never modify the device's state.
 | `VoltraLive/Protocol/TelemetryExtractor.swift` | 0xAA decode logic. Mutating offsets makes the FORCE/REPS/PHASE tiles silently wrong. |
 | `VoltraLive/Protocol/PacketParser.swift` | Frame parser, mirrors JS reference. |
 | `VoltraLive/Protocol/FrameAssembler.swift` | Stream defragmenter. |
-| `.github/workflows/build.yml` | Working unsigned IPA build. 4 fixes needed to get it green originally — do not regress. |
+| `.github/workflows/build.yml` | Working unsigned IPA build. 4 fixes needed to get it green originally — do not regress. *(Exception: 2026-04-25 surgical edit to pin iOS app name after Watch target added — `'VOLTRA Live.app'` instead of `'*.app'`.)* |
 
 If you must modify a sacred file:
 1. State the assumption that the change is necessary.
