@@ -77,6 +77,7 @@ struct DebugView: View {
             }
             .onAppear { refreshCounts() }
         }
+        .buildBadgeOverlay()
     }
 
     // MARK: - Actions

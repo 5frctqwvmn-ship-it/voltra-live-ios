@@ -59,6 +59,7 @@ struct SetLogView: View {
             .onAppear { prefillIfNeeded() }
         }
         .presentationDetents([.large, .medium])
+        .buildBadgeOverlay()
     }
 
     // MARK: - Pieces

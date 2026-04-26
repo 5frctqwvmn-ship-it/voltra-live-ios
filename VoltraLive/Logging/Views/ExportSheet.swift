@@ -58,6 +58,7 @@ struct ExportSheet: View {
             }
         }
         .presentationDetents([.large])
+        .buildBadgeOverlay()
     }
 
     private var summary: some View {

@@ -24,6 +24,7 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .tint(VoltraColor.accent)
+        .buildBadgeOverlay()
     }
 }
 
