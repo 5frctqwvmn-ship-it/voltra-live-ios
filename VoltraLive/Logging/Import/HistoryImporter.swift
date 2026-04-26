@@ -60,7 +60,7 @@ enum HistoryImporter {
     /// opportunistically heal existing rows with empty CSV on launch.
     /// Surfaces full diagnostics (parsed/saved/failed counts + last error)
     /// to DebugView so we can finally SEE what's failing on device.
-    private static let importVersion = 7
+    private static let importVersion = 8
 
     // MARK: - Diagnostics surfaced to DebugView
 
@@ -179,9 +179,20 @@ enum HistoryImporter {
         // that cache reuse below picks up the corrected tags.
         healPoisonedExercises(context: context)
 
+        // v0.3.9: BEFORE import, consolidate any duplicate Exercise rows
+        // that earlier (v0.3.8 and prior) imports left behind. The earlier
+        // dedup key was name|equipment, which produced one row per
+        // session-naming variant of the same lift. New key is
+        // canonicalName|equipmentFamily.
+        consolidateDuplicateExercises(context: context)
+
         // Run the recoverable importer (no throws — it captures errors per
         // session into lastImportStats / lastImportError).
         importMarkdownRecoverable(text, context: context)
+
+        // And consolidate again AFTER, in case the import created any new
+        // dup-equivalents alongside pre-existing rows.
+        consolidateDuplicateExercises(context: context)
 
         let stats = Self.lastImportStats
         Self.lastImportStats.finishedAt = Date()
@@ -203,6 +214,89 @@ enum HistoryImporter {
     /// empty AND whose `primaryDayType` is non-custom, and copy the primary
     /// day type into the CSV so they reappear in the picker. Catches rows
     /// poisoned by partial commits in v0.3.5 / v0.3.6 import runs.
+    /// v0.3.9: Walk all Exercise rows; for any group that share the same
+    /// canonical cacheKey, pick a survivor (most instances; ties broken by
+    /// earliest createdAt) and re-point all other rows' instances at it,
+    /// then delete the duplicates. This is what causes the picker to show
+    /// one "Belt Squats" row instead of four near-identical cards.
+    static func consolidateDuplicateExercises(context: ModelContext) {
+        let all = (try? context.fetch(FetchDescriptor<Exercise>())) ?? []
+        guard !all.isEmpty else { return }
+
+        // Bucket by canonical cache key.
+        var buckets: [String: [Exercise]] = [:]
+        for ex in all {
+            buckets[ex.cacheKey, default: []].append(ex)
+        }
+
+        var mergedGroups = 0
+        var deletedRows = 0
+
+        for (_, group) in buckets where group.count > 1 {
+            // Survivor = exercise with most instances; tiebreak earliest
+            // lastUsedAt; final tiebreak shortest name (avoids picking a
+            // verbose variant).
+            let survivor = group.max(by: { a, b in
+                let aCount = a.instances?.count ?? 0
+                let bCount = b.instances?.count ?? 0
+                if aCount != bCount { return aCount < bCount }
+                let aDate = a.lastUsedAt ?? Date.distantFuture
+                let bDate = b.lastUsedAt ?? Date.distantFuture
+                if aDate != bDate { return aDate > bDate }
+                return a.name.count > b.name.count
+            }) ?? group[0]
+
+            // Force the survivor onto the canonical name (it may currently
+            // hold a verbose variant like "Voltra Belt Squat (Harness)").
+            let canonical = ExerciseNameNormalizer.canonical(name: survivor.name, equipment: survivor.equipment)
+            if survivor.name != canonical.canonicalName {
+                survivor.name = canonical.canonicalName
+            }
+
+            // Merge dayTypeTags and lastUsedAt across the group.
+            var allTags = Set(survivor.dayTypeTags)
+            var latest = survivor.lastUsedAt
+            for ex in group where ex !== survivor {
+                allTags.formUnion(ex.dayTypeTags)
+                if let l = ex.lastUsedAt, latest == nil || l > latest! {
+                    latest = l
+                }
+                // Re-point all instances onto the survivor.
+                if let instances = ex.instances {
+                    for inst in instances {
+                        inst.exercise = survivor
+                    }
+                }
+                context.delete(ex)
+                deletedRows += 1
+            }
+            survivor.dayTypeTagsCSV = allTags.map(\.rawValue).sorted().joined(separator: ",")
+            if let l = latest { survivor.lastUsedAt = l }
+            mergedGroups += 1
+        }
+
+        // ALSO normalize singleton rows so the picker shows clean labels
+        // even when there was no duplicate to merge. (e.g. a lone
+        // "Voltra Belt Squats" row should still show as "Belt Squats".)
+        for ex in all {
+            // Skip rows we already deleted above.
+            if ex.isDeleted { continue }
+            let c = ExerciseNameNormalizer.canonical(name: ex.name, equipment: ex.equipment)
+            if ex.name != c.canonicalName && ex.seededFromHistory {
+                ex.name = c.canonicalName
+            }
+        }
+
+        if mergedGroups > 0 || deletedRows > 0 {
+            do {
+                try context.save()
+                print("[HistoryImporter] consolidated \(mergedGroups) duplicate groups, deleted \(deletedRows) rows")
+            } catch {
+                print("[HistoryImporter] consolidation save failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     static func healPoisonedExercises(context: ModelContext) {
         let existing = (try? context.fetch(FetchDescriptor<Exercise>())) ?? []
         var healed = 0
@@ -347,7 +441,14 @@ enum HistoryImporter {
 
         for sessionDoc in parsed {
             let sourceID = "history.md::Session \(sessionDoc.number)"
-            if importedSourceIDs.contains(sourceID) { continue }
+            if importedSourceIDs.contains(sourceID) {
+                // v0.3.9: count already-imported sessions toward saved count
+                // so the saved/parsed ratio remains ≥0.8 on importVersion
+                // bumps where we don't actually re-import data (e.g. v8
+                // bumped solely to trigger consolidateDuplicateExercises).
+                Self.lastImportStats.savedSessionCount += 1
+                continue
+            }
 
             // Track every object inserted for THIS session so we can roll
             // back if save() throws.
@@ -375,8 +476,13 @@ enum HistoryImporter {
                 if let hit = exerciseCache[key] {
                     exercise = hit
                 } else {
+                    // v0.3.9: store the canonical display name on the
+                    // Exercise row so the picker shows e.g. "Belt Squats"
+                    // instead of the raw "Voltra Belt Squat (Harness)"
+                    // session-header variant. equipment stays as a per-row
+                    // hint (last-seen wins).
                     exercise = Exercise(
-                        name: exDoc.name,
+                        name: exDoc.canonicalName,
                         equipment: exDoc.equipment,
                         primaryDayType: sessionDoc.dayType,
                         dayTypeTags: [sessionDoc.dayType],
@@ -531,8 +637,18 @@ enum HistoryImporter {
         let equipment: String
         var sets: [ParsedSet]
 
+        /// v0.3.9: cache key is now the canonical name + equipment FAMILY,
+        /// not the raw equipment string. This collapses the 30+ squat
+        /// variants in the seed history into a small number of real rows
+        /// (Belt Squats / Smith Machine Squats / Squats (Free Bar) / etc.)
+        /// instead of one row per session-naming variant.
         var cacheKey: String {
-            "\(name.lowercased())|\(equipment.lowercased())"
+            let c = ExerciseNameNormalizer.canonical(name: name, equipment: equipment)
+            return "\(c.canonicalName.lowercased())|\(c.equipmentFamily)"
+        }
+
+        var canonicalName: String {
+            ExerciseNameNormalizer.canonical(name: name, equipment: equipment).canonicalName
         }
     }
 
@@ -1019,5 +1135,10 @@ enum HistoryImporter {
 // MARK: - Exercise convenience
 
 private extension Exercise {
-    var cacheKey: String { "\(name.lowercased())|\(equipment.lowercased())" }
+    /// v0.3.9: must mirror ParsedExercise.cacheKey so cache rebuilds and
+    /// duplicate consolidation key off the same string.
+    var cacheKey: String {
+        let c = ExerciseNameNormalizer.canonical(name: name, equipment: equipment)
+        return "\(c.canonicalName.lowercased())|\(c.equipmentFamily)"
+    }
 }

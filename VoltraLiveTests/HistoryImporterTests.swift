@@ -135,4 +135,42 @@ final class HistoryImporterTests: XCTestCase {
         XCTAssertEqual(exercises.count, 1, "Belt Squats should parse")
         XCTAssertEqual(exercises.first?.sets.count, 2, "Both rows including the form-feed row should be captured")
     }
+
+    // MARK: - v0.3.9 canonical-name normalizer
+
+    /// Validates that the equipment-family bucketing collapses the
+    /// ~30 squat variants down to a small set of rows.
+    func testCanonicalNameCollapsesSquatVariants() {
+        // All variants of Belt Squat → same canonical name + family.
+        let beltVariants: [(String, String)] = [
+            ("Belt Squat", "Voltra Harness"),
+            ("Belt Squats", "Voltra"),
+            ("Voltra Belt Squat", "Harness"),
+            ("Belt Squats", "Single Voltra, Squat Harness"),
+        ]
+        let beltKeys = Set(beltVariants.map { (n, e) in
+            let c = ExerciseNameNormalizer.canonical(name: n, equipment: e)
+            return "\(c.canonicalName)|\(c.equipmentFamily)"
+        })
+        XCTAssertEqual(beltKeys.count, 1, "All Belt Squat variants must produce one canonical key, got: \(beltKeys)")
+        XCTAssertTrue(beltKeys.first?.hasPrefix("Belt Squats") == true)
+
+        // All Smith Machine Squat variants → same key.
+        let smithVariants: [(String, String)] = [
+            ("Smith Machine Squats", "Voltra, Straight Bar"),
+            ("Smith Machine Squats", "Voltra Smith, Solid Bar"),
+            ("Squats", "Voltra Smith, No Bench"),
+            ("Squats", "Bulletproof Smith 45 bar + ~20 carriage"),
+        ]
+        let smithKeys = Set(smithVariants.map { (n, e) in
+            let c = ExerciseNameNormalizer.canonical(name: n, equipment: e)
+            return "\(c.canonicalName)|\(c.equipmentFamily)"
+        })
+        XCTAssertEqual(smithKeys.count, 1, "All Smith Machine Squat variants must produce one canonical key, got: \(smithKeys)")
+
+        // Belt and Smith must NOT collapse together.
+        let beltKey = ExerciseNameNormalizer.canonical(name: "Belt Squats", equipment: "Voltra")
+        let smithKey = ExerciseNameNormalizer.canonical(name: "Smith Machine Squats", equipment: "Voltra")
+        XCTAssertNotEqual(beltKey.equipmentFamily, smithKey.equipmentFamily)
+    }
 }
