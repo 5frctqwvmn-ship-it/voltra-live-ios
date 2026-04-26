@@ -183,3 +183,14 @@ that the test coverage missed the regression.
 
 - [ ] **LV27.** Log set 1 at e.g. 25 lb (lower than last week's 30). When SetLogView opens for set 2, the inline toggle row reads "Last session you went +5 lb into this set" and the chips read `-5`, `Same: 30`, `+5: 35` (anchor = 25 + 5).
 - [ ] **LV28.** Tapping a chip in the inline toggle updates the WEIGHT field instantly. The user can still hand-type any number to override entirely.
+
+## v0.2.2 — Empty Leg Day Recovery
+
+> Bug: on real devices the Leg Day picker only showed "+ New exercise" because
+> the v0.2.0 / v0.2.1 import either never ran or skipped re-running after the
+> ModelContainer fell back to local-only.
+
+- [ ] **LV29.** On first launch after upgrading from 0.2.1 → 0.2.2, the importer runs again (importVersion bumped to 2). Console shows `[HistoryImporter] running (current v1 -> target v2)` followed by `Inserted N sessions; cache has M exercises`.
+- [ ] **LV30.** Tap **Leg Day** on home → the picker shows **belt squats**, **bulgarian split squats**, **deadlifts**, **leg curls**, etc. — at least 8 distinct rows, each with a "Last: …" summary.
+- [ ] **LV31.** Tap the gear icon in the top-right of the home header → **Debug** sheet opens, showing `Sessions: ≥80`, `Exercises: ≥40`, `Leg-tagged exercises: ≥8`. Tapping **Re-import history.md** runs the importer again and updates the counts in place.
+- [ ] **LV32.** No Voltra writes ever happen. `VoltraProtocol.swift`, `TelemetryExtractor.swift`, `PacketParser.swift`, `FrameAssembler.swift` are unchanged from v0.2.1. (Read-only constraint preserved.)

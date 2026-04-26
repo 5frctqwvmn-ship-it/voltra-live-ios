@@ -27,7 +27,10 @@ import SwiftData
 enum HistoryImporter {
 
     private static let importDoneKey = "historyImportV1Done"
-    private static let importVersion = 1
+    /// Bump this whenever parser logic changes OR we want to force re-import on
+    /// the next launch. v0.2.2 bumped to 2 to recover from v0.2.0/v0.2.1 stores
+    /// that ended up with no leg-day exercises tagged on real devices.
+    private static let importVersion = 2
 
     // MARK: - Public entry point
 
@@ -37,7 +40,11 @@ enum HistoryImporter {
     static func runIfNeeded(context: ModelContext) {
         let defaults = UserDefaults.standard
         let doneVersion = defaults.integer(forKey: importDoneKey)
-        if doneVersion >= importVersion { return }
+        if doneVersion >= importVersion {
+            print("[HistoryImporter] already at v\(doneVersion), skipping")
+            return
+        }
+        print("[HistoryImporter] running (current v\(doneVersion) -> target v\(importVersion))")
 
         do {
             let url = Bundle.main.url(forResource: "history", withExtension: "md", subdirectory: "seed")
@@ -54,6 +61,16 @@ enum HistoryImporter {
             print("[HistoryImporter] FAILED: \(error)")
             // Don't mark as done — we'll retry next launch.
         }
+    }
+
+    /// Diagnostic: counts (sessions, exercises, sets, leg-tagged exercises)
+    /// for the Debug screen.
+    static func storeCounts(context: ModelContext) -> (sessions: Int, exercises: Int, sets: Int, legTagged: Int) {
+        let sessions = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        let exercises = (try? context.fetch(FetchDescriptor<Exercise>())) ?? []
+        let sets = (try? context.fetch(FetchDescriptor<LoggedSet>())) ?? []
+        let legTagged = exercises.filter { $0.dayTypeTags.contains(.leg) }.count
+        return (sessions.count, exercises.count, sets.count, legTagged)
     }
 
     /// Force re-import (used by debug menu / tests).
@@ -293,7 +310,15 @@ enum HistoryImporter {
     ///    1         Warm-Up        33 lbs       —             12
     ///    ...
     private static func parseExercises(in block: String) -> [ParsedExercise] {
-        let lines = block.components(separatedBy: "\n")
+        // Strip control chars (form feed U+000C, etc.) that PDFs / pasted text
+        // sneak in. These break the leading-digit detection in the row loop.
+        let cleaned = block.unicodeScalars
+            .filter { scalar -> Bool in
+                if scalar == "\n" || scalar == "\r" || scalar == "\t" { return true }
+                return !CharacterSet.controlCharacters.contains(scalar)
+            }
+            .map(Character.init)
+        let lines = String(cleaned).components(separatedBy: "\n")
         var exercises: [ParsedExercise] = []
 
         var i = 0

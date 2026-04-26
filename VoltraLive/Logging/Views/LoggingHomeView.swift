@@ -19,6 +19,7 @@ struct LoggingHomeView: View {
     @State private var customLabel: String = ""
     @State private var showingCustom = false
     @State private var showingDashboard = false
+    @State private var showingDebug = false
 
     private let primaryDayTypes: [DayType] = [.leg, .back, .chest, .arm]
 
@@ -84,6 +85,9 @@ struct LoggingHomeView: View {
             .sheet(isPresented: $showingCustom) {
                 customSheet
             }
+            .sheet(isPresented: $showingDebug) {
+                DebugView()
+            }
             .preferredColorScheme(.dark)
         }
     }
@@ -106,6 +110,17 @@ struct LoggingHomeView: View {
                 }
                 Spacer()
                 connectionPill
+                Button {
+                    showingDebug = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(VoltraColor.textDim)
+                        .padding(8)
+                        .background(VoltraColor.bgElev)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
             }
             Text("Pick a day to start logging.")
                 .font(.system(size: 15))
