@@ -51,7 +51,38 @@ enum HistoryImporter {
     /// save in batches of 10 sessions + final flush. Also pre-strip form
     /// feeds and fix the inline-prose lookahead cursor that was eating
     /// every other exercise.
-    private static let importVersion = 6
+    /// v0.3.7 bumped to 7 because build 13 STILL produced 23/2/5 — the
+    /// per-batch save was throwing inside the loop and the catch was
+    /// swallowing the error invisibly. New strategy: save AFTER EVERY
+    /// SINGLE SESSION with a per-session do/catch + rollback. Also write
+    /// `dayTypeTagsCSV` directly to the stored property (not via the
+    /// computed-property setter) so it survives any partial commit, AND
+    /// opportunistically heal existing rows with empty CSV on launch.
+    /// Surfaces full diagnostics (parsed/saved/failed counts + last error)
+    /// to DebugView so we can finally SEE what's failing on device.
+    private static let importVersion = 7
+
+    // MARK: - Diagnostics surfaced to DebugView
+
+    /// Per-session error captured during import.
+    struct ImportStats {
+        var parsedSessionCount: Int = 0
+        var savedSessionCount: Int = 0
+        var failedSessionCount: Int = 0
+        var totalExercisesCreated: Int = 0
+        var totalSetsCreated: Int = 0
+        var lastErrorAtSession: Int? = nil
+        /// Capped at 10 to keep the Debug UI sane.
+        var perSessionErrors: [(Int, String)] = []
+        var startedAt: Date? = nil
+        var finishedAt: Date? = nil
+    }
+
+    /// Last fatal/per-session error string (most recent). Cleared at the
+    /// start of every import run.
+    static var lastImportError: String? = nil
+    /// Stats from the most recent import run. Cleared at start.
+    static var lastImportStats: ImportStats = ImportStats()
 
     // MARK: - Public entry point
 
@@ -66,16 +97,23 @@ enum HistoryImporter {
         let storeIsEmpty = counts.sessions == 0
         let stubCount = stubImportedSessionCount(context: context)
 
-        // "Looks healthy" = at version, has sessions, AND no stub sessions
-        // (imported rows that have zero ExerciseInstance children). Stubs are
-        // the smoking gun of an earlier broken parser run; if any exist we
-        // need to redo the import.
-        if doneVersion >= importVersion && !storeIsEmpty && stubCount == 0 {
-            print("[HistoryImporter] already at v\(doneVersion), \(counts.sessions) sessions, no stubs — skipping")
+        // "Looks healthy" gate. v0.3.7 ADDS a `counts.exercises >= 5` check:
+        // the user's stuck-store had 23 sessions but only 2 exercises (and
+        // every imported instance pointed at a manually-created Exercise
+        // row). Without this guard, a partial state where doneVersion did
+        // get set during a fluke first run would trap the user permanently.
+        if doneVersion >= importVersion && !storeIsEmpty && stubCount == 0 && counts.exercises >= 5 {
+            print("[HistoryImporter] already at v\(doneVersion), \(counts.sessions)s/\(counts.exercises)e — skipping")
+            // Even on the skip path, run a one-shot heal to recover any
+            // Exercise rows with empty dayTypeTagsCSV from prior bad runs.
+            healPoisonedExercises(context: context)
             return
         }
         if stubCount > 0 {
-            print("[HistoryImporter] detected \(stubCount) stub sessions (imported but no children) — will purge and re-run")
+            print("[HistoryImporter] detected \(stubCount) stub sessions — will purge and re-run")
+        }
+        if !storeIsEmpty && counts.exercises < 5 {
+            print("[HistoryImporter] only \(counts.exercises) exercises for \(counts.sessions) sessions — forcing re-run")
         }
 
         // Empty-store recovery path: UserDefaults says we've imported, but
@@ -90,11 +128,7 @@ enum HistoryImporter {
                 let recheck = storeCounts(context: context)
                 if recheck.sessions == 0 {
                     print("[HistoryImporter] still empty after CloudKit window — forcing re-import")
-                    do {
-                        try forceReimport(context: context)
-                    } catch {
-                        print("[HistoryImporter] recovery re-import FAILED: \(error)")
-                    }
+                    try? forceReimport(context: context)
                 } else {
                     print("[HistoryImporter] CloudKit populated \(recheck.sessions) sessions, no re-import needed")
                 }
@@ -104,27 +138,74 @@ enum HistoryImporter {
 
         print("[HistoryImporter] running (current v\(doneVersion) -> target v\(importVersion))")
 
+        // Reset diagnostics for this run.
+        Self.lastImportError = nil
+        Self.lastImportStats = ImportStats()
+        Self.lastImportStats.startedAt = Date()
+
+        let url = Bundle.main.url(forResource: "history", withExtension: "md", subdirectory: "seed")
+            ?? Bundle.main.url(forResource: "history", withExtension: "md")
+        guard let url else {
+            Self.lastImportError = "seed/history.md missing in bundle"
+            print("[HistoryImporter] \(Self.lastImportError!)")
+            Self.lastImportStats.finishedAt = Date()
+            return
+        }
+
+        let text: String
         do {
-            let url = Bundle.main.url(forResource: "history", withExtension: "md", subdirectory: "seed")
-                   ?? Bundle.main.url(forResource: "history", withExtension: "md")
-            guard let url else {
-                print("[HistoryImporter] seed/history.md missing in bundle — skipping")
-                return
-            }
-            // Pre-strip PDF-export artefacts (form feed U+000C, vertical tab
-            // U+000B). They were causing ICU's multiline `^` to match
-            // session-headers Python's regex didn't see, AND were sneaking
-            // into the middle of exercise titles. Removing them up front
-            // makes parsing locale/engine-independent.
-            let text = try String(contentsOf: url, encoding: .utf8)
+            text = try String(contentsOf: url, encoding: .utf8)
                 .replacingOccurrences(of: "\u{000C}", with: "\n")
                 .replacingOccurrences(of: "\u{000B}", with: "\n")
-            try importMarkdown(text, context: context)
-            defaults.set(importVersion, forKey: importDoneKey)
-            print("[HistoryImporter] Import complete (v\(importVersion))")
         } catch {
-            print("[HistoryImporter] FAILED: \(error)")
-            // Don't mark as done — we'll retry next launch.
+            Self.lastImportError = "Failed to read seed: \(error.localizedDescription)"
+            print("[HistoryImporter] \(Self.lastImportError!)")
+            Self.lastImportStats.finishedAt = Date()
+            return
+        }
+
+        // Heal first — fixes any rows poisoned by previous failed runs so
+        // that cache reuse below picks up the corrected tags.
+        healPoisonedExercises(context: context)
+
+        // Run the recoverable importer (no throws — it captures errors per
+        // session into lastImportStats / lastImportError).
+        importMarkdownRecoverable(text, context: context)
+
+        let stats = Self.lastImportStats
+        Self.lastImportStats.finishedAt = Date()
+        print("[HistoryImporter] parsed=\(stats.parsedSessionCount) saved=\(stats.savedSessionCount) failed=\(stats.failedSessionCount) ex=\(stats.totalExercisesCreated) sets=\(stats.totalSetsCreated)")
+
+        // Mark done only if we got at least 80% of what we parsed. A
+        // single-session failure shouldn't cause an infinite re-import loop;
+        // a near-zero run (the user's previous state) MUST retry.
+        if stats.parsedSessionCount > 0 &&
+           Double(stats.savedSessionCount) / Double(stats.parsedSessionCount) >= 0.8 {
+            defaults.set(importVersion, forKey: importDoneKey)
+            print("[HistoryImporter] marked done at v\(importVersion)")
+        } else {
+            print("[HistoryImporter] NOT marking done — only \(stats.savedSessionCount)/\(stats.parsedSessionCount) saved")
+        }
+    }
+
+    /// One-shot heal: scan all `Exercise` rows whose `dayTypeTagsCSV` is
+    /// empty AND whose `primaryDayType` is non-custom, and copy the primary
+    /// day type into the CSV so they reappear in the picker. Catches rows
+    /// poisoned by partial commits in v0.3.5 / v0.3.6 import runs.
+    static func healPoisonedExercises(context: ModelContext) {
+        let existing = (try? context.fetch(FetchDescriptor<Exercise>())) ?? []
+        var healed = 0
+        for ex in existing where ex.dayTypeTagsCSV.isEmpty {
+            // primaryDayType defaults to .custom for rows where it never
+            // got set; only heal if we have a meaningful day type to copy.
+            if ex.primaryDayType != .custom {
+                ex.dayTypeTagsCSV = ex.primaryDayType.rawValue
+                healed += 1
+            }
+        }
+        if healed > 0 {
+            try? context.save()
+            print("[HistoryImporter] healed \(healed) Exercise rows with empty dayTypeTagsCSV")
         }
     }
 
@@ -204,53 +285,65 @@ enum HistoryImporter {
     // MARK: - Markdown parser
 
     /// Parse the full history markdown into model rows and insert them.
-    /// Visible (internal) for unit testing.
+    /// Visible (internal) for unit testing. v0.3.7 wraps importMarkdownRecoverable
+    /// for backward source compatibility — it never throws now, but keeps the
+    /// `throws` signature so older call sites compile.
     static func importMarkdown(_ text: String, context: ModelContext) throws {
-        // CRITICAL: disable autosave during the import. With autosave on, the
-        // main run loop opportunistically flushes mid-loop — racing the explicit
-        // save() and forcing CloudKit to commit a partial batch. Combined with
-        // the per-CKModifyRecordsOperation ceiling on the synced container,
-        // that's how earlier builds ended up with 17 / 23 sessions instead of
-        // all 84. We restore the prior value when this function returns.
+        importMarkdownRecoverable(text, context: context)
+    }
+
+    /// v0.3.7: Recoverable per-session importer.
+    ///
+    /// CRITICAL design choices:
+    /// - **Save AFTER EVERY SESSION.** Each save is ~1 session + a handful of
+    ///   exercises + instances + sets — at most ~10 records, far under any
+    ///   CloudKit batch ceiling. A failure on one session forfeits only that
+    ///   session, not the rest of the import.
+    /// - **Per-session do/catch with rollback.** If save throws, delete what
+    ///   we just inserted for this session, save the deletion, log the error,
+    ///   and continue with the next session.
+    /// - **Direct `dayTypeTagsCSV` assignment.** Never use `addDayType` (which
+    ///   goes through the computed-property setter and is vulnerable to
+    ///   in-memory rollback in some SwiftData/CloudKit conflict modes). We
+    ///   write the stored property directly so SwiftData treats it as a
+    ///   first-class mutation that gets persisted with the row.
+    /// - **Capture errors in `lastImportError` + `lastImportStats`.** DebugView
+    ///   surfaces these so we can finally see what's failing on device.
+    static func importMarkdownRecoverable(_ text: String, context: ModelContext) {
         let priorAutosave = context.autosaveEnabled
         context.autosaveEnabled = false
         defer { context.autosaveEnabled = priorAutosave }
 
         let parsed = parse(text)
+        Self.lastImportStats.parsedSessionCount = parsed.count
 
-        // 1. Build / reuse Exercise rows keyed by name+equipment.
+        // Seed the cache once. We rebuild after every per-session failure so
+        // post-rollback objectIDs stay valid.
         var exerciseCache: [String: Exercise] = [:]
-        let existing = (try? context.fetch(FetchDescriptor<Exercise>())) ?? []
-        for ex in existing {
-            exerciseCache[ex.cacheKey] = ex
+        rebuildCache(into: &exerciseCache, context: context)
+
+        // Purge stub sessions (imported rows with zero children from prior
+        // buggy runs). One save up front; if this fails the import bails.
+        do {
+            try purgeStubs(context: context)
+        } catch {
+            Self.lastImportError = "Stub purge failed: \(error.localizedDescription)"
+            print("[HistoryImporter] \(Self.lastImportError!)")
+            return
         }
 
-        // 2. Look up which sessions have already been imported.
-        var existingSessions = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
-
-        // 2a. Purge stub imported sessions (rows with importSourceID set but
-        // zero exercise instances). These came from earlier buggy parser runs
-        // and would otherwise dedup-skip forever, leaving the user with a
-        // permanently empty history. Once we delete them the loop below will
-        // recreate them properly.
-        var stubsPurged = 0
-        for s in existingSessions where s.importedFromHistory && (s.instances?.count ?? 0) == 0 {
-            context.delete(s)
-            stubsPurged += 1
-        }
-        if stubsPurged > 0 {
-            print("[HistoryImporter] purged \(stubsPurged) stub imported sessions before re-import")
-            try context.save()
-            existingSessions = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
-        }
-
-        let importedSourceIDs: Set<String> = Set(existingSessions.compactMap(\.importSourceID))
-
-        var insertedSessions = 0
+        var importedSourceIDs: Set<String> = currentImportedSourceIDs(context: context)
 
         for sessionDoc in parsed {
             let sourceID = "history.md::Session \(sessionDoc.number)"
             if importedSourceIDs.contains(sourceID) { continue }
+
+            // Track every object inserted for THIS session so we can roll
+            // back if save() throws.
+            var insertedThisSession: [any PersistentModel] = []
+            // Track which Exercise rows are NEW this session (vs cache hits)
+            // so rollback can decrement totalExercisesCreated correctly.
+            var newExercisesThisSession: [Exercise] = []
 
             let session = WorkoutSession(
                 startedAt: sessionDoc.date,
@@ -261,6 +354,9 @@ enum HistoryImporter {
                 importSourceID: sourceID
             )
             context.insert(session)
+            insertedThisSession.append(session)
+
+            var sessionSetCount = 0
 
             for (exIdx, exDoc) in sessionDoc.exercises.enumerated() {
                 let key = exDoc.cacheKey
@@ -278,8 +374,22 @@ enum HistoryImporter {
                     )
                     context.insert(exercise)
                     exerciseCache[key] = exercise
+                    insertedThisSession.append(exercise)
+                    newExercisesThisSession.append(exercise)
                 }
-                exercise.addDayType(sessionDoc.dayType)
+
+                // CRITICAL: write CSV DIRECTLY to the stored property. Do not
+                // use `addDayType` (which goes through the computed-property
+                // setter) — those mutations are layered atop SwiftData's
+                // change tracking and have been observed to roll back when a
+                // sibling save fails. Direct stored-property assignment is
+                // first-class change tracking and survives.
+                let currentTags = exercise.dayTypeTags
+                if !currentTags.contains(sessionDoc.dayType) {
+                    var newTags = currentTags
+                    newTags.insert(sessionDoc.dayType)
+                    exercise.dayTypeTagsCSV = newTags.map(\.rawValue).sorted().joined(separator: ",")
+                }
                 if exercise.lastUsedAt == nil || exercise.lastUsedAt! < sessionDoc.date {
                     exercise.lastUsedAt = sessionDoc.date
                 }
@@ -293,6 +403,7 @@ enum HistoryImporter {
                     exercise: exercise
                 )
                 context.insert(instance)
+                insertedThisSession.append(instance)
 
                 for (setIdx, setDoc) in exDoc.sets.enumerated() {
                     let logged = LoggedSet(
@@ -314,27 +425,82 @@ enum HistoryImporter {
                         instance: instance
                     )
                     context.insert(logged)
+                    insertedThisSession.append(logged)
+                    sessionSetCount += 1
                 }
             }
 
-            insertedSessions += 1
-
-            // CRITICAL (the actual fix): commit in small batches so we never
-            // hand CloudKit more than ~30–40 records per save. A single
-            // gigantic save of all 84 sessions + their exercises/instances/
-            // sets exceeds the per-CKModifyRecordsOperation ceiling and
-            // throws partway, leaving the local store with whatever it had
-            // committed before the failure (the user's "23 sessions, 2
-            // exercises, 5 sets" symptom). 10 sessions per save keeps every
-            // batch comfortably below any known limit.
-            if insertedSessions % 10 == 0 {
+            // Save THIS session by itself.
+            do {
                 try context.save()
+                Self.lastImportStats.savedSessionCount += 1
+                Self.lastImportStats.totalSetsCreated += sessionSetCount
+                Self.lastImportStats.totalExercisesCreated += newExercisesThisSession.count
+                importedSourceIDs.insert(sourceID)
+            } catch {
+                // Roll back this session's insertions.
+                for obj in insertedThisSession.reversed() {
+                    context.delete(obj)
+                }
+                // Drop the rolled-back exercises from the cache so the next
+                // session re-creates them fresh.
+                for ex in newExercisesThisSession {
+                    exerciseCache.removeValue(forKey: ex.cacheKey)
+                }
+                // Try to flush the deletes; if THAT throws, bail entirely.
+                do {
+                    try context.save()
+                } catch let flushError {
+                    let msg = "Catastrophic flush failure at session \(sessionDoc.number): \(flushError.localizedDescription)"
+                    Self.lastImportError = msg
+                    Self.lastImportStats.failedSessionCount += 1
+                    Self.lastImportStats.lastErrorAtSession = sessionDoc.number
+                    print("[HistoryImporter] \(msg)")
+                    return
+                }
+                Self.lastImportStats.failedSessionCount += 1
+                Self.lastImportStats.lastErrorAtSession = sessionDoc.number
+                let msg = "Session \(sessionDoc.number): \(error.localizedDescription)"
+                if Self.lastImportStats.perSessionErrors.count < 10 {
+                    Self.lastImportStats.perSessionErrors.append((sessionDoc.number, msg))
+                }
+                Self.lastImportError = msg
+                print("[HistoryImporter] \(msg)")
+                // Rebuild cache from disk to recover from objectID drift.
+                rebuildCache(into: &exerciseCache, context: context)
+                continue
             }
         }
 
-        // Final flush for the trailing partial batch.
-        try context.save()
-        print("[HistoryImporter] Inserted \(insertedSessions) sessions; cache has \(exerciseCache.count) exercises")
+        print("[HistoryImporter] cache holds \(exerciseCache.count) exercises after import")
+    }
+
+    // MARK: - Helpers for the recoverable importer
+
+    private static func rebuildCache(into cache: inout [String: Exercise], context: ModelContext) {
+        cache.removeAll(keepingCapacity: true)
+        let existing = (try? context.fetch(FetchDescriptor<Exercise>())) ?? []
+        for ex in existing {
+            cache[ex.cacheKey] = ex
+        }
+    }
+
+    private static func currentImportedSourceIDs(context: ModelContext) -> Set<String> {
+        let ws = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        return Set(ws.compactMap(\.importSourceID))
+    }
+
+    private static func purgeStubs(context: ModelContext) throws {
+        let sessions = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        var purged = 0
+        for s in sessions where s.importedFromHistory && (s.instances?.count ?? 0) == 0 {
+            context.delete(s)
+            purged += 1
+        }
+        if purged > 0 {
+            print("[HistoryImporter] purging \(purged) stub sessions")
+            try context.save()
+        }
     }
 
     // MARK: - Parsing internals

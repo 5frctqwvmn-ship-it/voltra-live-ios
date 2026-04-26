@@ -19,6 +19,10 @@ struct DebugView: View {
     @State private var statusMessage: String = ""
     @State private var isWorking = false
     @State private var showWipeConfirm = false
+    /// Mirrors HistoryImporter.lastImportStats, captured into @State so SwiftUI
+    /// re-renders when refreshCounts() reads new values.
+    @State private var importStats: HistoryImporter.ImportStats = HistoryImporter.ImportStats()
+    @State private var importError: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -33,6 +37,41 @@ struct DebugView: View {
                             row("Logged sets", "\(counts.sets)")
                             row("Leg-tagged exercises", "\(counts.legTagged)")
                             row("Stub imported sessions", "\(stubCount)")
+                        }
+
+                        // v0.3.7: surface the importer's per-session diagnostics
+                        // so we can see WHY the import is partially failing.
+                        section("LAST IMPORT") {
+                            row("Parsed sessions",  "\(importStats.parsedSessionCount)")
+                            row("Saved sessions",   "\(importStats.savedSessionCount)")
+                            row("Failed sessions",  "\(importStats.failedSessionCount)")
+                            row("Exercises created","\(importStats.totalExercisesCreated)")
+                            row("Sets created",     "\(importStats.totalSetsCreated)")
+                            if let n = importStats.lastErrorAtSession {
+                                row("Last error at session", "#\(n)")
+                            }
+                        }
+
+                        // Red error banner if anything failed.
+                        if let err = importError {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("IMPORT ERROR")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .kerning(1.5)
+                                    .foregroundColor(VoltraColor.warn)
+                                Text(err)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(VoltraColor.warn)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(VoltraColor.bgElev2)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(VoltraColor.warn.opacity(0.5), lineWidth: 1)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
 
                         section("ACTIONS") {
@@ -102,6 +141,8 @@ struct DebugView: View {
     private func refreshCounts() {
         counts = HistoryImporter.storeCounts(context: context)
         stubCount = HistoryImporter.stubImportedSessionCount(context: context)
+        importStats = HistoryImporter.lastImportStats
+        importError = HistoryImporter.lastImportError
         statusMessage = "Refreshed at \(timestamp())"
     }
 
@@ -112,14 +153,11 @@ struct DebugView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             do {
                 try HistoryImporter.forceReimport(context: context)
-                let after = HistoryImporter.storeCounts(context: context)
-                counts = after
-                stubCount = HistoryImporter.stubImportedSessionCount(context: context)
+                refreshCounts()
                 statusMessage =
                     "Re-import done at \(timestamp())\n" +
-                    "Sessions: \(after.sessions)  Exercises: \(after.exercises)\n" +
-                    "Sets: \(after.sets)  Leg-tagged: \(after.legTagged)\n" +
-                    "Stubs: \(stubCount)"
+                    "Saved \(importStats.savedSessionCount)/\(importStats.parsedSessionCount) sessions, " +
+                    "\(importStats.totalExercisesCreated) ex, \(importStats.totalSetsCreated) sets"
             } catch {
                 statusMessage = "Re-import FAILED: \(error)"
             }
@@ -134,14 +172,11 @@ struct DebugView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             do {
                 let wiped = try HistoryImporter.wipeAndReimport(context: context)
-                let after = HistoryImporter.storeCounts(context: context)
-                counts = after
-                stubCount = HistoryImporter.stubImportedSessionCount(context: context)
+                refreshCounts()
                 statusMessage =
-                    "Wiped \(wiped) imported sessions, re-imported at \(timestamp())\n" +
-                    "Sessions: \(after.sessions)  Exercises: \(after.exercises)\n" +
-                    "Sets: \(after.sets)  Leg-tagged: \(after.legTagged)\n" +
-                    "Stubs: \(stubCount)"
+                    "Wiped \(wiped) sessions at \(timestamp())\n" +
+                    "Saved \(importStats.savedSessionCount)/\(importStats.parsedSessionCount) sessions, " +
+                    "\(importStats.totalExercisesCreated) ex, \(importStats.totalSetsCreated) sets"
             } catch {
                 statusMessage = "Wipe FAILED: \(error)"
             }
