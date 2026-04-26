@@ -1,0 +1,156 @@
+name: ASC Expire Old TestFlight Builds
+
+# Marks every TestFlight build as `expired: true` EXCEPT the newest non-expired
+# one. Expired builds disappear from TestFlight installs immediately and can no
+# longer be installed by testers, so this leaves exactly one active build.
+#
+# Run automatically after a successful release-to-TestFlight workflow, or
+# manually via workflow_dispatch.
+
+on:
+  workflow_run:
+    workflows: ["Release to TestFlight"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      keep_count:
+        description: "How many newest builds to keep active (default 1)"
+        required: false
+        default: "1"
+      dry_run:
+        description: "Dry run — log which builds would be expired but do not change them"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+jobs:
+  expire:
+    # On workflow_run, only act when the upstream release succeeded
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Expire all but the newest build(s)
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APP_ID: "6763798738"
+          KEEP_COUNT: ${{ inputs.keep_count || '1' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          set -e
+          python3 -m pip install --quiet pyjwt cryptography requests
+          python3 <<'PY'
+          import os, time, json, sys
+          import requests, jwt
+
+          key_id     = os.environ["APPLE_API_KEY_ID"]
+          issuer_id  = os.environ["APPLE_API_ISSUER_ID"]
+          private_key = os.environ["APPLE_API_PRIVATE_KEY"]
+          app_id     = os.environ["APP_ID"]
+          keep_count = int(os.environ.get("KEEP_COUNT") or "1")
+          dry_run    = (os.environ.get("DRY_RUN", "false").lower() == "true")
+
+          # JWT — same pattern as asc-link-build.yml
+          now = int(time.time())
+          payload = {"iss": issuer_id, "iat": now, "exp": now + 1200, "aud": "appstoreconnect-v1"}
+          token = jwt.encode(payload, private_key, algorithm="ES256",
+                             headers={"kid": key_id, "typ": "JWT"})
+          headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+          # Page through ALL builds for the app, sorted newest-first.
+          # /v1/builds returns 200 max per page; we paginate via 'next' link.
+          builds = []
+          url = "https://api.appstoreconnect.apple.com/v1/builds"
+          params = {
+              "filter[app]": app_id,
+              "sort": "-uploadedDate",
+              "limit": 200,
+              "fields[builds]": "version,uploadedDate,expired,processingState,preReleaseVersion",
+              "include": "preReleaseVersion",
+          }
+          while url:
+              r = requests.get(url, headers=headers, params=params if params else None)
+              if r.status_code != 200:
+                  print(f"List builds failed: {r.status_code}\n{r.text}")
+                  sys.exit(1)
+              j = r.json()
+              builds.extend(j.get("data", []))
+              # Apple returns a fully-qualified next URL when present.
+              url = j.get("links", {}).get("next")
+              params = None  # next URL already encodes params
+
+          print(f"Total builds returned: {len(builds)}")
+
+          # Build a quick lookup from preReleaseVersion id -> version string
+          included = {(i["type"], i["id"]): i for i in (j.get("included") or [])}
+          # The last response 'included' may not cover earlier pages; we just
+          # show the version+build for diagnostics, no functional dependency.
+
+          # Sort defensively by uploadedDate desc (Apple should already, but
+          # let's not depend on stable ordering across pages).
+          def upload_ts(b):
+              return b["attributes"].get("uploadedDate") or ""
+          builds.sort(key=upload_ts, reverse=True)
+
+          # Decide which to keep: first N that are NOT already expired AND are
+          # in a usable processing state. Anything else gets expired.
+          keep_ids = []
+          for b in builds:
+              attrs = b.get("attributes", {})
+              if attrs.get("expired"):
+                  continue
+              # Only count builds that completed processing or are still
+              # processing — don't keep INVALID or FAILED.
+              state = attrs.get("processingState")
+              if state in ("INVALID", "FAILED"):
+                  continue
+              keep_ids.append(b["id"])
+              if len(keep_ids) >= keep_count:
+                  break
+
+          print(f"Keeping {len(keep_ids)} build(s): {keep_ids}")
+
+          to_expire = []
+          for b in builds:
+              if b["id"] in keep_ids:
+                  continue
+              if b["attributes"].get("expired"):
+                  continue  # already expired, skip
+              to_expire.append(b)
+
+          print(f"Will expire {len(to_expire)} build(s)")
+          for b in to_expire:
+              a = b["attributes"]
+              print(f"  - id={b['id']} v={a.get('version')} state={a.get('processingState')} uploaded={a.get('uploadedDate')}")
+
+          if dry_run:
+              print("DRY RUN — not modifying any builds.")
+              sys.exit(0)
+
+          # PATCH each build to expire it.
+          # https://developer.apple.com/documentation/appstoreconnectapi/modify_a_build
+          failures = 0
+          for b in to_expire:
+              body = {"data": {"type": "builds", "id": b["id"], "attributes": {"expired": True}}}
+              r = requests.patch(
+                  f"https://api.appstoreconnect.apple.com/v1/builds/{b['id']}",
+                  headers=headers, json=body)
+              if r.status_code in (200, 204):
+                  print(f"  EXPIRED {b['id']}")
+              else:
+                  failures += 1
+                  print(f"  FAILED  {b['id']} -> {r.status_code} {r.text[:200]}")
+
+          if failures:
+              print(f"{failures} expire(s) failed")
+              sys.exit(1)
+          print("Done.")
+          PY

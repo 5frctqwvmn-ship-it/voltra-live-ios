@@ -54,8 +54,8 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         DEVELOPMENT_TEAM: "${APPLE_TEAM_ID:-}"
-        MARKETING_VERSION: "0.3.1"
-        CURRENT_PROJECT_VERSION: "8"
+        MARKETING_VERSION: "0.3.2"
+        CURRENT_PROJECT_VERSION: "9"
     dependencies:
       - sdk: CoreBluetooth.framework
       - sdk: CloudKit.framework
@@ -79,8 +79,8 @@ targets:
         UIUserInterfaceStyle: Dark
         CFBundleDisplayName: "VOLTRA Live"
         CFBundleName: "VoltraLive"
-        CFBundleShortVersionString: "0.3.1"
-        CFBundleVersion: "8"
+        CFBundleShortVersionString: "0.3.2"
+        CFBundleVersion: "9"
 
   VoltraLiveTests:
     type: bundle.unit-test

@@ -107,6 +107,14 @@ struct LoggingHomeView: View {
                     Text("Live")
                         .font(.system(size: 18))
                         .foregroundColor(VoltraColor.textDim)
+                    Text(buildBadge)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(VoltraColor.textFaint)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(VoltraColor.bgElev)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .accessibilityLabel("App version \(buildBadge)")
                 }
                 Spacer()
                 connectionPill
@@ -127,6 +135,16 @@ struct LoggingHomeView: View {
                 .foregroundColor(VoltraColor.textDim)
         }
         .padding(.horizontal, 18)
+    }
+
+    /// Short "v<short> (<build>)" pulled from Info.plist so users (and we)
+    /// can confirm at a glance which TestFlight build is running. Lives
+    /// inline next to the wordmark so it can't be missed.
+    private var buildBadge: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let short = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        return "v\(short) (\(build))"
     }
 
     private var connectionPill: some View {
