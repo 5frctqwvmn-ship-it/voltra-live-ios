@@ -10,26 +10,31 @@ struct ExercisePickerView: View {
     @EnvironmentObject var logging: LoggingStore
     let dayType: DayType
 
-    // Exercises are queried via @Query for live updates when the user adds new
-    // ones — we still go through LoggingStore for the day-type filter logic.
+    // We query via @Query for live updates when the user adds new exercises
+    // and also @Query sessions so the sequence ordering stays fresh.
     @Query private var allExercises: [Exercise]
+    @Query private var allSessions: [WorkoutSession]
 
     @State private var search: String = ""
     @State private var showingNewExercise = false
-    @State private var navigateToCapture = false
+    @State private var navigateToStart = false
 
     init(dayType: DayType) {
         self.dayType = dayType
     }
 
+    /// Exercises filtered to the chosen day type, ordered by typical sequence
+    /// (set 1 first), then by search query.
     var filteredExercises: [Exercise] {
         let pool: [Exercise] = {
             if dayType == .custom { return allExercises }
             return allExercises.filter { $0.dayTypeTags.contains(dayType) }
         }()
-        let sorted = pool.sorted {
-            ($0.lastUsedAt ?? .distantPast) > ($1.lastUsedAt ?? .distantPast)
-        }
+        let sorted = HistoryAnalytics.exercisesOrderedBySequence(
+            candidates: pool,
+            sessions: allSessions,
+            dayType: dayType
+        )
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         if q.isEmpty { return sorted }
         return sorted.filter {
@@ -65,11 +70,11 @@ struct ExercisePickerView: View {
             NewExerciseSheet(dayType: dayType) { newExercise in
                 logging.pickExercise(newExercise)
                 showingNewExercise = false
-                navigateToCapture = true
+                navigateToStart = true
             }
         }
-        .navigationDestination(isPresented: $navigateToCapture) {
-            LiveCaptureView()
+        .navigationDestination(isPresented: $navigateToStart) {
+            ExerciseStartView()
         }
     }
 
@@ -112,12 +117,13 @@ struct ExercisePickerView: View {
     }
 
     private func exerciseRow(_ ex: Exercise) -> some View {
-        Button {
+        let summary = previousSummary(for: ex)
+        return Button {
             logging.pickExercise(ex)
-            navigateToCapture = true
+            navigateToStart = true
         } label: {
             HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(ex.name)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(VoltraColor.text)
@@ -129,12 +135,20 @@ struct ExercisePickerView: View {
                                 .foregroundColor(VoltraColor.textDim)
                         }
                         if let last = ex.lastUsedAt {
-                            Text("·")
-                                .foregroundColor(VoltraColor.textFaint)
+                            if !ex.equipment.isEmpty {
+                                Text("·").foregroundColor(VoltraColor.textFaint)
+                            }
                             Text(relativeDate(last))
                                 .font(.system(size: 12))
                                 .foregroundColor(VoltraColor.textFaint)
                         }
+                    }
+                    if !summary.isEmpty {
+                        Text("Last: \(summary)")
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundColor(VoltraColor.accent.opacity(0.85))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
                 Spacer()
@@ -150,6 +164,28 @@ struct ExercisePickerView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
+    }
+
+    /// Compact "30 lb × 10 / 8 / 6" summary for the most recent prior session.
+    private func previousSummary(for ex: Exercise) -> String {
+        let series = HistoryAnalytics.previousSetSeries(for: ex, excluding: logging.activeSession)
+        guard !series.isEmpty else { return "" }
+        // Detect uniform weight or first-set weight as the headline.
+        let weights = series.map(\.weightLb)
+        let reps = series.map(\.reps)
+        let allSame = weights.allSatisfy { $0 == weights.first }
+        let weightStr: String = {
+            if allSame, let w = weights.first { return "\(formatLb(w)) lb" }
+            let mn = weights.min() ?? 0
+            let mx = weights.max() ?? 0
+            return "\(formatLb(mn))\u{2013}\(formatLb(mx)) lb"
+        }()
+        let repsStr = reps.map(String.init).joined(separator: "/")
+        return "\(weightStr) × \(repsStr)"
+    }
+
+    private func formatLb(_ d: Double) -> String {
+        d == d.rounded() ? "\(Int(d))" : String(format: "%.1f", d)
     }
 
     private var emptyState: some View {

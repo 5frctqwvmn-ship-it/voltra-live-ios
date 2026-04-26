@@ -29,6 +29,10 @@ final class LoggingStore: ObservableObject {
     /// Mirror of the running set count for the current instance — drives the
     /// "Set #" label in the UI.
     @Published var setNumberForCurrentInstance: Int = 1
+    /// User-chosen starting weight from the smart-start toggle (or free entry)
+    /// for the upcoming set. Read by SetLogView at prefill time and cleared
+    /// after each set is logged.
+    @Published var pendingPlannedWeightLb: Double? = nil
 
     // MARK: - Dependencies
 
@@ -129,6 +133,7 @@ final class LoggingStore: ObservableObject {
         ctx.insert(instance)
         activeInstance = instance
         setNumberForCurrentInstance = 1
+        pendingPlannedWeightLb = nil
 
         // Bump exercise recency.
         exercise.lastUsedAt = Date()
@@ -196,6 +201,7 @@ final class LoggingStore: ObservableObject {
         ctx.insert(logged)
         setNumberForCurrentInstance = order + 1
         pendingTelemetrySet = nil
+        pendingPlannedWeightLb = nil
         try? ctx.save()
     }
 
@@ -205,18 +211,19 @@ final class LoggingStore: ObservableObject {
 
     // MARK: - Picker queries
 
-    /// Exercises ordered by relevance for a chosen day type:
-    /// 1. Match dayTypeTags exactly, sorted by lastUsedAt desc.
-    /// 2. Then primary match (if any), sorted by lastUsedAt desc.
-    /// 3. Custom day type returns ALL exercises sorted by recency.
+    /// Exercises ordered by relevance for a chosen day type, using the
+    /// HistoryAnalytics sequence model (lower slot = appears earlier in a
+    /// typical session, weighted by recency).
     func exercises(for dayType: DayType) -> [Exercise] {
         guard let ctx = modelContext else { return [] }
         let all = (try? ctx.fetch(FetchDescriptor<Exercise>())) ?? []
-        if dayType == .custom {
-            return all.sorted { ($0.lastUsedAt ?? .distantPast) > ($1.lastUsedAt ?? .distantPast) }
-        }
-        let matching = all.filter { $0.dayTypeTags.contains(dayType) }
-        return matching.sorted { ($0.lastUsedAt ?? .distantPast) > ($1.lastUsedAt ?? .distantPast) }
+        let pool = (dayType == .custom) ? all : all.filter { $0.dayTypeTags.contains(dayType) }
+        let sessions = (try? ctx.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        return HistoryAnalytics.exercisesOrderedBySequence(
+            candidates: pool,
+            sessions: sessions,
+            dayType: dayType
+        )
     }
 
     /// Last set logged for a given exercise — used to autofill weight/ecc/reps.
@@ -228,6 +235,37 @@ final class LoggingStore: ObservableObject {
         desc.fetchLimit = 50
         let candidates = (try? ctx.fetch(desc)) ?? []
         return candidates.first { $0.instance?.exercise?.id == exercise.id }
+    }
+
+    /// Sets from the most recent prior session that included this exercise,
+    /// in 1..N order. Drives the smart-start toggle.
+    func previousSetSeries(for exercise: Exercise) -> [LoggedSet] {
+        HistoryAnalytics.previousSetSeries(
+            for: exercise,
+            excluding: activeSession
+        )
+    }
+
+    /// Sets the user has already logged in the *active* instance, in order.
+    /// Empty before the first set is logged.
+    func currentInstanceSets() -> [LoggedSet] {
+        guard let inst = activeInstance else { return [] }
+        return inst.orderedSets
+    }
+
+    /// One-stop convenience: build a SetSuggestion for the next set the user
+    /// is about to log on the active instance.
+    func nextSetSuggestion() -> SetSuggestion {
+        guard let inst = activeInstance, let exercise = inst.exercise else {
+            return SetSuggestion(source: .freeEntry, anchorLb: nil, offsets: [])
+        }
+        let prev = previousSetSeries(for: exercise)
+        let curr = inst.orderedSets
+        return SetSuggestionEngine.suggestion(
+            forSetIndex: setNumberForCurrentInstance,
+            currentInstanceSets: curr,
+            previousSeries: prev
+        )
     }
 
     // MARK: - Markdown export

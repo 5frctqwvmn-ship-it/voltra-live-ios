@@ -32,7 +32,7 @@ struct SetLogView: View {
                         telemetryStrip
                         labelChips
 
-                        numberRow(title: "Weight", text: $weight, suffix: "lb", placeholder: "0")
+                        weightRowWithToggle
                         numberRow(title: "Eccentric", text: $eccentric, suffix: "lb", placeholder: "—")
                         numberRow(title: "Reps", text: $reps, suffix: "", placeholder: "0")
                         numberRow(title: "Chains", text: $chains, suffix: "lb", placeholder: "—",
@@ -225,14 +225,27 @@ struct SetLogView: View {
         guard !didPrefill else { return }
         didPrefill = true
 
-        // From telemetry first.
+        // 1) Reps from telemetry when available.
         if let pending = logging.pendingTelemetrySet {
             reps = "\(pending.reps)"
         }
 
-        // Defaults from previous set on this exercise.
+        // 2) Weight — prefer the user's planned weight from the smart-start
+        //    toggle, then telemetry-detected weight, then last set on this
+        //    exercise.
+        if weight.isEmpty {
+            if let planned = logging.pendingPlannedWeightLb, planned > 0 {
+                weight = formatLb(planned)
+            } else if let pending = logging.pendingTelemetrySet, pending.peakLb > 0 {
+                // Voltra reports peak force; round to nearest 5 as a starting hint.
+                weight = formatLb((pending.peakLb / 5).rounded() * 5)
+            } else if let last = lastSet {
+                weight = formatLb(last.weightLb)
+            }
+        }
+
+        // 3) Other defaults from previous set on this exercise.
         if let last = lastSet {
-            if weight.isEmpty { weight = formatLb(last.weightLb) }
             if eccentric.isEmpty, let e = last.eccentricLb, e > 0 {
                 eccentric = formatLb(e)
             }
@@ -245,6 +258,81 @@ struct SetLogView: View {
                 mode = last.mode
             }
         }
+    }
+
+    // MARK: - Weight + smart toggle row
+
+    private var weightRowWithToggle: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("WEIGHT")
+                    .font(.system(size: 11, weight: .bold))
+                    .kerning(1.2)
+                    .foregroundColor(VoltraColor.textDim)
+                Spacer()
+                Text("lb")
+                    .font(.system(size: 11))
+                    .foregroundColor(VoltraColor.textFaint)
+            }
+            TextField("0", text: $weight)
+                .keyboardType(.decimalPad)
+                .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                .foregroundColor(VoltraColor.text)
+                .padding(14)
+                .background(VoltraColor.bgElev2)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(VoltraColor.border, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            // Inline smart toggle so the user can re-anchor between sets.
+            inlineSmartToggle
+        }
+    }
+
+    private var inlineSmartToggle: some View {
+        let suggestion = logging.nextSetSuggestion()
+        return Group {
+            if !suggestion.isFreeEntry, !suggestion.options.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(suggestion.caption.uppercased())
+                        .font(.system(size: 9, weight: .bold))
+                        .kerning(1.4)
+                        .foregroundColor(VoltraColor.textFaint)
+                    HStack(spacing: 8) {
+                        ForEach(Array(suggestion.options.enumerated()), id: \.offset) { idx, value in
+                            let offset = suggestion.offsets[idx]
+                            Button {
+                                weight = formatLb(value)
+                            } label: {
+                                Text(toggleLabel(value: value, offset: offset))
+                                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(VoltraColor.bgElev)
+                                    .foregroundColor(VoltraColor.text)
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(VoltraColor.accent.opacity(0.5), lineWidth: 1)
+                                    )
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            } else {
+                EmptyView()
+            }
+        }
+    }
+
+    private func toggleLabel(value: Double, offset: Double) -> String {
+        if offset == 0 { return "Same: \(formatLb(value))" }
+        let sign = offset > 0 ? "+" : "−"
+        return "\(sign)\(formatLb(abs(offset))) → \(formatLb(value))"
     }
 
     private func commit() {

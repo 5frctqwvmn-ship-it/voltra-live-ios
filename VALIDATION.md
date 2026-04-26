@@ -157,3 +157,29 @@ that the test coverage missed the regression.
 
 - [ ] **LV18.** With another iPhone signed into the same iCloud account, install v0.2 — the seeded exercises and any logged sessions appear within ~30 seconds (skip if you only have one device).
 - [ ] **LV19.** Reinstalling the app on the same device preserves logged sessions (CloudKit restores them) — first-launch import does NOT duplicate sessions.
+
+## v0.2.1 — Smart Start & Per-Set Suggestion
+
+> Capture loop with day-type selection still works as in v0.2; this section
+> validates the new exercise-start screen and the smart toggle.
+
+### Picker ordering
+
+- [ ] **LV20.** Tap a day type tile (e.g. Leg). The exercise list is ordered by the slot you typically do that exercise *first*, weighted by recency. So if you almost always start with belt squats, belt squats appear at the top of Leg Day.
+- [ ] **LV21.** Each row shows a `Last: <weight> × <reps>/<reps>/<reps>` line in accent color when the exercise has prior sets. New exercises have no such line.
+
+### Exercise start screen
+
+- [ ] **LV22.** Tapping an exercise opens the **ExerciseStartView**, NOT the live capture screen directly. The header reads `SET 1`.
+- [ ] **LV23.** The **LAST SESSION** card lists every set from your most recent prior session of this exercise (set #, weight, reps), with an arrow next to the slot matching the upcoming set.
+- [ ] **LV24.** The **START WITH** section shows three chips: `-5`, `SAME: <last-first-set-lb>`, `+5`. The middle chip is selected by default. Tapping a chip changes the highlighted option.
+- [ ] **LV25.** For an exercise with NO history, the toggle is replaced with a **free-entry numeric field**, and the Start button stays disabled until you type a positive value.
+- [ ] **LV26.** Tapping **Start** navigates to the LiveCaptureView. When the SetLogView pops up, the WEIGHT field is pre-populated with whatever you chose on the start screen — not the previous-session value.
+
+### Per-set delta projection
+
+> Pre-condition: in your master history this exercise had at least 2 sets last
+> session.
+
+- [ ] **LV27.** Log set 1 at e.g. 25 lb (lower than last week's 30). When SetLogView opens for set 2, the inline toggle row reads "Last session you went +5 lb into this set" and the chips read `-5`, `Same: 30`, `+5: 35` (anchor = 25 + 5).
+- [ ] **LV28.** Tapping a chip in the inline toggle updates the WEIGHT field instantly. The user can still hand-type any number to override entirely.
