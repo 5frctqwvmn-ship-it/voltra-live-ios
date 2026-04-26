@@ -396,7 +396,113 @@ enum HistoryImporter {
             i += 1
         }
 
+        // Fallback: many sessions in the master history use an INLINE-PROSE
+        // format instead of the Set/Label/Weight table. We try the table
+        // parser first (above) and only fall through to the inline parser
+        // if that yielded nothing.
+        if exercises.isEmpty {
+            exercises = parseInlineProseExercises(lines: lines)
+        }
+
         return exercises
+    }
+
+    /// Inline-prose format examples seen in seed/history.md:
+    ///   Belt Squats (Voltra Harness)
+    ///
+    ///   WU1: 50+18 ecc x 10. WU2: 90+32 ecc x 17. Working: 130+46 ecc x 9,
+    ///   200+20 ecc x 10, 240+48 ecc x 10, 260+52 ecc x 8
+    ///
+    /// Heuristic: a non-numeric, non-metadata line followed within ~3 lines
+    /// by a line containing `WU`, `Working`, `Set 1`, or a digits-x-digits
+    /// pattern is treated as an exercise header. We then collect every
+    /// `<weight>+<ecc> ecc x <reps>` or `<weight> x <reps>` token as a set.
+    private static func parseInlineProseExercises(lines: [String]) -> [ParsedExercise] {
+        var exercises: [ParsedExercise] = []
+
+        // Pattern: optional sign + integer/decimal weight, optional `+ecc`,
+        // mandatory ` x <reps>`. Examples: `50+18 ecc x 10`, `200+20 ecc x 8`,
+        // `120 x 12`, `BW x 8`.
+        let setRegex = try? NSRegularExpression(
+            pattern: #"(\d+(?:\.\d+)?)(?:\s*\+\s*(\d+(?:\.\d+)?)\s*ecc)?\s*[x×]\s*(\d+)"#,
+            options: [.caseInsensitive]
+        )
+        guard let setRegex else { return [] }
+
+        var i = 0
+        while i < lines.count {
+            let line = lines[i].trimmingCharacters(in: .whitespaces)
+            i += 1
+            if line.isEmpty { continue }
+            if isMetadataLine(line) { continue }
+            // Title-like: contains '(' and ')' and is not numeric, not a heading
+            guard line.contains("("), line.contains(")"),
+                  !line.hasPrefix("Session "), !line.hasSuffix(":")
+            else { continue }
+
+            // Look ahead for a body line within next 4 non-empty lines that
+            // contains at least one set token.
+            var bodyLines: [String] = []
+            var look = i
+            var nonEmptySeen = 0
+            while look < lines.count, nonEmptySeen < 12 {
+                let t = lines[look].trimmingCharacters(in: .whitespaces)
+                look += 1
+                if t.isEmpty {
+                    if !bodyLines.isEmpty { break }
+                    continue
+                }
+                nonEmptySeen += 1
+                // Stop if we hit another title-like line.
+                if t.contains("(") && t.contains(")") && !bodyLines.isEmpty { break }
+                if isMetadataLine(t) { continue }
+                bodyLines.append(t)
+            }
+            guard !bodyLines.isEmpty else { continue }
+            let body = bodyLines.joined(separator: " ")
+            let nsBody = body as NSString
+            let matches = setRegex.matches(in: body, range: NSRange(location: 0, length: nsBody.length))
+            guard !matches.isEmpty else { continue }
+
+            let (name, equipment) = splitExerciseTitle(line)
+            var ex = ParsedExercise(name: name, equipment: equipment, sets: [])
+            for (idx, m) in matches.enumerated() {
+                var set = ParsedSet()
+                set.weightLb = Double(nsBody.substring(with: m.range(at: 1)))
+                if m.range(at: 2).location != NSNotFound {
+                    set.eccentricLb = Double(nsBody.substring(with: m.range(at: 2)))
+                }
+                set.reps = Int(nsBody.substring(with: m.range(at: 3)))
+                // Best-effort label: WU1/WU2/WU = warm-up, otherwise working.
+                let surrounding = nsBody.substring(with: NSRange(
+                    location: max(0, m.range.location - 8),
+                    length: min(8, m.range.location)
+                )).lowercased()
+                if surrounding.contains("wu") {
+                    set.mode = .warmUp
+                    set.label = "Warm-Up"
+                } else {
+                    set.mode = .working
+                    set.label = "Working"
+                }
+                _ = idx
+                ex.sets.append(set)
+            }
+            if !ex.sets.isEmpty { exercises.append(ex) }
+            i = look
+        }
+        return exercises
+    }
+
+    /// Lines we should never treat as exercise titles or set rows.
+    private static func isMetadataLine(_ line: String) -> Bool {
+        let prefixes = [
+            "Session ", "Focus:", "Duration:", "Time:", "Active kcal",
+            "Avg HR:", "Range:", "Insights:", "Note:", "NOTE:",
+            "Equipment:", "Vitals:",
+        ]
+        for p in prefixes where line.hasPrefix(p) { return true }
+        return false
     }
 
     /// An exercise header: non-empty line whose next non-blank line within 4
