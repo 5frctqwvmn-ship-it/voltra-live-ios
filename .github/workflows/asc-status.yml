@@ -19,6 +19,7 @@ jobs:
 
           python3 <<'PY'
           import os, time, json, requests, jwt
+          import sys
 
           key_id = os.environ["APPLE_API_KEY_ID"]
           issuer_id = os.environ["APPLE_API_ISSUER_ID"]
@@ -37,60 +38,117 @@ jobs:
 
           headers = {"Authorization": f"Bearer {token}"}
 
-          # Get all builds for the app, sorted by upload time desc
-          url = f"https://api.appstoreconnect.apple.com/v1/builds"
-          params = {
+          def get(path, params=None):
+              r = requests.get(f"https://api.appstoreconnect.apple.com{path}", headers=headers, params=params)
+              print(f"GET {path} -> {r.status_code}")
+              if r.status_code != 200:
+                  print(r.text); sys.exit(1)
+              return r.json()
+
+          # 1) Recent builds with everything we can include
+          data = get("/v1/builds", {
               "filter[app]": app_id,
               "sort": "-uploadedDate",
-              "limit": 10,
-              "include": "preReleaseVersion,buildBetaDetail",
-          }
-          r = requests.get(url, headers=headers, params=params)
-          print(f"Status: {r.status_code}")
-          if r.status_code != 200:
-              print(r.text)
-              raise SystemExit(1)
-
-          data = r.json()
-
-          # index included resources
-          included = {}
-          for inc in data.get("included", []):
-              included[(inc["type"], inc["id"])] = inc
-
+              "limit": 5,
+              "include": "preReleaseVersion,buildBetaDetail,betaBuildLocalizations,individualTesters,betaGroups,app",
+          })
+          included = {(i["type"], i["id"]): i for i in data.get("included", [])}
           print("\n=== Recent Builds ===\n")
+          target_build_id = None
           for b in data.get("data", []):
               attrs = b["attributes"]
               version = attrs.get("version", "?")
-              processing = attrs.get("processingState", "?")
-              uploaded = attrs.get("uploadedDate", "?")
-              expired = attrs.get("expired", False)
-              uses_non_exempt = attrs.get("usesNonExemptEncryption")
-
-              # pre-release version (CFBundleShortVersionString)
               prv_rel = b.get("relationships", {}).get("preReleaseVersion", {}).get("data")
               short_ver = "?"
               if prv_rel:
                   prv = included.get((prv_rel["type"], prv_rel["id"]))
                   if prv:
                       short_ver = prv["attributes"].get("version", "?")
-
-              # buildBetaDetail
               bbd_rel = b.get("relationships", {}).get("buildBetaDetail", {}).get("data")
-              internal_state = "?"
-              external_state = "?"
+              internal_state = external_state = "?"
               if bbd_rel:
                   bbd = included.get((bbd_rel["type"], bbd_rel["id"]))
                   if bbd:
                       internal_state = bbd["attributes"].get("internalBuildState", "?")
                       external_state = bbd["attributes"].get("externalBuildState", "?")
-
-              print(f"  v{short_ver} (build {version})")
-              print(f"    uploaded:        {uploaded}")
-              print(f"    processingState: {processing}")
-              print(f"    expired:         {expired}")
-              print(f"    encryption:      {uses_non_exempt}")
+              print(f"  v{short_ver} (build {version}) id={b['id']}")
+              print(f"    processingState: {attrs.get('processingState')}")
+              print(f"    expired:         {attrs.get('expired')}")
+              print(f"    encryption:      {attrs.get('usesNonExemptEncryption')}")
+              print(f"    minOsVersion:    {attrs.get('minOsVersion')}")
+              print(f"    iconAssetToken:  {bool(attrs.get('iconAssetToken'))}")
               print(f"    internalState:   {internal_state}")
               print(f"    externalState:   {external_state}")
+              groups_rel = b.get("relationships", {}).get("betaGroups", {}).get("data") or []
+              print(f"    betaGroups attached to build: {len(groups_rel)}")
+              for g in groups_rel:
+                  gobj = included.get((g["type"], g["id"]))
+                  print(f"      - {g['id']} {gobj['attributes'].get('name') if gobj else ''}")
+              testers_rel = b.get("relationships", {}).get("individualTesters", {}).get("data") or []
+              print(f"    individualTesters attached: {len(testers_rel)}")
+              if short_ver == "0.2.0" and version == "4":
+                  target_build_id = b["id"]
               print()
+
+          # 2) The app itself — bundle id and active platforms
+          app = get(f"/v1/apps/{app_id}")
+          a_attrs = app["data"]["attributes"]
+          print("=== App ===")
+          print(f"  name: {a_attrs.get('name')}  bundleId: {a_attrs.get('bundleId')}  sku: {a_attrs.get('sku')}")
+          print(f"  primaryLocale: {a_attrs.get('primaryLocale')}")
+          print()
+
+          # 3) Beta groups for the app
+          bg = get("/v1/betaGroups", {"filter[app]": app_id, "limit": 50, "include": "betaTesters,builds"})
+          bg_inc = {(i["type"], i["id"]): i for i in bg.get("included", [])}
+          print("=== Beta Groups ===")
+          for g in bg.get("data", []):
+              ga = g["attributes"]
+              testers = g.get("relationships", {}).get("betaTesters", {}).get("data") or []
+              builds_rel = g.get("relationships", {}).get("builds", {}).get("data") or []
+              print(f"  '{ga.get('name')}' id={g['id']}")
+              print(f"    isInternalGroup:        {ga.get('isInternalGroup')}")
+              print(f"    hasAccessToAllBuilds:   {ga.get('hasAccessToAllBuilds')}")
+              print(f"    publicLinkEnabled:      {ga.get('publicLinkEnabled')}")
+              print(f"    feedbackEnabled:        {ga.get('feedbackEnabled')}")
+              print(f"    iosBuildsAvailableForAppleSiliconMac: {ga.get('iosBuildsAvailableForAppleSiliconMac')}")
+              print(f"    testers in group: {len(testers)}")
+              print(f"    builds attached to group: {len(builds_rel)}")
+              for t in testers[:10]:
+                  tobj = bg_inc.get((t["type"], t["id"]))
+                  if tobj:
+                      ta = tobj["attributes"]
+                      print(f"      tester: {ta.get('email')}  state={ta.get('state','?')}  inviteType={ta.get('inviteType','?')}")
+              print()
+
+          # 4) All beta testers with state/build access
+          bt = get("/v1/betaTesters", {"filter[apps]": app_id, "limit": 50, "include": "apps,betaGroups,builds"})
+          print("=== Beta Testers ===")
+          for t in bt.get("data", []):
+              ta = t["attributes"]
+              groups = t.get("relationships", {}).get("betaGroups", {}).get("data") or []
+              builds_rel = t.get("relationships", {}).get("builds", {}).get("data") or []
+              print(f"  {ta.get('email')}  firstName={ta.get('firstName')}  lastName={ta.get('lastName')}")
+              print(f"    state: {ta.get('state')}  inviteType: {ta.get('inviteType')}")
+              print(f"    groups: {[g['id'] for g in groups]}")
+              print(f"    builds attached: {len(builds_rel)}")
+              print()
+
+          # 5) For target build: explicit accessible-builds check & beta build localization
+          if target_build_id:
+              print(f"=== Build {target_build_id} (v0.2.0 build 4) deep dive ===")
+              loc = get(f"/v1/builds/{target_build_id}/betaBuildLocalizations")
+              print(f"  betaBuildLocalizations: {len(loc.get('data', []))}")
+              for l in loc.get("data", []):
+                  la = l["attributes"]
+                  whats_new = la.get('whatsNew') or ''
+                  print(f"    locale={la.get('locale')}  whatsNew_len={len(whats_new)}")
+              # which beta groups have access to this build
+              bg_for_build = get(f"/v1/builds/{target_build_id}/betaGroups")
+              print(f"  betaGroups linked to build: {len(bg_for_build.get('data', []))}")
+              for g in bg_for_build.get("data", []):
+                  print(f"    - {g['id']}")
+              # individual testers on this build
+              it = get(f"/v1/builds/{target_build_id}/individualTesters")
+              print(f"  individualTesters on build: {len(it.get('data', []))}")
           PY
