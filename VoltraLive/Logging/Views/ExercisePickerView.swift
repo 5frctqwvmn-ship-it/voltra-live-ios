@@ -74,7 +74,7 @@ struct ExercisePickerView: View {
             }
         }
         .navigationDestination(isPresented: $navigateToStart) {
-            ExerciseStartView()
+            ExerciseDetailView()
         }
     }
 

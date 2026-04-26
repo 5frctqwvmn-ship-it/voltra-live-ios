@@ -303,6 +303,17 @@ final class LoggedSet {
     var reps: Int = 0
     /// Manual chains entry — pounds of added chain weight.
     var chainsLb: Double? = nil
+    /// Voltra control-frame additions (v0.3 prototype port).
+    /// All optional w/ defaults so the SwiftData migration is additive and
+    /// safe to land mid-CloudKit-rollout: existing rows decode with nil/false
+    /// and the writer treats nil as "not engaged".
+    /// True if the chains weight was sent as inverse-chains (PARAM_FITNESS_INVERSE_CHAIN=1)
+    /// rather than additive chains. Mutually exclusive with positive chainsLb meaning.
+    var inverseChains: Bool = false
+    /// Damper level 0..9 if this set was logged in damper mode. Nil for weight/band.
+    var damperLevel: Int? = nil
+    /// Resistance-band max force in lb if this set was logged in band mode. Nil otherwise.
+    var bandMaxForceLb: Double? = nil
 
     // Telemetry-derived
     var peakForceLb: Double = 0
@@ -337,6 +348,9 @@ final class LoggedSet {
         notes: String? = nil,
         autofilledFromTelemetry: Bool = false,
         importedFromHistory: Bool = false,
+        inverseChains: Bool = false,
+        damperLevel: Int? = nil,
+        bandMaxForceLb: Double? = nil,
         instance: ExerciseInstance? = nil
     ) {
         self.id = id
@@ -355,6 +369,9 @@ final class LoggedSet {
         self.notes = notes
         self.autofilledFromTelemetry = autofilledFromTelemetry
         self.importedFromHistory = importedFromHistory
+        self.inverseChains = inverseChains
+        self.damperLevel = damperLevel
+        self.bandMaxForceLb = bandMaxForceLb
         self.instance = instance
     }
 

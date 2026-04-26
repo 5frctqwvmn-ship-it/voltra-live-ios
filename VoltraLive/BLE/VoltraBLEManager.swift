@@ -101,6 +101,26 @@ final class VoltraBLEManager: NSObject, ObservableObject {
         handleDisconnect(reason: nil)
     }
 
+    // MARK: Control writes
+    //
+    // The user explicitly granted permission to load weights into the VOLTRA
+    // (Apr 2026). All control writes flow through this single entry point so
+    // we can swap in a different transport later (e.g. a write-without-response
+    // path on the just-write characteristic) without touching callers.
+
+    /// Write a fully-built VOLTRA frame to the transport characteristic.
+    /// Must be a complete 0x55-magic frame including CRC8 + CRC16.
+    /// Currently fire-and-forget: we don't parse param-write ACKs from the
+    /// device — we rely on `.withResponse` for radio-level delivery only.
+    func writeControlFrame(_ data: Data) {
+        guard let p = peripheral, p.state == .connected, let char = transportChar else {
+            addLog("Control write skipped — not connected (\(data.count)B)", level: .warn)
+            return
+        }
+        p.writeValue(data, for: char, type: .withResponse)
+        addLog("Wrote control frame (\(data.count)B): \(data.hexString.prefix(24))…")
+    }
+
     // MARK: Bootstrap
 
     func sendBootstrap() {
