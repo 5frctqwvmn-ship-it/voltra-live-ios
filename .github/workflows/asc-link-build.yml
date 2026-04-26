@@ -1,0 +1,98 @@
+name: ASC Link Build to Internal Group
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "CFBundleShortVersionString (e.g. 0.2.0)"
+        required: true
+        default: "0.2.0"
+      build:
+        description: "CFBundleVersion (e.g. 4)"
+        required: true
+        default: "4"
+
+jobs:
+  link:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find build and link to Internal group
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APP_ID: "6763798738"
+          INTERNAL_GROUP_ID: "e5cd7c94-33c3-4235-83b4-9b13c5c2d670"
+          TARGET_VERSION: ${{ inputs.version }}
+          TARGET_BUILD: ${{ inputs.build }}
+        run: |
+          set -e
+          python3 -m pip install --quiet pyjwt cryptography requests
+          python3 <<'PY'
+          import os, time, json, requests, jwt, sys
+
+          key_id = os.environ["APPLE_API_KEY_ID"]
+          issuer_id = os.environ["APPLE_API_ISSUER_ID"]
+          private_key = os.environ["APPLE_API_PRIVATE_KEY"]
+          app_id = os.environ["APP_ID"]
+          group_id = os.environ["INTERNAL_GROUP_ID"]
+          tv = os.environ["TARGET_VERSION"]
+          tb = os.environ["TARGET_BUILD"]
+
+          now = int(time.time())
+          payload = {"iss": issuer_id, "iat": now, "exp": now + 1200, "aud": "appstoreconnect-v1"}
+          token = jwt.encode(payload, private_key, algorithm="ES256",
+                             headers={"kid": key_id, "typ": "JWT"})
+          headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+          # Find the build resource ID by version+build
+          r = requests.get("https://api.appstoreconnect.apple.com/v1/builds",
+                           headers=headers,
+                           params={"filter[app]": app_id,
+                                   "filter[preReleaseVersion.version]": tv,
+                                   "filter[version]": tb,
+                                   "include": "preReleaseVersion",
+                                   "limit": 5})
+          print(f"Search builds -> {r.status_code}")
+          if r.status_code != 200:
+              print(r.text); sys.exit(1)
+          d = r.json()
+          if not d.get("data"):
+              print(f"No build found for v{tv} build {tb}"); sys.exit(1)
+          build = d["data"][0]
+          build_id = build["id"]
+          print(f"Build resource id: {build_id}")
+          print(f"  version: {build['attributes'].get('version')}")
+          print(f"  processing: {build['attributes'].get('processingState')}")
+          print(f"  encryption: {build['attributes'].get('usesNonExemptEncryption')}")
+
+          # Check current beta group linkage
+          r = requests.get(f"https://api.appstoreconnect.apple.com/v1/builds/{build_id}/betaGroups",
+                           headers=headers)
+          print(f"Current betaGroups for build -> {r.status_code}")
+          if r.status_code == 200:
+              ids = [g['id'] for g in r.json().get('data', [])]
+              print(f"  current groups: {ids}")
+              if group_id in ids:
+                  print("Already linked. Nothing to do.")
+                  sys.exit(0)
+          else:
+              print(r.text)
+
+          # Link the build to the Internal group
+          # POST /v1/betaGroups/{id}/relationships/builds
+          body = {"data": [{"type": "builds", "id": build_id}]}
+          r = requests.post(
+              f"https://api.appstoreconnect.apple.com/v1/betaGroups/{group_id}/relationships/builds",
+              headers=headers, json=body)
+          print(f"Link build to group -> {r.status_code}")
+          if r.status_code not in (200, 201, 204):
+              print(r.text); sys.exit(1)
+          print("LINKED.")
+
+          # Confirm
+          r = requests.get(f"https://api.appstoreconnect.apple.com/v1/builds/{build_id}/betaGroups",
+                           headers=headers)
+          print(f"Post-link verify -> {r.status_code}")
+          print(json.dumps(r.json(), indent=2)[:1000])
+          PY
