@@ -37,7 +37,12 @@ enum HistoryImporter {
     /// where CloudKit had already synced the (empty) UserDefaults flag back
     /// to v3 from another device. Combined with the new empty-store
     /// recovery path in runIfNeeded.
-    private static let importVersion = 4
+    /// v0.3.5 bumped to 5 because the v0.3.3 fix only handled "store has zero
+    /// sessions" — a real device showed 17 stub sessions (rows with
+    /// importSourceID set but zero ExerciseInstance children) leftover from
+    /// older buggy parser runs. Combined with stub-session purge in
+    /// importMarkdown so dedup skips can't perpetuate the empty rows.
+    private static let importVersion = 5
 
     // MARK: - Public entry point
 
@@ -50,10 +55,18 @@ enum HistoryImporter {
 
         let counts = storeCounts(context: context)
         let storeIsEmpty = counts.sessions == 0
+        let stubCount = stubImportedSessionCount(context: context)
 
-        if doneVersion >= importVersion && !storeIsEmpty {
-            print("[HistoryImporter] already at v\(doneVersion) and store has \(counts.sessions) sessions, skipping")
+        // "Looks healthy" = at version, has sessions, AND no stub sessions
+        // (imported rows that have zero ExerciseInstance children). Stubs are
+        // the smoking gun of an earlier broken parser run; if any exist we
+        // need to redo the import.
+        if doneVersion >= importVersion && !storeIsEmpty && stubCount == 0 {
+            print("[HistoryImporter] already at v\(doneVersion), \(counts.sessions) sessions, no stubs — skipping")
             return
+        }
+        if stubCount > 0 {
+            print("[HistoryImporter] detected \(stubCount) stub sessions (imported but no children) — will purge and re-run")
         }
 
         // Empty-store recovery path: UserDefaults says we've imported, but
@@ -115,6 +128,63 @@ enum HistoryImporter {
         runIfNeeded(context: context)
     }
 
+    /// Nuclear option: delete every row that came from history.md — sessions,
+    /// instances, sets — then run the importer fresh. Used by the Debug
+    /// "Wipe & re-import" button. Live (non-imported) sessions are untouched.
+    /// Returns the number of imported sessions deleted.
+    @discardableResult
+    static func wipeAndReimport(context: ModelContext) throws -> Int {
+        let removed = try wipeImportedRows(context: context)
+        UserDefaults.standard.removeObject(forKey: importDoneKey)
+        runIfNeeded(context: context)
+        return removed
+    }
+
+    /// Delete every WorkoutSession with `importedFromHistory: true`. Cascades
+    /// to ExerciseInstance + LoggedSet via SwiftData relationship deletion if
+    /// configured; otherwise we walk children explicitly.
+    private static func wipeImportedRows(context: ModelContext) throws -> Int {
+        let sessions = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        var removed = 0
+        for session in sessions where session.importedFromHistory {
+            // Walk children defensively in case the relationship cascade isn't
+            // configured to delete on parent removal.
+            for inst in session.instances ?? [] {
+                for set in inst.sets ?? [] {
+                    context.delete(set)
+                }
+                context.delete(inst)
+            }
+            context.delete(session)
+            removed += 1
+        }
+        // Also delete Exercise rows that came purely from the seed and have no
+        // remaining instances after the wipe — otherwise re-import re-uses the
+        // existing names with stale dayTypeTags.
+        let exercises = (try? context.fetch(FetchDescriptor<Exercise>())) ?? []
+        for ex in exercises where ex.seededFromHistory {
+            let liveInstances = (ex.instances ?? []).filter { inst in
+                (inst.session?.importedFromHistory ?? false) == false
+            }
+            if liveInstances.isEmpty {
+                context.delete(ex)
+            }
+        }
+        try context.save()
+        print("[HistoryImporter] wiped \(removed) imported sessions")
+        return removed
+    }
+
+    /// Count sessions that claim to come from the import but have zero
+    /// ExerciseInstance children. These are the smoking-gun rows from earlier
+    /// buggy parser runs that shipped to real devices.
+    static func stubImportedSessionCount(context: ModelContext) -> Int {
+        let sessions = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        return sessions.filter {
+            $0.importedFromHistory && ($0.instances?.count ?? 0) == 0
+        }.count
+    }
+
     // MARK: - Markdown parser
 
     /// Parse the full history markdown into model rows and insert them.
@@ -130,7 +200,24 @@ enum HistoryImporter {
         }
 
         // 2. Look up which sessions have already been imported.
-        let existingSessions = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        var existingSessions = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+
+        // 2a. Purge stub imported sessions (rows with importSourceID set but
+        // zero exercise instances). These came from earlier buggy parser runs
+        // and would otherwise dedup-skip forever, leaving the user with a
+        // permanently empty history. Once we delete them the loop below will
+        // recreate them properly.
+        var stubsPurged = 0
+        for s in existingSessions where s.importedFromHistory && (s.instances?.count ?? 0) == 0 {
+            context.delete(s)
+            stubsPurged += 1
+        }
+        if stubsPurged > 0 {
+            print("[HistoryImporter] purged \(stubsPurged) stub imported sessions before re-import")
+            try context.save()
+            existingSessions = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        }
+
         let importedSourceIDs: Set<String> = Set(existingSessions.compactMap(\.importSourceID))
 
         var insertedSessions = 0

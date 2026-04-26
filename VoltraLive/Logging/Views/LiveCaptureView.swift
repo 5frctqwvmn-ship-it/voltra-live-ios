@@ -47,7 +47,7 @@ struct LiveCaptureView: View {
                     liveTiles
 
                     RestTimerView(
-                        anchor: lastSetCompletedAt,
+                        anchor: logging.restAnchor,
                         targetSeconds: restTargetBinding
                     )
 
@@ -346,8 +346,11 @@ struct LiveCaptureView: View {
         d == d.rounded() ? "\(Int(d))" : String(format: "%.1f", d)
     }
 
-    /// completedAt of the most recent set in the active instance, used as the
-    /// rest-timer anchor. nil before the first set is logged in this instance.
+    /// (Legacy fallback) completedAt of the most recent SwiftData LoggedSet in
+    /// the active instance. Kept around for diagnostic builds. The view now
+    /// reads `logging.restAnchor` directly because that source-of-truth is a
+    /// `@Published` and updates synchronously when the Vulture reports an idle
+    /// boundary (telemetry-driven rest start).
     private var lastSetCompletedAt: Date? {
         logging.activeInstance?.orderedSets.last?.completedAt
     }

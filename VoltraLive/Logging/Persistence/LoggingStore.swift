@@ -37,6 +37,15 @@ final class LoggingStore: ObservableObject {
     /// so the home view can pop the entire navigation stack back to root.
     /// Avoids the user being stranded on the (now-empty) capture screen.
     @Published var sessionExitTick: Int = 0
+    /// When the rest timer should anchor (count up from). Driven by:
+    ///   - Telemetry: when the Vulture reports an idle boundary (set ended on
+    ///     the device), we set this to that endedAt — so rest starts the
+    ///     instant the user racks the weight, BEFORE they tap Log.
+    ///   - Manual log: if the user logs without a telemetry boundary, we fall
+    ///     back to the moment they tapped Log so the timer at least starts.
+    /// Cleared at session start / instance change. The anchor persists across
+    /// the next set's logging so the user can see the actual rest duration.
+    @Published var restAnchor: Date? = nil
 
     // MARK: - Dependencies
 
@@ -73,6 +82,10 @@ final class LoggingStore: ObservableObject {
         // Only surface the latest — earlier ones were either logged or skipped.
         if let latest = sets.last {
             pendingTelemetrySet = latest
+            // The Vulture has reported a set boundary — start the rest timer
+            // NOW, anchored to the telemetry endedAt. This is the user's
+            // "weight reloaded after the set completes" trigger.
+            restAnchor = latest.endedAt
         }
         consumedSetCount = sets.count
     }
@@ -92,6 +105,7 @@ final class LoggingStore: ObservableObject {
         setNumberForCurrentInstance = 1
         sessionStore?.completedSets = []
         consumedSetCount = 0
+        restAnchor = nil
         try? ctx.save()
     }
 
@@ -108,6 +122,7 @@ final class LoggingStore: ObservableObject {
         setNumberForCurrentInstance = 1
         sessionStore?.completedSets = []
         consumedSetCount = 0
+        restAnchor = nil
         return result
     }
 
@@ -118,6 +133,7 @@ final class LoggingStore: ObservableObject {
         activeInstance = nil
         pendingTelemetrySet = nil
         setNumberForCurrentInstance = 1
+        restAnchor = nil
         try? ctx.save()
     }
 
@@ -138,6 +154,9 @@ final class LoggingStore: ObservableObject {
         activeInstance = instance
         setNumberForCurrentInstance = 1
         pendingPlannedWeightLb = nil
+        // New exercise = new rest baseline. The user just picked it; we don't
+        // want a stale anchor from the prior exercise's last set carrying over.
+        restAnchor = nil
 
         // Bump exercise recency.
         exercise.lastUsedAt = Date()
@@ -206,6 +225,15 @@ final class LoggingStore: ObservableObject {
         setNumberForCurrentInstance = order + 1
         pendingTelemetrySet = nil
         pendingPlannedWeightLb = nil
+        // Anchor the rest timer to this set's actual end. Prefer the
+        // telemetry-detected endedAt (the moment the Vulture went idle and
+        // "reloaded" the weight) over Date() (which is when the user finally
+        // tapped Log, possibly seconds later). If neither is available we
+        // anchor to now so manual flows still get a rest countdown.
+        // We DO overwrite any prior telemetry anchor here so each logged set
+        // resets the rest counter — the user wants to track time since the
+        // most recent set, not the first one in the instance.
+        restAnchor = endedAt ?? restAnchor ?? Date()
         try? ctx.save()
     }
 

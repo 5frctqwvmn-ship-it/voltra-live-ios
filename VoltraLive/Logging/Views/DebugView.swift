@@ -15,8 +15,10 @@ struct DebugView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var counts: (sessions: Int, exercises: Int, sets: Int, legTagged: Int) = (0, 0, 0, 0)
+    @State private var stubCount: Int = 0
     @State private var statusMessage: String = ""
     @State private var isWorking = false
+    @State private var showWipeConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -30,6 +32,7 @@ struct DebugView: View {
                             row("Exercises",  "\(counts.exercises)")
                             row("Logged sets", "\(counts.sets)")
                             row("Leg-tagged exercises", "\(counts.legTagged)")
+                            row("Stub imported sessions", "\(stubCount)")
                         }
 
                         section("ACTIONS") {
@@ -47,6 +50,14 @@ struct DebugView: View {
                                 tint: VoltraColor.accent
                             ) {
                                 forceReimport()
+                            }
+
+                            actionButton(
+                                title: "Wipe & re-import history",
+                                systemImage: "trash.slash",
+                                tint: VoltraColor.warn
+                            ) {
+                                showWipeConfirm = true
                             }
                         }
 
@@ -76,6 +87,12 @@ struct DebugView: View {
                 }
             }
             .onAppear { refreshCounts() }
+            .alert("Wipe imported history?", isPresented: $showWipeConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Wipe & re-import", role: .destructive) { wipeAndReimport() }
+            } message: {
+                Text("Deletes every session that came from history.md (live workouts you logged in the app are kept), then re-runs the importer from scratch. Use this if your history shows fewer sessions than you expect.")
+            }
         }
         .buildBadgeOverlay()
     }
@@ -84,6 +101,7 @@ struct DebugView: View {
 
     private func refreshCounts() {
         counts = HistoryImporter.storeCounts(context: context)
+        stubCount = HistoryImporter.stubImportedSessionCount(context: context)
         statusMessage = "Refreshed at \(timestamp())"
     }
 
@@ -96,12 +114,36 @@ struct DebugView: View {
                 try HistoryImporter.forceReimport(context: context)
                 let after = HistoryImporter.storeCounts(context: context)
                 counts = after
+                stubCount = HistoryImporter.stubImportedSessionCount(context: context)
                 statusMessage =
                     "Re-import done at \(timestamp())\n" +
                     "Sessions: \(after.sessions)  Exercises: \(after.exercises)\n" +
-                    "Sets: \(after.sets)  Leg-tagged: \(after.legTagged)"
+                    "Sets: \(after.sets)  Leg-tagged: \(after.legTagged)\n" +
+                    "Stubs: \(stubCount)"
             } catch {
                 statusMessage = "Re-import FAILED: \(error)"
+            }
+            isWorking = false
+        }
+    }
+
+    private func wipeAndReimport() {
+        guard !isWorking else { return }
+        isWorking = true
+        statusMessage = "Wiping imported rows and re-running importer…"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            do {
+                let wiped = try HistoryImporter.wipeAndReimport(context: context)
+                let after = HistoryImporter.storeCounts(context: context)
+                counts = after
+                stubCount = HistoryImporter.stubImportedSessionCount(context: context)
+                statusMessage =
+                    "Wiped \(wiped) imported sessions, re-imported at \(timestamp())\n" +
+                    "Sessions: \(after.sessions)  Exercises: \(after.exercises)\n" +
+                    "Sets: \(after.sets)  Leg-tagged: \(after.legTagged)\n" +
+                    "Stubs: \(stubCount)"
+            } catch {
+                statusMessage = "Wipe FAILED: \(error)"
             }
             isWorking = false
         }
