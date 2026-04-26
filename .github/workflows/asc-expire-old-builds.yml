@@ -36,6 +36,13 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
+      # When triggered automatically by a successful release, give Apple a few
+      # minutes to surface the just-uploaded build via the API. Without this
+      # wait the API may still return the previous build as 'newest', which
+      # would cause us to keep the old build and expire the new one.
+      - name: Wait for ASC to ingest the new build
+        if: github.event_name == 'workflow_run'
+        run: sleep 300
       - name: Expire all but the newest build(s)
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
