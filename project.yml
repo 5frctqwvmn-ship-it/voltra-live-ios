@@ -37,8 +37,10 @@ targets:
           - "**/*.md"
     resources:
       - path: VoltraLive/Assets.xcassets
-      - path: seed
-        type: folder
+      # NOTE: seed/history.md is also baked into the binary via
+      # VoltraLive/Logging/Import/HistorySeedData.swift as a primary source.
+      # The bundle copy is kept as a secondary fallback only.
+      - path: seed/history.md
     settings:
       base:
         PRODUCT_NAME: "VOLTRA Live"
@@ -54,8 +56,8 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         DEVELOPMENT_TEAM: "${APPLE_TEAM_ID:-}"
-        MARKETING_VERSION: "0.3.7"
-        CURRENT_PROJECT_VERSION: "14"
+        MARKETING_VERSION: "0.3.8"
+        CURRENT_PROJECT_VERSION: "15"
     dependencies:
       - sdk: CoreBluetooth.framework
       - sdk: CloudKit.framework
@@ -79,8 +81,8 @@ targets:
         UIUserInterfaceStyle: Dark
         CFBundleDisplayName: "VOLTRA Live"
         CFBundleName: "VoltraLive"
-        CFBundleShortVersionString: "0.3.7"
-        CFBundleVersion: "14"
+        CFBundleShortVersionString: "0.3.8"
+        CFBundleVersion: "15"
 
   VoltraLiveTests:
     type: bundle.unit-test

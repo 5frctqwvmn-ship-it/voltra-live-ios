@@ -143,22 +143,33 @@ enum HistoryImporter {
         Self.lastImportStats = ImportStats()
         Self.lastImportStats.startedAt = Date()
 
-        let url = Bundle.main.url(forResource: "history", withExtension: "md", subdirectory: "seed")
-            ?? Bundle.main.url(forResource: "history", withExtension: "md")
-        guard let url else {
-            Self.lastImportError = "seed/history.md missing in bundle"
-            print("[HistoryImporter] \(Self.lastImportError!)")
-            Self.lastImportStats.finishedAt = Date()
-            return
-        }
-
+        // v0.3.7 (build 14) revealed the actual root cause: seed/history.md
+        // was NOT in the app bundle. Builds 0–13 were running against an
+        // empty seed and the catch was swallowing the "missing in bundle"
+        // error invisibly. The fix is twofold:
+        //   1. Always prefer the baked-in HistorySeedData.markdown string
+        //      — it is compiled into the binary and CANNOT go missing.
+        //   2. Keep the bundle-resource lookup as a secondary path for
+        //      future-proofing, but never depend on it.
         let text: String
-        do {
-            text = try String(contentsOf: url, encoding: .utf8)
-                .replacingOccurrences(of: "\u{000C}", with: "\n")
-                .replacingOccurrences(of: "\u{000B}", with: "\n")
-        } catch {
-            Self.lastImportError = "Failed to read seed: \(error.localizedDescription)"
+        if !HistorySeedData.markdown.isEmpty {
+            text = HistorySeedData.markdown
+            print("[HistoryImporter] using baked-in seed (\(text.count) chars)")
+        } else if let url = Bundle.main.url(forResource: "history", withExtension: "md", subdirectory: "seed")
+            ?? Bundle.main.url(forResource: "history", withExtension: "md") {
+            do {
+                text = try String(contentsOf: url, encoding: .utf8)
+                    .replacingOccurrences(of: "\u{000C}", with: "\n")
+                    .replacingOccurrences(of: "\u{000B}", with: "\n")
+                print("[HistoryImporter] using bundled seed at \(url.lastPathComponent)")
+            } catch {
+                Self.lastImportError = "Failed to read seed: \(error.localizedDescription)"
+                print("[HistoryImporter] \(Self.lastImportError!)")
+                Self.lastImportStats.finishedAt = Date()
+                return
+            }
+        } else {
+            Self.lastImportError = "seed/history.md missing in bundle AND baked-in seed empty"
             print("[HistoryImporter] \(Self.lastImportError!)")
             Self.lastImportStats.finishedAt = Date()
             return
