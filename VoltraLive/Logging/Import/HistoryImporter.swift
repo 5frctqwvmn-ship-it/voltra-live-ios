@@ -42,7 +42,16 @@ enum HistoryImporter {
     /// importSourceID set but zero ExerciseInstance children) leftover from
     /// older buggy parser runs. Combined with stub-session purge in
     /// importMarkdown so dedup skips can't perpetuate the empty rows.
-    private static let importVersion = 5
+    /// v0.3.6 bumped to 6 because v0.3.5 finally exposed the real bug:
+    /// `try context.save()` was called ONCE at the end of importMarkdown,
+    /// committing every session+exercise+instance+set in a single CloudKit
+    /// batch. That exceeds the per-CKModifyRecordsOperation ceiling and
+    /// throws partway, leaving a partial commit (the user's 23-of-84
+    /// sessions, 2 exercises, 5 sets symptom). Fix: disable autosave +
+    /// save in batches of 10 sessions + final flush. Also pre-strip form
+    /// feeds and fix the inline-prose lookahead cursor that was eating
+    /// every other exercise.
+    private static let importVersion = 6
 
     // MARK: - Public entry point
 
@@ -102,7 +111,14 @@ enum HistoryImporter {
                 print("[HistoryImporter] seed/history.md missing in bundle — skipping")
                 return
             }
+            // Pre-strip PDF-export artefacts (form feed U+000C, vertical tab
+            // U+000B). They were causing ICU's multiline `^` to match
+            // session-headers Python's regex didn't see, AND were sneaking
+            // into the middle of exercise titles. Removing them up front
+            // makes parsing locale/engine-independent.
             let text = try String(contentsOf: url, encoding: .utf8)
+                .replacingOccurrences(of: "\u{000C}", with: "\n")
+                .replacingOccurrences(of: "\u{000B}", with: "\n")
             try importMarkdown(text, context: context)
             defaults.set(importVersion, forKey: importDoneKey)
             print("[HistoryImporter] Import complete (v\(importVersion))")
@@ -190,6 +206,16 @@ enum HistoryImporter {
     /// Parse the full history markdown into model rows and insert them.
     /// Visible (internal) for unit testing.
     static func importMarkdown(_ text: String, context: ModelContext) throws {
+        // CRITICAL: disable autosave during the import. With autosave on, the
+        // main run loop opportunistically flushes mid-loop — racing the explicit
+        // save() and forcing CloudKit to commit a partial batch. Combined with
+        // the per-CKModifyRecordsOperation ceiling on the synced container,
+        // that's how earlier builds ended up with 17 / 23 sessions instead of
+        // all 84. We restore the prior value when this function returns.
+        let priorAutosave = context.autosaveEnabled
+        context.autosaveEnabled = false
+        defer { context.autosaveEnabled = priorAutosave }
+
         let parsed = parse(text)
 
         // 1. Build / reuse Exercise rows keyed by name+equipment.
@@ -292,8 +318,21 @@ enum HistoryImporter {
             }
 
             insertedSessions += 1
+
+            // CRITICAL (the actual fix): commit in small batches so we never
+            // hand CloudKit more than ~30–40 records per save. A single
+            // gigantic save of all 84 sessions + their exercises/instances/
+            // sets exceeds the per-CKModifyRecordsOperation ceiling and
+            // throws partway, leaving the local store with whatever it had
+            // committed before the failure (the user's "23 sessions, 2
+            // exercises, 5 sets" symptom). 10 sessions per save keeps every
+            // batch comfortably below any known limit.
+            if insertedSessions % 10 == 0 {
+                try context.save()
+            }
         }
 
+        // Final flush for the trailing partial batch.
         try context.save()
         print("[HistoryImporter] Inserted \(insertedSessions) sessions; cache has \(exerciseCache.count) exercises")
     }
@@ -568,16 +607,27 @@ enum HistoryImporter {
             var bodyLines: [String] = []
             var look = i
             var nonEmptySeen = 0
+            // Track whether the line we stopped on is the *next* exercise's
+            // title (so we can rewind one step and let the outer loop re-pick
+            // it up). Without this rewind, sessions with multiple inline
+            // exercises had every other one silently dropped.
+            var stoppedOnNextTitle = false
             while look < lines.count, nonEmptySeen < 12 {
                 let t = lines[look].trimmingCharacters(in: .whitespaces)
-                look += 1
                 if t.isEmpty {
+                    look += 1
                     if !bodyLines.isEmpty { break }
                     continue
                 }
                 nonEmptySeen += 1
-                // Stop if we hit another title-like line.
-                if t.contains("(") && t.contains(")") && !bodyLines.isEmpty { break }
+                // Stop if we hit another title-like line. Crucially, do NOT
+                // advance `look` past it — we want the outer loop to reprocess
+                // this line as the next title.
+                if t.contains("(") && t.contains(")") && !bodyLines.isEmpty {
+                    stoppedOnNextTitle = true
+                    break
+                }
+                look += 1
                 if isMetadataLine(t) { continue }
                 bodyLines.append(t)
             }
@@ -612,7 +662,11 @@ enum HistoryImporter {
                 ex.sets.append(set)
             }
             if !ex.sets.isEmpty { exercises.append(ex) }
+            // Resume the outer loop at `look` — if we stopped on the next
+            // title we deliberately did not advance past it, so the next
+            // outer iteration picks it up as a new exercise header.
             i = look
+            _ = stoppedOnNextTitle  // silence “unused” — kept for clarity above
         }
         return exercises
     }
