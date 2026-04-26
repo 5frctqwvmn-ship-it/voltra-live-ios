@@ -23,6 +23,19 @@ struct LiveCaptureView: View {
     @State private var showingExportSheet = false
     @State private var lastEndedSession: WorkoutSession? = nil
 
+    /// Persisted target rest in seconds. nil = off. Persists across launches.
+    @AppStorage("voltra.restTargetSeconds") private var restTargetRaw: Int = 90
+    /// We use 0 as the sentinel for "off" in @AppStorage since it can't store
+    /// nil directly. Wrap that as Int? for the timer view.
+    private var restTargetBinding: Binding<Int?> {
+        Binding(
+            get: { restTargetRaw <= 0 ? nil : restTargetRaw },
+            set: { restTargetRaw = $0 ?? 0 }
+        )
+    }
+
+
+
     var body: some View {
         ZStack {
             VoltraColor.bg.ignoresSafeArea()
@@ -32,6 +45,11 @@ struct LiveCaptureView: View {
                     header
 
                     liveTiles
+
+                    RestTimerView(
+                        anchor: lastSetCompletedAt,
+                        targetSeconds: restTargetBinding
+                    )
 
                     setsList
 
@@ -73,7 +91,13 @@ struct LiveCaptureView: View {
         } message: {
             Text("This will save all logged sets and stop recording.")
         }
-        .sheet(isPresented: $showingExportSheet) {
+        .sheet(isPresented: $showingExportSheet, onDismiss: {
+            // Session is over — ask the home view to pop the whole nav stack
+            // back to root so the user can pick a new day or exit. Without
+            // this they're stranded on a stale capture screen.
+            lastEndedSession = nil
+            logging.sessionExitTick &+= 1
+        }) {
             if let s = lastEndedSession {
                 ExportSheet(session: s)
                     .environmentObject(logging)
@@ -320,6 +344,12 @@ struct LiveCaptureView: View {
 
     private func formatLb(_ d: Double) -> String {
         d == d.rounded() ? "\(Int(d))" : String(format: "%.1f", d)
+    }
+
+    /// completedAt of the most recent set in the active instance, used as the
+    /// rest-timer anchor. nil before the first set is logged in this instance.
+    private var lastSetCompletedAt: Date? {
+        logging.activeInstance?.orderedSets.last?.completedAt
     }
 }
 

@@ -79,6 +79,13 @@ struct LoggingHomeView: View {
             .navigationDestination(item: $pickedDayType) { dt in
                 ExercisePickerView(dayType: dt)
             }
+            // After the user finishes a session and dismisses the export
+            // sheet, LiveCaptureView bumps logging.sessionExitTick. Pop the
+            // entire navigation stack back to root here so the user lands on
+            // the day-picker home and isn't stranded on a stale capture view.
+            .onChange(of: logging.sessionExitTick) { _, _ in
+                pickedDayType = nil
+            }
             .navigationDestination(isPresented: $showingDashboard) {
                 DashboardView()
             }

@@ -3,11 +3,14 @@
 // a Share button so they can paste into Notes / Notion / send to themselves.
 
 import SwiftUI
+import SwiftData
 
 struct ExportSheet: View {
     let session: WorkoutSession
     @EnvironmentObject var logging: LoggingStore
     @Environment(\.dismiss) private var dismiss
+
+    @Environment(\.modelContext) private var context
 
     @State private var markdown: String = ""
     @State private var showingCopiedToast = false
@@ -48,7 +51,10 @@ struct ExportSheet: View {
                 }
             }
             .onAppear {
-                markdown = logging.markdownExport(for: session, sessionNumber: estimatedSessionNumber())
+                markdown = logging.markdownExport(
+                    for: session,
+                    sessionNumber: estimatedSessionNumber(context: context)
+                )
             }
         }
         .presentationDetents([.large])
@@ -90,10 +96,13 @@ struct ExportSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    /// Best-effort numbering for the markdown header. Counts how many imported
-    /// + non-imported sessions exist before this one.
-    private func estimatedSessionNumber() -> Int {
-        // Without an explicit query here, fall back to a stable date-based n.
-        return 89  // First user-logged session lands at #89 (after the imported 88).
+    /// Best-effort numbering for the markdown header. Counts how many
+    /// sessions (imported + user-logged) started on or before this one and
+    /// uses that as the session ordinal. Falls back to total count if the
+    /// fetch fails.
+    private func estimatedSessionNumber(context: ModelContext) -> Int {
+        let all = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        let earlierOrSame = all.filter { $0.startedAt <= session.startedAt }.count
+        return max(earlierOrSame, 1)
     }
 }

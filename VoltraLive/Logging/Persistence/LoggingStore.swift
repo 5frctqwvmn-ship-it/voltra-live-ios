@@ -33,6 +33,10 @@ final class LoggingStore: ObservableObject {
     /// for the upcoming set. Read by SetLogView at prefill time and cleared
     /// after each set is logged.
     @Published var pendingPlannedWeightLb: Double? = nil
+    /// Bumped each time the user fully exits the post-session export sheet,
+    /// so the home view can pop the entire navigation stack back to root.
+    /// Avoids the user being stranded on the (now-empty) capture screen.
+    @Published var sessionExitTick: Int = 0
 
     // MARK: - Dependencies
 

@@ -33,7 +33,11 @@ enum HistoryImporter {
     /// v0.3.1 bumped to 3 because real-device installs of build 6/7 ended up
     /// with empty history (importer marked done but no sessions/exercises
     /// inserted) — re-run unconditionally on next launch to recover.
-    private static let importVersion = 3
+    /// v0.3.3 bumped to 4 because v0.3.1's bump didn't fully take on devices
+    /// where CloudKit had already synced the (empty) UserDefaults flag back
+    /// to v3 from another device. Combined with the new empty-store
+    /// recovery path in runIfNeeded.
+    private static let importVersion = 4
 
     // MARK: - Public entry point
 
@@ -43,10 +47,39 @@ enum HistoryImporter {
     static func runIfNeeded(context: ModelContext) {
         let defaults = UserDefaults.standard
         let doneVersion = defaults.integer(forKey: importDoneKey)
-        if doneVersion >= importVersion {
-            print("[HistoryImporter] already at v\(doneVersion), skipping")
+
+        let counts = storeCounts(context: context)
+        let storeIsEmpty = counts.sessions == 0
+
+        if doneVersion >= importVersion && !storeIsEmpty {
+            print("[HistoryImporter] already at v\(doneVersion) and store has \(counts.sessions) sessions, skipping")
             return
         }
+
+        // Empty-store recovery path: UserDefaults says we've imported, but
+        // SwiftData has zero sessions. Could be (a) genuinely lost data, or
+        // (b) CloudKit hasn't replicated yet on a freshly-installed device.
+        // Wait 6 seconds and re-check before re-importing to avoid creating
+        // duplicates that CloudKit will then conflict-merge with the
+        // already-synced rows.
+        if storeIsEmpty && doneVersion >= importVersion {
+            print("[HistoryImporter] doneVersion=\(doneVersion) but store is EMPTY — waiting 6s for CloudKit")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                let recheck = storeCounts(context: context)
+                if recheck.sessions == 0 {
+                    print("[HistoryImporter] still empty after CloudKit window — forcing re-import")
+                    do {
+                        try forceReimport(context: context)
+                    } catch {
+                        print("[HistoryImporter] recovery re-import FAILED: \(error)")
+                    }
+                } else {
+                    print("[HistoryImporter] CloudKit populated \(recheck.sessions) sessions, no re-import needed")
+                }
+            }
+            return
+        }
+
         print("[HistoryImporter] running (current v\(doneVersion) -> target v\(importVersion))")
 
         do {
