@@ -30,7 +30,10 @@ enum HistoryImporter {
     /// Bump this whenever parser logic changes OR we want to force re-import on
     /// the next launch. v0.2.2 bumped to 2 to recover from v0.2.0/v0.2.1 stores
     /// that ended up with no leg-day exercises tagged on real devices.
-    private static let importVersion = 2
+    /// v0.3.1 bumped to 3 because real-device installs of build 6/7 ended up
+    /// with empty history (importer marked done but no sessions/exercises
+    /// inserted) — re-run unconditionally on next launch to recover.
+    private static let importVersion = 3
 
     // MARK: - Public entry point
 
