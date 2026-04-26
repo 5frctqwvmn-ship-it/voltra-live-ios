@@ -17,18 +17,35 @@ import XCTest
 final class HistoryImporterTests: XCTestCase {
 
     private func loadBundledHistory() throws -> String {
-        let bundle = Bundle(for: HistoryImporterTests.self)
-        // Test bundle hosts inside the app bundle for resources, so try main
-        // bundle first then fall back.
-        let url = Bundle.main.url(forResource: "history", withExtension: "md", subdirectory: "seed")
-              ?? Bundle.main.url(forResource: "history", withExtension: "md")
-              ?? bundle.url(forResource: "history", withExtension: "md", subdirectory: "seed")
-              ?? bundle.url(forResource: "history", withExtension: "md")
-        guard let url else {
-            XCTFail("seed/history.md not found in any bundle")
-            throw NSError(domain: "test", code: 1)
+        // Try every reasonable lookup path. Tests may run with or without a
+        // proper test host bundle depending on the CI scheme.
+        let testBundle = Bundle(for: HistoryImporterTests.self)
+        let candidates: [URL?] = [
+            Bundle.main.url(forResource: "history", withExtension: "md", subdirectory: "seed"),
+            Bundle.main.url(forResource: "history", withExtension: "md"),
+            testBundle.url(forResource: "history", withExtension: "md", subdirectory: "seed"),
+            testBundle.url(forResource: "history", withExtension: "md"),
+            // Fallback: walk up from the test source file location.
+            sourceRelativeURL(),
+        ]
+        for case let url? in candidates {
+            if let text = try? String(contentsOf: url, encoding: .utf8) {
+                return text
+            }
         }
-        return try String(contentsOf: url, encoding: .utf8)
+        XCTFail("seed/history.md not found in any bundle or source path")
+        throw NSError(domain: "test", code: 1)
+    }
+
+    /// Locate seed/history.md by walking up from the source file path.
+    /// Compiled-in #file gives us the absolute path on the build machine.
+    private func sourceRelativeURL(file: StaticString = #filePath) -> URL? {
+        let src = URL(fileURLWithPath: "\(file)")
+        // src = .../VoltraLiveTests/HistoryImporterTests.swift
+        // repo root = src/../..
+        let repoRoot = src.deletingLastPathComponent().deletingLastPathComponent()
+        let url = repoRoot.appendingPathComponent("seed/history.md")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     func testParsesAllSessionsFromBundledHistory() throws {
