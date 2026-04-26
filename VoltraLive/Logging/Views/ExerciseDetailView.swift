@@ -471,10 +471,15 @@ struct ExerciseDetailView: View {
 
     private var lastSessionSummary: String {
         guard let last = previousSeries.first else { return "—" }
-        let date = last.instance?.session?.startedAt
-            .map { RelativeDateTimeFormatter().localizedString(for: $0, relativeTo: Date()) }
-            ?? ""
-        return "\(formatLb(last.weightLb)) lb × \(last.reps) \(date)"
+        let dateStr: String
+        if let started = last.instance?.session?.startedAt {
+            let f = RelativeDateTimeFormatter()
+            f.unitsStyle = .short
+            dateStr = f.localizedString(for: started, relativeTo: Date())
+        } else {
+            dateStr = ""
+        }
+        return "\(formatLb(last.weightLb)) lb × \(last.reps) \(dateStr)"
     }
 
     private func lastMatchingSetSummary(_ last: LoggedSet?) -> String {
