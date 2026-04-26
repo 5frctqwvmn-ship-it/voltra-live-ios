@@ -302,7 +302,20 @@ final class LoggedSet {
     var eccentricLb: Double? = nil
     var reps: Int = 0
     /// Manual chains entry — pounds of added chain weight.
+    /// Retained for back-compat with v0.3.x rows and history.md imports.
+    /// New code should prefer `addedLoadLb` + `addedLoadType` which generalize
+    /// this to any external load (chains, plates on a Voltra harness, weighted
+    /// vest, accommodating band, etc.).
     var chainsLb: Double? = nil
+
+    /// v0.4.0: generalized "non-Voltra weight added to this set" in lb.
+    /// Combined with `addedLoadType` to render UI like "+45 lb chains".
+    /// Optional + nil-safe so the SwiftData migration is additive.
+    var addedLoadLb: Double? = nil
+    /// v0.4.0: free-form type tag for the added load. Stored as String so we
+    /// can extend the set of valid values without a model migration. Common
+    /// values: "chains", "plates", "vest", "band", "other".
+    var addedLoadType: String? = nil
     /// Voltra control-frame additions (v0.3 prototype port).
     /// All optional w/ defaults so the SwiftData migration is additive and
     /// safe to land mid-CloudKit-rollout: existing rows decode with nil/false
@@ -351,6 +364,8 @@ final class LoggedSet {
         inverseChains: Bool = false,
         damperLevel: Int? = nil,
         bandMaxForceLb: Double? = nil,
+        addedLoadLb: Double? = nil,
+        addedLoadType: String? = nil,
         instance: ExerciseInstance? = nil
     ) {
         self.id = id
@@ -372,6 +387,8 @@ final class LoggedSet {
         self.inverseChains = inverseChains
         self.damperLevel = damperLevel
         self.bandMaxForceLb = bandMaxForceLb
+        self.addedLoadLb = addedLoadLb
+        self.addedLoadType = addedLoadType
         self.instance = instance
     }
 

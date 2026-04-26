@@ -73,6 +73,7 @@ struct ExerciseDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     historyStrip
+                    progressChart
                     modeSection
                     modifiersAndSteppers
                     targetSection
@@ -106,6 +107,20 @@ struct ExerciseDetailView: View {
 
     private var navTitle: String {
         logging.activeInstance?.exercise?.name ?? "Exercise"
+    }
+
+    // v0.4.0 — Per-exercise progress chart, sample-fallback when empty so a
+    // first-time user still sees the shape. Sits between the history strip
+    // and the mode picker per research recommendation.
+    private var progressChart: some View {
+        let history: [LoggedSet]
+        if let ex = logging.activeInstance?.exercise {
+            history = logging.historicalSets(for: ex)
+        } else {
+            history = []
+        }
+        let realPoints = ProgressChartView.points(fromSeries: history)
+        return ProgressChartView(series: realPoints)
     }
 
     private var historyStrip: some View {
@@ -345,16 +360,30 @@ struct ExerciseDetailView: View {
 
     private var startButton: some View {
         Button {
-            // Stash the planned weight so SetLogView prefills weight + ecc.
-            // For non-weight modes we pass the dominant load (band max-force
-            // or damper has no lb anchor — use 0).
+            // v0.4.0 — plumb the FULL upcoming-set context into LoggingStore so
+            // when telemetry detects the set boundary, autoLogTelemetrySet()
+            // can build a complete LoggedSet without any user prompt.
             switch mode {
             case .weight:
                 logging.pendingPlannedWeightLb = Double(baseLb)
+                logging.upcomingMode = eccentric ? .eccentric : .working
+                logging.upcomingEccLb = eccentric ? Double(eccLb) : 0
             case .band:
                 logging.pendingPlannedWeightLb = Double(bandMaxForceLb)
+                logging.upcomingMode = .band
+                logging.upcomingEccLb = 0
             case .damper:
                 logging.pendingPlannedWeightLb = nil
+                logging.upcomingMode = .standard
+                logging.upcomingEccLb = 0
+            }
+            logging.upcomingTargetReps = targetReps
+            // Chains/inverse from this screen carry into the upcoming set as
+            // an added-load entry (chains type, with sign captured by
+            // inverseChains via the modifier toggles in LiveCapture).
+            if (chains || inverse) && chainsLb > 0 {
+                logging.upcomingAddedLoadLb = Double(chainsLb)
+                logging.upcomingAddedLoadType = inverse ? "inverse_chains" : "chains"
             }
             navigateToCapture = true
         } label: {

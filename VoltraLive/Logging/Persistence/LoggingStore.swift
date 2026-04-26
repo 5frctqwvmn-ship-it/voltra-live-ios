@@ -33,6 +33,25 @@ final class LoggingStore: ObservableObject {
     /// for the upcoming set. Read by SetLogView at prefill time and cleared
     /// after each set is logged.
     @Published var pendingPlannedWeightLb: Double? = nil
+
+    // MARK: - v0.4.0: Upcoming-set context (drives auto-log on telemetry)
+    //
+    // These fields hold the user's CURRENTLY-CONFIGURED next-set plan, set
+    // from ExerciseDetailView and live-edited inline on LiveCaptureView via
+    // ±1/±5 nudges. When SessionStore reports a telemetry-detected set
+    // boundary, autoLogTelemetrySet() snapshots these into a new LoggedSet
+    // (with telemetry reps + peak force overlaid) and clears them only as
+    // appropriate (added load PERSISTS across sets in the same instance;
+    // weight/ecc/mode are reused too so the user sees a hot prefill until
+    // they nudge it).
+    @Published var upcomingMode: SetMode = .working
+    @Published var upcomingEccLb: Double = 0
+    @Published var upcomingTargetReps: Int = 0
+    /// Generalized non-Voltra added load. Persists across sets in the
+    /// active instance — you don't usually re-rack chains between sets.
+    /// Reset to nil on `pickExercise`.
+    @Published var upcomingAddedLoadLb: Double? = nil
+    @Published var upcomingAddedLoadType: String? = nil
     /// Bumped each time the user fully exits the post-session export sheet,
     /// so the home view can pop the entire navigation stack back to root.
     /// Avoids the user being stranded on the (now-empty) capture screen.
@@ -79,15 +98,131 @@ final class LoggingStore: ObservableObject {
             return
         }
         guard sets.count > consumedSetCount else { return }
-        // Only surface the latest — earlier ones were either logged or skipped.
-        if let latest = sets.last {
-            pendingTelemetrySet = latest
-            // The Vulture has reported a set boundary — start the rest timer
-            // NOW, anchored to the telemetry endedAt. This is the user's
-            // "weight reloaded after the set completes" trigger.
-            restAnchor = latest.endedAt
+        // v0.4.0: auto-log every newly-detected telemetry set. The user no
+        // longer confirms via SetLogView — it's logged immediately with the
+        // upcoming-set context (weight/ecc/mode/added-load) overlaid by
+        // telemetry reps + peak force. They can tap a row to edit or swipe
+        // to delete (with undo).
+        let newOnes = sets[consumedSetCount..<sets.count]
+        for telemetrySet in newOnes {
+            autoLogTelemetrySet(telemetrySet)
         }
         consumedSetCount = sets.count
+    }
+
+    /// v0.4.0: snapshot the current upcoming-set plan into a real LoggedSet,
+    /// overlay telemetry reps + peak force, persist immediately. Triggered by
+    /// `handleCompletedSetsUpdate` when the Vulture reports an idle boundary.
+    /// No SetLogView prompt — the user can edit the row inline if they want.
+    func autoLogTelemetrySet(_ telemetry: CompletedSet) {
+        guard let ctx = modelContext, let instance = activeInstance else { return }
+        let order = (instance.sets?.count ?? 0) + 1
+        let weight = pendingPlannedWeightLb ?? 0
+        let ecc = upcomingEccLb > 0 ? upcomingEccLb : nil
+        let reps = telemetry.reps  // telemetry-overridden
+        let logged = LoggedSet(
+            completedAt: Date(),
+            startedAt: telemetry.startedAt,
+            endedAt: telemetry.endedAt,
+            orderIndex: order,
+            weightLb: weight,
+            eccentricLb: ecc,
+            reps: reps,
+            chainsLb: nil,
+            peakForceLb: telemetry.peakLb,
+            avgForceLb: nil,
+            mode: upcomingMode,
+            labelText: upcomingMode.label,
+            notes: nil,
+            autofilledFromTelemetry: true,
+            importedFromHistory: false,
+            inverseChains: false,
+            damperLevel: nil,
+            bandMaxForceLb: nil,
+            addedLoadLb: upcomingAddedLoadLb,
+            addedLoadType: upcomingAddedLoadType,
+            instance: instance
+        )
+        ctx.insert(logged)
+        setNumberForCurrentInstance = order + 1
+        // Anchor REST so any legacy consumers still work; the new
+        // LiveCaptureView reads SessionStore.restActive directly anyway.
+        restAnchor = telemetry.endedAt
+        // Clear the one-shot pending-set indicator so any old code paths
+        // that still react to it stop showing the SetLogView sheet.
+        pendingTelemetrySet = nil
+        try? ctx.save()
+    }
+
+    /// v0.4.0: tap-to-edit on a logged-set row. Apply user-edited values to
+    /// an existing LoggedSet and persist.
+    func updateLoggedSet(
+        _ set: LoggedSet,
+        weightLb: Double,
+        eccentricLb: Double?,
+        reps: Int,
+        addedLoadLb: Double?,
+        addedLoadType: String?,
+        mode: SetMode,
+        notes: String?
+    ) {
+        set.weightLb = weightLb
+        set.eccentricLb = eccentricLb
+        set.reps = reps
+        set.addedLoadLb = addedLoadLb
+        set.addedLoadType = addedLoadType
+        set.mode = mode
+        set.labelText = mode.label
+        set.notes = notes
+        try? modelContext?.save()
+    }
+
+    /// v0.4.0: swipe-to-delete on a logged-set row. Returns a snapshot for the
+    /// undo toast; call `restoreDeletedSet` within ~5 seconds to put it back.
+    func deleteLoggedSet(_ set: LoggedSet) -> DeletedSetSnapshot? {
+        guard let ctx = modelContext, let inst = set.instance else { return nil }
+        let snap = DeletedSetSnapshot(set: set, instance: inst)
+        ctx.delete(set)
+        // Renumber remaining sets in this instance so orderIndex stays 1..N.
+        let remaining = inst.orderedSets
+        for (i, s) in remaining.enumerated() { s.orderIndex = i + 1 }
+        setNumberForCurrentInstance = (inst.sets?.count ?? 0) + 1
+        try? ctx.save()
+        return snap
+    }
+
+    /// v0.4.0: restore a snapshot from `deleteLoggedSet`. Recreates the row
+    /// at the end of its instance — the user's undoing a delete, exact
+    /// position isn't critical.
+    func restoreDeletedSet(_ snap: DeletedSetSnapshot) {
+        guard let ctx = modelContext else { return }
+        let order = (snap.instance.sets?.count ?? 0) + 1
+        let revived = LoggedSet(
+            completedAt: snap.completedAt,
+            startedAt: snap.startedAt,
+            endedAt: snap.endedAt,
+            orderIndex: order,
+            weightLb: snap.weightLb,
+            eccentricLb: snap.eccentricLb,
+            reps: snap.reps,
+            chainsLb: snap.chainsLb,
+            peakForceLb: snap.peakForceLb,
+            avgForceLb: snap.avgForceLb,
+            mode: snap.mode,
+            labelText: snap.labelText,
+            notes: snap.notes,
+            autofilledFromTelemetry: snap.autofilledFromTelemetry,
+            importedFromHistory: snap.importedFromHistory,
+            inverseChains: snap.inverseChains,
+            damperLevel: snap.damperLevel,
+            bandMaxForceLb: snap.bandMaxForceLb,
+            addedLoadLb: snap.addedLoadLb,
+            addedLoadType: snap.addedLoadType,
+            instance: snap.instance
+        )
+        ctx.insert(revived)
+        setNumberForCurrentInstance = order + 1
+        try? ctx.save()
     }
 
     // MARK: - Session lifecycle
@@ -157,6 +292,15 @@ final class LoggingStore: ObservableObject {
         // New exercise = new rest baseline. The user just picked it; we don't
         // want a stale anchor from the prior exercise's last set carrying over.
         restAnchor = nil
+        // v0.4.0 — sync our consumed-set marker to whatever SessionStore is
+        // already holding so the FIRST telemetry-detected set on this new
+        // instance actually fires `handleCompletedSetsUpdate` (the previous
+        // bug: stale consumedSetCount left over from the prior exercise meant
+        // sets.count > consumedSetCount was false on instance #1's first set).
+        consumedSetCount = sessionStore?.completedSets.count ?? 0
+        // v0.4.0 — added-load is per-instance. New exercise, fresh start.
+        upcomingAddedLoadLb = nil
+        upcomingAddedLoadType = nil
 
         // Bump exercise recency.
         exercise.lastUsedAt = Date()
@@ -278,6 +422,24 @@ final class LoggingStore: ObservableObject {
         )
     }
 
+    /// v0.4.0: ALL logged sets for an exercise across all prior sessions
+    /// (excluding the active one). Drives the per-exercise progress chart on
+    /// ExerciseDetailView. Includes imported-from-history rows so the chart
+    /// reflects the user's full baseline. Sorted oldest → newest.
+    func historicalSets(for exercise: Exercise) -> [LoggedSet] {
+        let instances = (exercise.instances ?? []).filter { inst in
+            guard let s = inst.session else { return false }
+            if let active = activeSession, s.id == active.id { return false }
+            return s.endedAt != nil || s.importedFromHistory
+        }
+        let allSets = instances.flatMap { $0.sets ?? [] }
+        return allSets.sorted { (a, b) in
+            let aDate = a.instance?.session?.startedAt ?? a.completedAt
+            let bDate = b.instance?.session?.startedAt ?? b.completedAt
+            return aDate < bDate
+        }
+    }
+
     /// Sets the user has already logged in the *active* instance, in order.
     /// Empty before the first set is logged.
     func currentInstanceSets() -> [LoggedSet] {
@@ -365,5 +527,56 @@ private extension String {
     func padded(_ n: Int) -> String {
         if count >= n { return self }
         return self + String(repeating: " ", count: n - count)
+    }
+}
+
+// MARK: - DeletedSetSnapshot (undo support)
+
+/// Lightweight value-type snapshot of a LoggedSet captured at delete time so
+/// the user can undo. We can't keep the SwiftData model alive after delete,
+/// so we copy the fields out and recreate on restore.
+struct DeletedSetSnapshot {
+    let completedAt: Date
+    let startedAt: Date?
+    let endedAt: Date?
+    let weightLb: Double
+    let eccentricLb: Double?
+    let reps: Int
+    let chainsLb: Double?
+    let peakForceLb: Double
+    let avgForceLb: Double?
+    let mode: SetMode
+    let labelText: String
+    let notes: String?
+    let autofilledFromTelemetry: Bool
+    let importedFromHistory: Bool
+    let inverseChains: Bool
+    let damperLevel: Int?
+    let bandMaxForceLb: Double?
+    let addedLoadLb: Double?
+    let addedLoadType: String?
+    let instance: ExerciseInstance
+
+    init(set: LoggedSet, instance: ExerciseInstance) {
+        self.completedAt = set.completedAt
+        self.startedAt = set.startedAt
+        self.endedAt = set.endedAt
+        self.weightLb = set.weightLb
+        self.eccentricLb = set.eccentricLb
+        self.reps = set.reps
+        self.chainsLb = set.chainsLb
+        self.peakForceLb = set.peakForceLb
+        self.avgForceLb = set.avgForceLb
+        self.mode = set.mode
+        self.labelText = set.labelText
+        self.notes = set.notes
+        self.autofilledFromTelemetry = set.autofilledFromTelemetry
+        self.importedFromHistory = set.importedFromHistory
+        self.inverseChains = set.inverseChains
+        self.damperLevel = set.damperLevel
+        self.bandMaxForceLb = set.bandMaxForceLb
+        self.addedLoadLb = set.addedLoadLb
+        self.addedLoadType = set.addedLoadType
+        self.instance = instance
     }
 }
