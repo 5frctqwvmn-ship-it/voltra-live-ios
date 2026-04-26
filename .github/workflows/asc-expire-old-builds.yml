@@ -88,6 +88,9 @@ jobs:
               params = None  # next URL already encodes params
 
           print(f"Total builds returned: {len(builds)}")
+          for b in builds:
+              a = b.get("attributes", {})
+              print(f"  ALL: id={b['id']} v={a.get('version')} expired={a.get('expired')} state={a.get('processingState')} uploaded={a.get('uploadedDate')}")
 
           # Build a quick lookup from preReleaseVersion id -> version string
           included = {(i["type"], i["id"]): i for i in (j.get("included") or [])}
