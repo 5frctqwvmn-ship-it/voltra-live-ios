@@ -13,6 +13,7 @@
 import XCTest
 @testable import VoltraLive
 
+@MainActor
 final class HistoryImporterTests: XCTestCase {
 
     private func loadBundledHistory() throws -> String {
