@@ -302,13 +302,15 @@ struct LiveCaptureView: View {
                 label: "HEART RATE",
                 value: health.currentHR.map { String($0) } ?? "\u{2014}",
                 unit: health.currentHR != nil ? "BPM" : nil,
-                color: VoltraColor.danger
+                color: VoltraColor.danger,
+                freshnessIndicator: .some(health.lastHRSampleAt)
             )
             tile(
                 label: "KCAL",
                 value: health.sessionKcal > 0 ? String(Int(health.sessionKcal.rounded())) : "\u{2014}",
                 unit: health.sessionKcal > 0 ? "kcal" : nil,
-                color: VoltraColor.accent
+                color: VoltraColor.accent,
+                freshnessIndicator: .some(health.lastKcalSampleAt)
             )
         }
     }
@@ -612,12 +614,22 @@ struct LiveCaptureView: View {
         }
     }
 
-    private func tile(label: String, value: String, unit: String? = nil, color: Color, subline: String? = nil) -> some View {
+    /// `freshnessIndicator` (build 30): when set, renders a small PulseDot
+    /// next to the label that pulses green while data is fresh and fades
+    /// to grey when stale. Used by the HR and kcal tiles to show whether
+    /// HealthKit is actively streaming samples from the paired Watch.
+    private func tile(label: String, value: String, unit: String? = nil, color: Color, subline: String? = nil, freshnessIndicator: Date?? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.system(size: 10, weight: .bold))
-                .kerning(1.5)
-                .foregroundColor(VoltraColor.textDim)
+            HStack(spacing: 6) {
+                Text(label)
+                    .font(.system(size: 10, weight: .bold))
+                    .kerning(1.5)
+                    .foregroundColor(VoltraColor.textDim)
+                if let last = freshnessIndicator {
+                    PulseDot(lastSampleAt: last)
+                }
+                Spacer(minLength: 0)
+            }
             HStack(alignment: .lastTextBaseline, spacing: 4) {
                 Text(value)
                     .font(.system(size: 32, weight: .bold, design: .monospaced))

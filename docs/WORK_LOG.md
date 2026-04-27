@@ -147,3 +147,52 @@ points at it.
   cancels, unchanged.
 - **Next step:** Commit the fix + version bump, push, trigger dry-run,
   then move to HealthKit live HR/kcal streaming (build-30 priority #2).
+
+---
+
+## 2026-04-27 14:25 PDT — HealthKit live streaming + PulseDot freshness indicator (build 30)
+
+- **Goal:** Build 30 priority #2 (live HR streaming) + #3 (live kcal
+  streaming) + #4 (PulseDot fresh-data indicator). User confirmed they
+  start an Apple Workout app session on the Watch before each VOLTRA
+  session, so HR + active-energy samples ARE being written to the shared
+  HealthKit store; the iPhone just isn't being woken to read them.
+- **Root cause:** `HealthKitStore` had `HKAnchoredObjectQuery` with
+  `updateHandler` set up correctly, but without `enableBackgroundDelivery`
+  the system doesn't reliably wake the iPhone process for samples written
+  by the paired Watch. The initial seed callback fires (the user's
+  observed snapshot), then no further updates arrive.
+- **Fix:** Added `enableBackgroundDeliveryForTypes()` called once after
+  authorization succeeds and on every `start()` (idempotent). Calls
+  `store.enableBackgroundDelivery(for:frequency: .immediate)` for both
+  `.heartRate` and `.activeEnergyBurned`. The existing anchored-query
+  pipeline is unchanged otherwise.
+- **PulseDot:** New SwiftUI view at
+  `VoltraLive/Logging/Views/PulseDot.swift`. Pulses green at ~1.4 Hz while
+  data is fresh (≤8s since last sample), fades to faint grey when stale
+  or never. TimelineView ticks 4×/s so no host redraw needed. Pure view,
+  no env deps.
+- **Wiring:** `HealthKitStore` gained two new @Published timestamps:
+  `lastHRSampleAt` and `lastKcalSampleAt`, set inside the existing
+  `handleHRSamples` / `handleKcalSamples` callbacks. The `tile()` helper
+  in `LiveCaptureView` got a new optional `freshnessIndicator: Date??`
+  parameter (double-optional so omission means "no dot", `.some(nil)`
+  means "show dot in stale state"). HR + KCAL tiles pass the respective
+  store timestamps.
+- **Files changed:**
+  - `VoltraLive/Health/HealthKitStore.swift` — `enableBackgroundDeliveryForTypes`,
+    `lastHRSampleAt`, `lastKcalSampleAt`, comments updated.
+  - `VoltraLive/Logging/Views/PulseDot.swift` — NEW file.
+  - `VoltraLive/Logging/Views/LiveCaptureView.swift` — `tile()` gains
+    `freshnessIndicator` param; HR + KCAL tile call sites pass it.
+- **Verification:** Static review only (no Mac). Will trigger a release.yml
+  dry-run after commit. The risk surface is small: background delivery
+  has been HealthKit-stable since iOS 8, and PulseDot is a leaf view.
+- **Risks:** (a) If the user has denied HealthKit auth, `enableBackgroundDelivery`
+  succeeds-no-op and the dot stays grey — same effect as before, no
+  regression. (b) The 1.4 Hz pulse may feel busy; can drop to 1.0 Hz if
+  user feedback says so. (c) Initial seed callback fires for ALL samples
+  in [sessionStartDate, now], which on session re-entry could double-count
+  kcal — but anchor-based queries de-duplicate via `kcalAnchor`, so this
+  is correct.
+- **Next step:** Commit, push, dry-run. Then move to warmup mode (priority #4).

@@ -58,15 +58,19 @@ opening a fresh one. Old logs are not yet imported — that is a future task
      `[100, 95]` after start + 3 tier bumps and explicitly forbids 80, 55,
      and 64 from appearing. `testLiveCascade_FuseFiresAtCurrentTier_AnchorRelative`
      verifies the fuse still commits anchor-relative drops at the current tier.
-2. **HR is one-shot snapshot.** Heart rate populates once at session start
-   then stops updating. Should stream continuously.
-   - Suspect file: `VoltraLive/Health/HealthKitStore.swift`.
-   - Fix: `HKAnchoredObjectQuery` (or observer query) for continuous reads.
-3. **Active calories never arrive.** Same store, same session, kcal stays empty.
-   - Likely the same query never fires, or the wrong type is queried.
-4. **No live-data indicator.** User wants a pulsing green dot on the HR
-   and kcal tiles when fresh data arrived in the last ~3 seconds; goes
-   solid grey when data goes stale. New view: `PulseDot`.
+2. **HR / active calories not streaming (FIXED in build 30).** User
+   confirmed they start an Apple Workout session on the Watch before each
+   VOLTRA session, so samples ARE being written. The anchored query was
+   wired correctly; the missing piece was `enableBackgroundDelivery` to
+   actually wake the iPhone. Added `.immediate` background delivery for
+   `.heartRate` and `.activeEnergyBurned` in
+   `VoltraLive/Health/HealthKitStore.swift`. Auth flow unchanged.
+3. **No live-data indicator (FIXED in build 30).** New `PulseDot` view at
+   `VoltraLive/Logging/Views/PulseDot.swift` pulses green at ~1.4 Hz
+   while data is fresh (≤8s since last sample), fades to faint grey
+   when stale. Wired to HR + KCAL tiles via a new `freshnessIndicator`
+   parameter on the `tile()` helper. `HealthKitStore` exposes
+   `lastHRSampleAt` and `lastKcalSampleAt` timestamps for this purpose.
 
 ## Active design specs to preserve
 

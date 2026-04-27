@@ -10,12 +10,17 @@ Locked-in priority order:
    tier-bump preview-only; the 4s fuse remains the sole drop trigger.
    Cascade math was already anchor-correct. Regression tests pin the new
    behavior in `VoltraLiveTests/DropSetCascadeTests.swift`.
-2. **Live HealthKit streaming.** Replace one-shot reads with
-   `HKAnchoredObjectQuery` (or `HKObserverQuery` + anchored read) for both
-   heart rate and active energy burned. Continue updating until session ends.
-3. **Pulsing data indicator.** New `PulseDot` view: green pulse animation
-   while a tile received data in the last ~3s; fades to solid grey when
-   stale. Apply on HR and kcal tiles.
+2. **Live HealthKit streaming.** ✅ DONE. Real cause was missing
+   `enableBackgroundDelivery` — the anchored query was already wired,
+   but without background delivery the iPhone wasn't woken for samples
+   the Watch wrote. Added `.immediate` background delivery for both
+   `.heartRate` and `.activeEnergyBurned`, called once after auth
+   succeeds (idempotent on every start).
+3. **Pulsing data indicator.** ✅ DONE. `PulseDot` view at
+   `VoltraLive/Logging/Views/PulseDot.swift` pulses green at ~1.4 Hz
+   while data is fresh (≤8s since last sample), fades to faint grey
+   when stale. Wired into HR + KCAL tiles via the `tile()` helper's new
+   `freshnessIndicator` parameter.
 4. **Warmup phase.** Auto-engage on a new exercise. Starting weight =
    **last warmup used for that exercise**. On first-ever warmup for an
    exercise, fall back to **50% of working weight**. Persist the chosen
