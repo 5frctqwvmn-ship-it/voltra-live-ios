@@ -71,10 +71,16 @@ jobs:
       # If the wire format regressed, fail fast — don't ship a broken IPA to TestFlight.
       - name: Run protocol unit tests
         run: |
+          # macos-26 ships with modern iPad simulators only (no iPad 10th gen).
+          # Pick the first available iPhone simulator at runtime so this stays
+          # forward-compatible as runner images change.
+          DEVICE_ID=$(xcrun simctl list devices available --json | \
+            python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(dev['udid'] for runtime in d for dev in d[runtime] if dev.get('isAvailable') and 'iPhone' in dev.get('name','')))")
+          echo "Using simulator: $DEVICE_ID"
           xcodebuild test \
             -project VoltraLive.xcodeproj \
             -scheme VoltraLive \
-            -destination 'platform=iOS Simulator,name=iPad (10th generation),OS=latest' \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
             -only-testing:VoltraLiveTests \
             CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 
