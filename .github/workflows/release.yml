@@ -64,8 +64,17 @@ jobs:
           API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
         run: |
           mkdir -p ~/.appstoreconnect/private_keys
-          echo "${API_PRIVATE_KEY}" > ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8
+          # Use printf (not echo) to preserve the literal newlines inside the
+          # PEM-formatted .p8 key. echo with a multi-line secret can drop the
+          # trailing newline, which makes xcodebuild's JWT signer reject the
+          # key with "Authentication failed".
+          printf '%s\n' "${API_PRIVATE_KEY}" > ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8
           chmod 600 ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8
+          # Sanity-check the key file shape without leaking contents.
+          KEY_FILE=~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8
+          echo "Key file size: $(wc -c < "$KEY_FILE") bytes, lines: $(wc -l < "$KEY_FILE")"
+          head -1 "$KEY_FILE" | grep -q 'BEGIN PRIVATE KEY' && echo "Header OK" || echo "WARN: missing BEGIN header"
+          tail -1 "$KEY_FILE" | grep -q 'END PRIVATE KEY' && echo "Footer OK" || echo "WARN: missing END footer"
 
       # Run protocol unit tests BEFORE we burn signing credentials.
       # If the wire format regressed, fail fast — don't ship a broken IPA to TestFlight.

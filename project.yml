@@ -89,8 +89,8 @@ targets:
         UIUserInterfaceStyle: Dark
         CFBundleDisplayName: "VOLTRA Live"
         CFBundleName: "VoltraLive"
-        CFBundleShortVersionString: "0.4.6"
-        CFBundleVersion: "23"
+        CFBundleShortVersionString: "0.4.6.2"
+        CFBundleVersion: "25"
 
   VoltraLiveTests:
     type: bundle.unit-test
