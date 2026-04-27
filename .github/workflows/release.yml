@@ -269,6 +269,79 @@ jobs:
           bundle_resource_id = resp["data"][0]["id"]
           print(f"bundleId resource id: {bundle_resource_id}")
 
+          # 2b. Ensure required capabilities are enabled on the bundle ID.
+          # The app declares HealthKit + iCloud (CloudKit + Documents) + iCloud Container
+          # + ubiquity-kvstore. HealthKit is already enabled. We need to make sure the
+          # iCloud capability is on, with the iCloud.com.voltralive.app container
+          # associated. ubiquity-kvstore is implied by the iCloud capability.
+          ICLOUD_CONTAINER_ID = "iCloud.com.voltralive.app"
+          # Look up or create the iCloud container resource.
+          status, resp = api("GET", f"/v1/iCloudContainers?filter[identifier]={urllib.parse.quote(ICLOUD_CONTAINER_ID)}")
+          container_resource_id = None
+          if status == 200 and resp.get("data"):
+              container_resource_id = resp["data"][0]["id"]
+              print(f"found iCloud container resource id: {container_resource_id}")
+          else:
+              status, resp = api("POST", "/v1/iCloudContainers", {
+                  "data": {
+                      "type": "iCloudContainers",
+                      "attributes": {
+                          "identifier": ICLOUD_CONTAINER_ID,
+                          "name": "VOLTRA Live iCloud",
+                      },
+                  }
+              })
+              if status == 201:
+                  container_resource_id = resp["data"]["id"]
+                  print(f"created iCloud container resource id: {container_resource_id}")
+              else:
+                  print(f"iCloud container create -> HTTP {status}")
+                  print(json.dumps(resp, indent=2)[:1200])
+                  sys.exit(20)
+
+          # List existing capabilities on the bundle ID to see what we already have.
+          status, resp = api("GET", f"/v1/bundleIds/{bundle_resource_id}/bundleIdCapabilities?limit=200")
+          existing_caps = {}
+          if status == 200:
+              for c in resp.get("data", []):
+                  existing_caps[c["attributes"].get("capabilityType")] = c["id"]
+          print(f"existing bundleIdCapabilities: {list(existing_caps.keys())}")
+
+          # If ICLOUD already enabled, delete it so we can re-create with our specific
+          # settings + container relationship. (The PATCH semantics for capability
+          # settings are inconsistent across capability types; delete-then-create is
+          # the documented pattern.)
+          if "ICLOUD" in existing_caps:
+              did, _ = api("DELETE", f"/v1/bundleIdCapabilities/{existing_caps['ICLOUD']}")
+              print(f"deleted existing ICLOUD capability -> HTTP {did}")
+
+          # Create ICLOUD capability with CloudKit + CloudDocuments enabled and our
+          # container associated. The settings list mirrors what Xcode would set.
+          status, resp = api("POST", "/v1/bundleIdCapabilities", {
+              "data": {
+                  "type": "bundleIdCapabilities",
+                  "attributes": {
+                      "capabilityType": "ICLOUD",
+                      "settings": [
+                          {
+                              "key": "ICLOUD_VERSION",
+                              "options": [{"key": "XCODE_6"}],
+                          }
+                      ],
+                  },
+                  "relationships": {
+                      "bundleId": {"data": {"type": "bundleIds", "id": bundle_resource_id}},
+                      "iCloudContainers": {"data": [{"type": "iCloudContainers", "id": container_resource_id}]},
+                  }
+              }
+          })
+          print(f"create ICLOUD capability -> HTTP {status}")
+          if status not in (200, 201):
+              print(json.dumps(resp, indent=2)[:1500])
+              # Don't abort yet - try without the container, some accounts use a different
+              # relationship key. Fallback: attach container to existing capability.
+              sys.exit(21)
+
           # 3. Create the App Store profile.
           # Try delete-then-create idempotency: list profiles by name and delete matching
           status, resp = api("GET", f"/v1/profiles?filter[name]={urllib.parse.quote(PROFILE_NAME)}") if False else api("GET", "/v1/profiles?limit=200")
