@@ -76,6 +76,56 @@ jobs:
           head -1 "$KEY_FILE" | grep -q 'BEGIN PRIVATE KEY' && echo "Header OK" || echo "WARN: missing BEGIN header"
           tail -1 "$KEY_FILE" | grep -q 'END PRIVATE KEY' && echo "Footer OK" || echo "WARN: missing END footer"
 
+      # Independently verify the ASC API key auths against Apple's REST API
+      # before xcodebuild touches it. If this prints OK, the secret values are
+      # valid and the bug is inside xcodebuild's JWT/profile flow. If it prints
+      # a 401/403, the secret itself is wrong (revoked / wrong team / no role).
+      - name: Verify ASC API key (independent JWT smoke test)
+        env:
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set +e
+          python3 -m pip install --quiet pyjwt cryptography
+          cat > /tmp/asc_smoke.py <<'PY'
+          import os, time, jwt, urllib.request, urllib.error, json, sys
+          key_id = os.environ['API_KEY_ID']
+          iss    = os.environ['API_ISSUER_ID']
+          with open(os.path.expanduser(f"~/.appstoreconnect/private_keys/AuthKey_{key_id}.p8")) as f:
+              pem = f.read()
+          now = int(time.time())
+          token = jwt.encode(
+              {"iss": iss, "iat": now, "exp": now + 600, "aud": "appstoreconnect-v1"},
+              pem,
+              algorithm="ES256",
+              headers={"kid": key_id, "typ": "JWT"},
+          )
+          print(f"JWT minted, length={len(token)}")
+          req = urllib.request.Request(
+              "https://api.appstoreconnect.apple.com/v1/apps?limit=5",
+              headers={"Authorization": f"Bearer {token}"},
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  body = json.loads(resp.read().decode())
+                  apps = body.get("data", [])
+                  print(f"ASC /v1/apps OK status={resp.status} returned {len(apps)} apps")
+                  for a in apps:
+                      attrs = a.get("attributes", {})
+                      print(f"  - {attrs.get('bundleId','?')}  ({attrs.get('name','?')})")
+          except urllib.error.HTTPError as e:
+              body = e.read().decode(errors="replace")
+              print(f"ASC FAILED: HTTP {e.code} {e.reason}")
+              print(body[:500])
+              sys.exit(2)
+          except Exception as e:
+              print(f"ASC FAILED: {type(e).__name__}: {e}")
+              sys.exit(3)
+          PY
+          python3 /tmp/asc_smoke.py
+          echo "smoke exit: $?"
+          set -e
+
       # Run protocol unit tests BEFORE we burn signing credentials.
       # If the wire format regressed, fail fast — don't ship a broken IPA to TestFlight.
       - name: Run protocol unit tests
