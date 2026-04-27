@@ -749,11 +749,10 @@ struct LiveCaptureView: View {
 
     /// Build 36: LOAD / UNLOAD pair. Disabled when not BLE-connected
     /// because writeControlFrame would just log a warning and no-op,
-    /// which is confusing UX. Demo mode also disables — demo doesn't
-    /// have a real device to engage. Long enough labels and icons that
-    /// the user can tell at a glance which one engages vs releases.
+    /// which is confusing UX. Long enough labels and icons that the
+    /// user can tell at a glance which one engages vs releases.
     private var loadUnloadRow: some View {
-        let isLive = ble.isConnected && !demo.isActive
+        let isLive = ble.connectionState.isConnected
         return HStack(spacing: 10) {
             Button {
                 ble.sendUnload()
