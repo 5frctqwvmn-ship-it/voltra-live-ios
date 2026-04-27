@@ -10,11 +10,19 @@ struct ContentView: View {
     @EnvironmentObject var ble: VoltraBLEManager
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var logging: LoggingStore
+    @EnvironmentObject var demo: DemoController
 
     var body: some View {
         ZStack {
             VoltraColor.bg.ignoresSafeArea()
-            if ble.connectionState.isConnected {
+            // Build 31 fix: also route into the home screen when Demo Mode
+            // is active. Previously only `ble.connectionState.isConnected`
+            // gated the transition, so tapping the "Demo Mode" button on
+            // ConnectView flipped demo.isActive=true but the user stayed
+            // stuck on the connect screen \u2014 user reported this as
+            // "Demo mode does nothing, I expected it to take me into the
+            // app so I can show people what it does without a Voltra."
+            if ble.connectionState.isConnected || demo.isActive {
                 LoggingHomeView()
                     .transition(.opacity.animation(.easeInOut(duration: 0.3)))
             } else {

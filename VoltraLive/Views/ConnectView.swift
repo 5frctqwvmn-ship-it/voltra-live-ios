@@ -146,14 +146,34 @@ struct ConnectView: View {
                         .multilineTextAlignment(.center)
                 }
 
-                // v0.4.6.3: secondary Demo Mode entry — lets you walk
-                // through the full app without pairing a Voltra. Uses
-                // synthetic telemetry to keep charts populated.
-                DemoModeButton(source: .prePair) {
+                // Build 31: Demo Mode is now a primary, full-width call to
+                // action under Connect. User reported the previous secondary
+                // text-styled button was missable and "Demo mode does
+                // nothing" \u2014 actually it was working but never visibly
+                // routed away from this screen (ContentView didn't honor
+                // demo.isActive). Both fixed now.
+                Button {
                     guard let handler = DemoTelemetryBridge.shared.handler else { return }
-                    demo.note(.buttonTap(label: "Demo Mode (pre-pair)", screen: "Connect"))
+                    demo.note(.buttonTap(label: "Skip - Try Demo", screen: "Connect"))
                     demo.enter(source: .prePair, onTelemetry: handler)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "play.rectangle")
+                        Text("Skip - Try Demo")
+                    }
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(VoltraColor.accent)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(VoltraColor.accent, lineWidth: 1.5)
+                    )
                 }
+                .buttonStyle(.plain)
+                .opacity(demo.isActive ? 0.4 : 1.0)
+                .disabled(demo.isActive)
+                .accessibilityLabel("Skip pairing and enter Demo Mode")
 
                 // v0.4.8 build 30: dual-Voltra opt-in. Tiny tertiary link
                 // — single-device flow above is unchanged.

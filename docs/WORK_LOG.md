@@ -553,3 +553,25 @@ Files changed for label system:
 - VoltraLive/Views/BuildBadgeOverlay.swift (read VOLTRAFeatureLabel)
 - VoltraLive/Info.plist (NEW key, set to "HR test")
 - project.yml info.properties (NEW key, set to "HR test")
+
+## 2026-04-27 — b32 "Demo mode"
+
+User feedback on b30: "Demo mode does nothing. Should auto-take me to the
+next screen, not make me connect a Voltra to get into the tile section."
+
+Two real bugs:
+1. The Demo Mode button on ConnectView was a small secondary text-styled
+   chip, easy to miss.
+2. Even when tapped, ContentView only routed to LoggingHomeView based on
+   ble.connectionState.isConnected - it never checked demo.isActive. So
+   demo flipped on but the user stayed stuck on Connect.
+
+Fixes:
+- ConnectView: replaced the secondary DemoModeButton with a primary
+  full-width "Skip - Try Demo" call-to-action with play.rectangle icon.
+- ContentView: now routes to LoggingHomeView when ble.isConnected OR
+  demo.isActive, with a comment explaining why.
+
+Files changed:
+- VoltraLive/Views/ConnectView.swift
+- VoltraLive/Views/ContentView.swift
