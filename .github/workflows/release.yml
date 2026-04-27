@@ -578,11 +578,27 @@ jobs:
           API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
+          set -euo pipefail
+          # altool sometimes returns exit 0 even when validation fails (409 etc).
+          # Tee output and grep for the failure marker so the workflow actually
+          # fails when Apple rejects the build.
+          set +e
           xcrun altool --upload-app \
             --type ios \
             --file build/export/VoltraLive.ipa \
             --apiKey "${API_KEY_ID}" \
-            --apiIssuer "${API_ISSUER_ID}"
+            --apiIssuer "${API_ISSUER_ID}" 2>&1 | tee /tmp/altool.log
+          ALTOOL_EXIT=${PIPESTATUS[0]}
+          set -e
+          if [ "$ALTOOL_EXIT" -ne 0 ]; then
+            echo "::error::altool exited with code $ALTOOL_EXIT"
+            exit $ALTOOL_EXIT
+          fi
+          if grep -qiE 'UPLOAD FAILED|Validation failed|ERROR ITMS-' /tmp/altool.log; then
+            echo "::error::altool reported a failure in its output (see log above)"
+            exit 1
+          fi
+          echo "altool upload succeeded."
 
       # On dry-run, surface the IPA as a workflow artifact instead of uploading
       - name: Upload IPA as workflow artifact (dry-run only)
