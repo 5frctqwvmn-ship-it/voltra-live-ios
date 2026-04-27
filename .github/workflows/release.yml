@@ -171,8 +171,172 @@ jobs:
             -only-testing:VoltraLiveTests \
             CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
 
-      # Archive — xcodebuild handles certificate + profile creation automatically
-      # via -allowProvisioningUpdates + ASC API key
+      # Pre-create the iOS Distribution cert + App Store profile via direct
+      # App Store Connect REST API. This sidesteps xcodebuild's automatic
+      # provisioning path, which has been failing with a misleading
+      # 'Authentication failed: bearer token...' on the macos-26 runner even
+      # though the same key authenticates to every other ASC endpoint.
+      - name: Pre-provision distribution cert + profile via ASC REST
+        env:
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/signing
+          cat > /tmp/asc_provision.py <<'PY'
+          import os, time, json, subprocess, base64, urllib.request, urllib.error, sys, tempfile
+          import jwt
+          key_id = os.environ['API_KEY_ID']
+          iss    = os.environ['API_ISSUER_ID']
+          team   = os.environ['APPLE_TEAM_ID']
+          BUNDLE = "com.voltralive.app"
+          PROFILE_NAME = "VOLTRA Live App Store (CI managed)"
+          with open(os.path.expanduser(f"~/.appstoreconnect/private_keys/AuthKey_{key_id}.p8")) as f:
+              pem = f.read()
+          def jwtok():
+              now = int(time.time())
+              return jwt.encode({"iss": iss, "iat": now, "exp": now + 600,
+                                 "aud": "appstoreconnect-v1"},
+                                pem, algorithm="ES256",
+                                headers={"kid": key_id, "typ": "JWT"})
+          def api(method, path, body=None):
+              url = "https://api.appstoreconnect.apple.com" + path
+              data = json.dumps(body).encode() if body is not None else None
+              req = urllib.request.Request(url, data=data, method=method,
+                                           headers={"Authorization": f"Bearer {jwtok()}",
+                                                    "Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      return r.status, json.loads(r.read().decode())
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read().decode() or "{}")
+
+          # 1. Find or create the iOS Distribution cert.
+          # Generate a new EC P-256 keypair + CSR using openssl (universally available).
+          os.makedirs("build/signing", exist_ok=True)
+          subprocess.check_call([
+              "openssl", "genrsa", "-out", "build/signing/dist.key", "2048"
+          ], stderr=subprocess.DEVNULL)
+          subprocess.check_call([
+              "openssl", "req", "-new",
+              "-key", "build/signing/dist.key",
+              "-out", "build/signing/dist.csr",
+              "-subj", f"/CN=Apple Distribution {team}/C=US"
+          ], stderr=subprocess.DEVNULL)
+          with open("build/signing/dist.csr") as f:
+              csr_pem = f.read()
+          # Strip PEM headers, base64 the inner content (strict CSR base64)
+          csr_inner = csr_pem.replace("-----BEGIN CERTIFICATE REQUEST-----", "").replace("-----END CERTIFICATE REQUEST-----", "").replace("\n", "").strip()
+          status, resp = api("POST", "/v1/certificates", {
+              "data": {
+                  "type": "certificates",
+                  "attributes": {
+                      "certificateType": "DISTRIBUTION",
+                      "csrContent": csr_inner,
+                  }
+              }
+          })
+          print(f"create cert -> HTTP {status}")
+          if status != 201:
+              print(json.dumps(resp, indent=2)[:1500])
+              sys.exit(10)
+          cert = resp["data"]
+          cert_id = cert["id"]
+          cert_b64 = cert["attributes"]["certificateContent"]  # DER base64
+          # Write .cer (DER) for security cli
+          with open("build/signing/dist.cer", "wb") as f:
+              f.write(base64.b64decode(cert_b64))
+          print(f"distribution cert id={cert_id}, name={cert['attributes'].get('name','?')}")
+
+          # 2. Find the bundleId resource id for com.voltralive.app
+          status, resp = api("GET", f"/v1/bundleIds?filter[identifier]={BUNDLE}")
+          assert status == 200 and resp["data"], f"no bundleId match: {resp}"
+          bundle_resource_id = resp["data"][0]["id"]
+          print(f"bundleId resource id: {bundle_resource_id}")
+
+          # 3. Create the App Store profile.
+          # Try delete-then-create idempotency: list profiles by name and delete matching
+          status, resp = api("GET", f"/v1/profiles?filter[name]={urllib.parse.quote(PROFILE_NAME)}") if False else api("GET", "/v1/profiles?limit=200")
+          if status == 200:
+              for p in resp.get("data", []):
+                  if p["attributes"]["name"] == PROFILE_NAME:
+                      did, _ = api("DELETE", f"/v1/profiles/{p['id']}")
+                      print(f"deleted stale profile {p['id']} -> HTTP {did}")
+          status, resp = api("POST", "/v1/profiles", {
+              "data": {
+                  "type": "profiles",
+                  "attributes": {
+                      "name": PROFILE_NAME,
+                      "profileType": "IOS_APP_STORE",
+                  },
+                  "relationships": {
+                      "bundleId":     {"data": {"type": "bundleIds",   "id": bundle_resource_id}},
+                      "certificates": {"data": [{"type": "certificates", "id": cert_id}]},
+                  }
+              }
+          })
+          print(f"create profile -> HTTP {status}")
+          if status != 201:
+              print(json.dumps(resp, indent=2)[:1500])
+              sys.exit(11)
+          prof = resp["data"]
+          prof_b64 = prof["attributes"]["profileContent"]
+          prof_uuid = prof["attributes"]["uuid"]
+          prof_name = prof["attributes"]["name"]
+          with open("build/signing/profile.mobileprovision", "wb") as f:
+              f.write(base64.b64decode(prof_b64))
+          print(f"profile uuid={prof_uuid}, name={prof_name}")
+          # Hand off identifiers via GITHUB_OUTPUT-equivalent env file
+          with open(os.environ["GITHUB_ENV"], "a") as gh:
+              gh.write(f"PROFILE_UUID={prof_uuid}\n")
+              gh.write(f"PROFILE_NAME={prof_name}\n")
+              gh.write(f"CERT_ID={cert_id}\n")
+          print("OK: cert + profile created and exported via GITHUB_ENV")
+          PY
+          python3 /tmp/asc_provision.py
+
+      - name: Install cert + profile into runner keychain
+        env:
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Build a PKCS#12 of (private key + signed cert) for security import.
+          # The cert from Apple is DER; the key is local PEM. openssl pkcs12 needs
+          # a PEM cert too — convert.
+          openssl x509 -inform der -in build/signing/dist.cer -out build/signing/dist.pem
+          openssl pkcs12 -export \
+            -inkey build/signing/dist.key \
+            -in    build/signing/dist.pem \
+            -out   build/signing/dist.p12 \
+            -name  "Apple Distribution CI" \
+            -password pass:"${KEYCHAIN_PASSWORD}"
+
+          KEYCHAIN="$RUNNER_TEMP/voltra.keychain-db"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          # Add to the active search list (preserve login.keychain too)
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"' | tr -s ' ' '\n' | grep -v '^$' | grep -v "$KEYCHAIN" || true)
+          security import build/signing/dist.p12 \
+            -k "$KEYCHAIN" -P "${KEYCHAIN_PASSWORD}" \
+            -T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/productsign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${KEYCHAIN_PASSWORD}" "$KEYCHAIN"
+
+          # Install the .mobileprovision so xcodebuild discovers it.
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp build/signing/profile.mobileprovision \
+            "$HOME/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision"
+
+          echo "Installed identities:"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+          echo "Installed profiles:"
+          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/"
+
+      # Archive with MANUAL signing pointed at the freshly-created profile.
+      # We don't pass -allowProvisioningUpdates because we just provisioned
+      # everything ourselves — the broken auto-flow is bypassed entirely.
       - name: Build and archive (signed)
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -186,12 +350,10 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -archivePath build/VoltraLive.xcarchive \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8 \
-            -authenticationKeyID "${API_KEY_ID}" \
-            -authenticationKeyIssuerID "${API_ISSUER_ID}" \
             DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="${PROFILE_NAME}" \
             archive
 
       # Generate ExportOptions.plist at runtime so APPLE_TEAM_ID stays a secret
@@ -209,18 +371,19 @@ jobs:
             <key>method</key><string>app-store-connect</string>
             <key>teamID</key><string>${APPLE_TEAM_ID}</string>
             <key>uploadSymbols</key><true/>
-            <key>signingStyle</key><string>automatic</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.voltralive.app</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
           </dict>
           </plist>
           EOF
           xcodebuild -exportArchive \
             -archivePath build/VoltraLive.xcarchive \
             -exportPath build/export \
-            -exportOptionsPlist ExportOptions.plist \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8 \
-            -authenticationKeyID "${API_KEY_ID}" \
-            -authenticationKeyIssuerID "${API_ISSUER_ID}"
+            -exportOptionsPlist ExportOptions.plist
 
       # Verify IPA exists before doing anything destructive — fails fast if signing/export broke
       - name: Verify signed IPA
