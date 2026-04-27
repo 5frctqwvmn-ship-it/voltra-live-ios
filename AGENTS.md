@@ -7,13 +7,24 @@
 > Style guide: [Karpathy Guidelines](https://pyshine.com/Andrej-Karpathy-Skills-LLM-Coding-Guidelines/) —
 > Think Before Coding · Simplicity First · Surgical Changes · Goal-Driven Execution.
 
+## Mandatory startup
+
+1. Read this file in full.
+2. Read `docs/handoff/00_START_HERE.md` and follow its startup sequence
+   (it points you at the rest of the handoff docs and `docs/WORK_LOG.md`).
+3. **Repeat the user's request back** before writing any code (Karpathy method).
+4. After **any meaningful change**, append an entry to `docs/WORK_LOG.md` and
+   update the relevant `docs/handoff/*.md` doc **in the same commit** as the
+   code change. The repo is the source of truth — chat history is not.
+5. Reference secrets by **name only**. Never paste secret values into any file.
+
 ---
 
 ## What this is
 
-VOLTRA Live is a **read-only** native iOS app that mirrors live workout telemetry from a
-Beyond Power VOLTRA cable machine over BLE. It does **not** issue any control writes
-(no load, no unload, no mode change). Telemetry only.
+VOLTRA Live is a native iOS app that mirrors live workout telemetry from a
+Beyond Power VOLTRA cable machine over BLE, logs sets to a local SwiftData
+store, and overlays HealthKit data (heart rate, active calories) during sessions.
 
 - iOS bundle ID: `com.voltralive.app` (PRODUCT_NAME: "VOLTRA Live")
 - Test bundle ID: `com.voltralive.app.tests` (PRODUCT_NAME: "VoltraLiveTests")
@@ -25,13 +36,23 @@ Beyond Power VOLTRA cable machine over BLE. It does **not** issue any control wr
 
 ## The hard constraint (do not violate)
 
-**READ-ONLY.** Never add code that writes anything except the 9 BOOTSTRAP_WRITES already
-present. The bootstrap writes are read-only handshake captures from the official iPad app —
-they are the *only* outbound traffic permitted. No load adjustments. No mode changes.
-No pairing writes. Nothing.
+The sacred protocol files are **off-limits** without explicit user approval —
+see "Sacred files" below. The 9 `BOOTSTRAP_WRITES` are byte-identical to the
+official iPad app capture and must not change.
 
-If a feature request would require a control write, **stop and surface the assumption** before
-coding. The user has been clear: this app must never modify the device's state.
+**Control writes — current policy (April 2026):** the user has explicitly
+approved control writes (target weight, eccentric, chains, mode, and the
+upcoming LOAD/UNLOAD), gated through `VoltraLive/BLE/VoltraWriter.swift`.
+This supersedes earlier read-only framing. **All** new control writes must:
+
+1. Go through `VoltraWriter` (or, for dual-device, `MultiDeviceManager`).
+2. Be triggered by an explicit user action — never auto-issued in the background.
+3. Use new files for new payload builders (e.g.
+   `VoltraControlFrames+<Feature>.swift`). Sacred protocol files are still untouchable.
+4. Be documented in `docs/handoff/05_BLE_AND_PROTOCOL.md` in the same commit.
+
+If a request is ambiguous about a write, **stop and surface the assumption**
+before coding.
 
 ## Sacred files (do not modify without explicit user approval)
 
