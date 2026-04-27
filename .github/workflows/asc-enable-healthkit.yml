@@ -102,10 +102,13 @@ jobs:
           # 4) List existing capabilities to detect "already enabled".
           EXISTING=$(curl -sS -H "Authorization: Bearer ${JWT}" \
             "https://api.appstoreconnect.apple.com/v1/bundleIds/${BID}/bundleIdCapabilities?limit=200")
-          echo "Existing capabilities:"
-          echo "${EXISTING}" | jq '.data | map(.attributes.capabilityType)'
+          echo "Existing capabilities raw:"
+          echo "${EXISTING}"
+          # Tolerate missing/null `data` (some accounts return errors[]); use //[]
+          CAP_LIST=$(echo "${EXISTING}" | jq -r '(.data // []) | map(.attributes.capabilityType)[]?' || true)
+          echo "Existing capability types: ${CAP_LIST}"
 
-          if echo "${EXISTING}" | jq -e '.data[] | select(.attributes.capabilityType == "HEALTHKIT")' >/dev/null; then
+          if echo "${CAP_LIST}" | grep -qx "HEALTHKIT"; then
             echo "HEALTHKIT already enabled on ${BUNDLE_ID_STRING}. Nothing to do."
             exit 0
           fi
