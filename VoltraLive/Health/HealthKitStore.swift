@@ -126,7 +126,7 @@ final class HealthKitStore: ObservableObject {
         store.execute(q)
     }
 
-    private func handleHRSamples(_ samples: [HKSample]?, newAnchor: HKQueryAnchor?) {
+    nonisolated private func handleHRSamples(_ samples: [HKSample]?, newAnchor: HKQueryAnchor?) {
         guard let qs = samples as? [HKQuantitySample], !qs.isEmpty else { return }
         // Most recent sample wins.
         let unit = HKUnit.count().unitDivided(by: .minute())
@@ -161,7 +161,7 @@ final class HealthKitStore: ObservableObject {
         store.execute(q)
     }
 
-    private func handleKcalSamples(_ samples: [HKSample]?, newAnchor: HKQueryAnchor?) {
+    nonisolated private func handleKcalSamples(_ samples: [HKSample]?, newAnchor: HKQueryAnchor?) {
         guard let qs = samples as? [HKQuantitySample], !qs.isEmpty else { return }
         let unit = HKUnit.kilocalorie()
         let delta = qs.reduce(0.0) { acc, s in acc + s.quantity.doubleValue(for: unit) }

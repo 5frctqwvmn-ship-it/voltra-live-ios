@@ -358,7 +358,7 @@ struct LiveCaptureView: View {
     /// The idle bar fills as `SessionStore.idleProgress01` ramps 0→1 over
     /// the 4-second IDLE_GRACE window. Only visible when phase is idle and
     /// the user has at least one rep — otherwise it stays empty.
-    private func repsTile(live: TelemetrySnapshot) -> some View {
+    private func repsTile(live: LiveTelemetry) -> some View {
         // Re-evaluate every 0.1s so the idle bar smoothly animates without
         // depending on telemetry packets arriving (since idle = no packets).
         TimelineView(.periodic(from: .now, by: 0.1)) { _ in
