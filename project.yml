@@ -61,8 +61,8 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         DEVELOPMENT_TEAM: "${APPLE_TEAM_ID:-}"
-        MARKETING_VERSION: "0.4.12"
-        CURRENT_PROJECT_VERSION: "34"
+        MARKETING_VERSION: "0.4.13"
+        CURRENT_PROJECT_VERSION: "35"
     dependencies:
       - sdk: CoreBluetooth.framework
       - sdk: CloudKit.framework
@@ -89,11 +89,11 @@ targets:
         UIUserInterfaceStyle: Dark
         CFBundleDisplayName: "VOLTRA Live"
         CFBundleName: "VoltraLive"
-        CFBundleShortVersionString: "0.4.12"
-        CFBundleVersion: "34"
+        CFBundleShortVersionString: "0.4.13"
+        CFBundleVersion: "35"
         # Build 31: per-build feature label shown in the on-screen badge so
         # the user knows exactly which one feature this build is testing.
-        VOLTRAFeatureLabel: "Back peek"
+        VOLTRAFeatureLabel: "HK prompt"
 
   VoltraLiveTests:
     type: bundle.unit-test

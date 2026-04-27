@@ -120,6 +120,15 @@ struct VoltraLiveApp: App {
                     sessionStore.modelContext = ctx
                     loggingStore.wire(context: ctx, sessionStore: sessionStore)
 
+                    // Build 35: prompt for HealthKit at app launch. Until
+                    // build 34 the only requestAuthorization call site was
+                    // LiveCaptureView.onAppear, so anyone who didn't start
+                    // a workout never saw the prompt. Eager auth here means
+                    // the system sheet appears on first launch as soon as
+                    // the home screen renders. Apple-side idempotent so a
+                    // second prompt never appears.
+                    healthStore.requestAuthIfNeeded()
+
                     // BLE → SessionStore + LoggingStore.
                     // v0.4.6.1: every telemetry packet also pings
                     // LoggingStore.noteTelemetryActivity() so an active drop

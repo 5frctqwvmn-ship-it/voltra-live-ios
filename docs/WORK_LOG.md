@@ -575,3 +575,30 @@ Fixes:
 Files changed:
 - VoltraLive/Views/ConnectView.swift
 - VoltraLive/Views/ContentView.swift
+
+## 2026-04-27 — b35 "HK prompt"
+
+User reported on b31 testing: still NO HealthKit permission prompt on device.
+That rules out the auth-suppression hypothesis from b31 — the real problem is
+the call site. `health.start()` only fires inside LiveCaptureView.onAppear,
+so a user who installs the app and opens it without immediately starting a
+workout never gets the prompt.
+
+Fixes for b35:
+1. New `HealthKitStore.requestAuthIfNeeded()` — eagerly calls
+   requestAuthorization without spinning up queries.
+2. `VoltraLiveApp.onAppear` calls it on first launch so the system sheet
+   appears as soon as the home screen renders.
+3. New tappable `healthPill` on the home header next to the connection
+   pill: amber "HK ask" before prompting, blue "HK on" after, green "HK
+   live" when fresh samples arrive (< 30s). Tap re-prompts so the user
+   can recover if the system sheet never appeared.
+
+This is build 35, label "HK prompt".
+
+Files changed:
+- VoltraLive/Health/HealthKitStore.swift (new requestAuthIfNeeded)
+- VoltraLive/VoltraLiveApp.swift (onAppear calls requestAuthIfNeeded)
+- VoltraLive/Logging/Views/LoggingHomeView.swift (healthPill + env object)
+- VoltraLive/Info.plist (0.4.12 -> 0.4.13, 34 -> 35, label "HK prompt")
+- project.yml (same bumps in 2 places)

@@ -74,6 +74,28 @@ final class HealthKitStore: ObservableObject {
     }
     #endif
 
+    /// Build 35: Request authorization eagerly without starting queries. Use
+    /// this at app launch so the system permission sheet appears BEFORE the
+    /// user enters a workout screen. The user reported on b31 that they
+    /// never saw the prompt — the only call site for `start()` was inside
+    /// LiveCaptureView.onAppear, so anyone testing without starting a
+    /// workout would never trigger the dialog. Idempotent and cheap.
+    func requestAuthIfNeeded() {
+        #if canImport(HealthKit)
+        guard isAvailable else {
+            print("[HealthKit] requestAuthIfNeeded skipped - not available")
+            return
+        }
+        print("[HealthKit] requestAuthIfNeeded - calling requestAuthorization")
+        requestAuthorization { [weak self] ok in
+            print("[HealthKit] requestAuthIfNeeded completed ok=\(ok)")
+            Task { @MainActor in
+                self?.hasRequestedAuthorization = true
+            }
+        }
+        #endif
+    }
+
     /// Begin polling. Idempotent — safe to call on every session start.
     ///
     /// Build 31 fix: previously this set `hasRequestedAuthorization = true`

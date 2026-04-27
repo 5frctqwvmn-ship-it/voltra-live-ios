@@ -15,6 +15,10 @@ struct LoggingHomeView: View {
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var logging: LoggingStore
     @EnvironmentObject var demo: DemoController
+    /// Build 35: HealthKit access for the home-screen status chip. Lets
+    /// the user see at a glance whether HK has been asked for permission
+    /// and tap to re-prompt if it never appeared.
+    @EnvironmentObject var health: HealthKitStore
 
     @State private var pickedDayType: DayType? = nil
     @State private var customLabel: String = ""
@@ -152,6 +156,7 @@ struct LoggingHomeView: View {
                     // covers this case more consistently.
                 }
                 Spacer()
+                healthPill
                 connectionPill
                 Button {
                     showingDebug = true
@@ -170,6 +175,49 @@ struct LoggingHomeView: View {
                 .foregroundColor(VoltraColor.textDim)
         }
         .padding(.horizontal, 18)
+    }
+
+    /// Build 35: tappable HealthKit status chip. Apple deliberately hides
+    /// READ-permission status, so we surface the next-best proxies:
+    ///   - red dot  = HealthKit unavailable on device
+    ///   - amber    = available but never prompted yet (tap to prompt)
+    ///   - blue     = prompted but no live samples seen yet
+    ///   - green    = receiving live samples (last < 30s)
+    /// Tapping ALWAYS calls requestAuthIfNeeded() so the user can
+    /// recover if the system sheet never appeared the first time.
+    private var healthPill: some View {
+        let now = Date()
+        let fresh: Bool = {
+            guard let t = health.lastHRSampleAt else { return false }
+            return now.timeIntervalSince(t) < 30
+        }()
+        let (dotColor, label): (Color, String) = {
+            if !health.isAvailable { return (VoltraColor.textFaint, "HK n/a") }
+            if !health.hasRequestedAuthorization { return (.orange, "HK ask") }
+            if fresh { return (VoltraColor.accent, "HK live") }
+            return (.blue, "HK on")
+        }()
+        return Button {
+            health.requestAuthIfNeeded()
+        } label: {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: dotColor.opacity(0.7), radius: 4)
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(VoltraColor.textDim)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(VoltraColor.bgElev)
+            .overlay(
+                Capsule().stroke(VoltraColor.border, lineWidth: 1)
+            )
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private var connectionPill: some View {
@@ -431,4 +479,5 @@ struct LoggingHomeView: View {
         .environmentObject(SessionStore())
         .environmentObject(LoggingStore())
         .environmentObject(DemoController())
+        .environmentObject(HealthKitStore())
 }
