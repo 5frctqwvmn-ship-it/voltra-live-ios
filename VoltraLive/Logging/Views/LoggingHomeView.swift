@@ -18,9 +18,13 @@ struct LoggingHomeView: View {
 
     @State private var pickedDayType: DayType? = nil
     @State private var customLabel: String = ""
-    @State private var showingCustom = false
+    /// Build 30: inline custom-day expander. Replaces the prior modal sheet —
+    /// tapping the Custom tile expands a textfield + recent-labels chip row
+    /// directly below the grid, no extra navigation.
+    @State private var showingCustomInline = false
     @State private var showingDashboard = false
     @State private var showingDebug = false
+    @FocusState private var customFieldFocused: Bool
 
     private let primaryDayTypes: [DayType] = [.leg, .back, .chest, .arm]
 
@@ -45,8 +49,18 @@ struct LoggingHomeView: View {
                                 }
                                 customTile
                             }
+
+                            // Build 30: inline custom-day expander, shown
+                            // directly below the grid when the Custom tile is
+                            // tapped. One tap + typing (or one tap on a
+                            // recent chip) starts a session — no sheet hop.
+                            if showingCustomInline {
+                                inlineCustomCard
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
                         }
                         .padding(.horizontal, 18)
+                        .animation(.easeInOut(duration: 0.18), value: showingCustomInline)
 
                         // Live dashboard shortcut — keeps v0.1 functionality reachable.
                         Button {
@@ -105,9 +119,6 @@ struct LoggingHomeView: View {
             }
             .navigationDestination(isPresented: $showingDashboard) {
                 DashboardView()
-            }
-            .sheet(isPresented: $showingCustom) {
-                customSheet
             }
             .sheet(isPresented: $showingDebug) {
                 DebugView()
@@ -210,19 +221,32 @@ struct LoggingHomeView: View {
 
     private var customTile: some View {
         Button {
-            customLabel = ""
-            showingCustom = true
+            // Toggle: tapping the tile while the inline expander is open
+            // collapses it, mirroring the classic disclosure pattern.
+            if showingCustomInline {
+                showingCustomInline = false
+                customFieldFocused = false
+            } else {
+                customLabel = ""
+                showingCustomInline = true
+                // Defer focus to the next runloop tick — SwiftUI needs the
+                // TextField to be in the hierarchy before focus takes.
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                    customFieldFocused = true
+                }
+            }
         } label: {
             VStack(alignment: .leading, spacing: 12) {
                 Image(systemName: DayType.custom.symbol)
                     .font(.system(size: 32, weight: .semibold))
-                    .foregroundColor(VoltraColor.textDim)
+                    .foregroundColor(showingCustomInline ? VoltraColor.accent : VoltraColor.textDim)
                 Spacer(minLength: 0)
                 Text("CUSTOM")
                     .font(.system(size: 15, weight: .bold))
                     .kerning(1.2)
                     .foregroundColor(VoltraColor.text)
-                Text("Name your own day")
+                Text(showingCustomInline ? "Tap again to collapse" : "Name your own day")
                     .font(.system(size: 12))
                     .foregroundColor(VoltraColor.textDim)
             }
@@ -239,56 +263,113 @@ struct LoggingHomeView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Custom day sheet
+    // MARK: - Inline custom-day card (build 30)
 
-    private var customSheet: some View {
-        NavigationStack {
-            ZStack {
-                VoltraColor.bg.ignoresSafeArea()
-                VStack(alignment: .leading, spacing: 18) {
-                    Text("Name your day")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(VoltraColor.text)
-                    TextField("e.g. Push, Pull, Mobility", text: $customLabel)
-                        .textFieldStyle(.plain)
-                        .padding(14)
-                        .background(VoltraColor.bgElev2)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(VoltraColor.border, lineWidth: 1)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .foregroundColor(VoltraColor.text)
-                    Button {
-                        let label = customLabel.trimmingCharacters(in: .whitespaces)
-                        guard !label.isEmpty else { return }
-                        logging.startSession(dayType: .custom, customLabel: label)
-                        showingCustom = false
-                        pickedDayType = .custom
-                    } label: {
-                        Text("Start")
-                            .font(.system(size: 15, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(VoltraColor.accent)
-                            .foregroundColor(VoltraColor.bg)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-                    Spacer()
+    /// Inline expansion shown directly below the day-tile grid when the user
+    /// taps Custom. Replaces the prior modal sheet so that creating a
+    /// custom-named day is one tap + typing instead of tap → modal → typing
+    /// → Start. Recent custom labels are surfaced as one-tap chips so repeat
+    /// workouts ("Push", "Mobility") need zero typing.
+    private var inlineCustomCard: some View {
+        let recents = logging.recentCustomLabels()
+        let trimmed = customLabel.trimmingCharacters(in: .whitespaces)
+        let canStart = !trimmed.isEmpty
+
+        return VStack(alignment: .leading, spacing: 14) {
+            Text("NAME YOUR DAY")
+                .font(VoltraFont.label())
+                .kerning(2)
+                .foregroundColor(VoltraColor.textDim)
+
+            HStack(spacing: 10) {
+                TextField("e.g. Push, Pull, Mobility", text: $customLabel)
+                    .textFieldStyle(.plain)
+                    .focused($customFieldFocused)
+                    .submitLabel(.go)
+                    .onSubmit { startCustom(trimmed) }
+                    .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
+                    .background(VoltraColor.bgElev2)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(VoltraColor.border, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .foregroundColor(VoltraColor.text)
+
+                Button {
+                    startCustom(trimmed)
+                } label: {
+                    Text("Start")
+                        .font(.system(size: 14, weight: .semibold))
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 12)
+                        .background(canStart ? VoltraColor.accent : VoltraColor.bgElev2)
+                        .foregroundColor(canStart ? VoltraColor.bg : VoltraColor.textFaint)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-                .padding(20)
+                .disabled(!canStart)
+                .buttonStyle(.plain)
             }
-            .navigationTitle("Custom Day")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showingCustom = false }
+
+            if !recents.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Recent")
+                        .font(.system(size: 11, weight: .semibold))
+                        .kerning(1)
                         .foregroundColor(VoltraColor.textDim)
+                    // Wrapping chip row — LazyVGrid with adaptive sizing
+                    // gives free reflow without manual width math.
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 80), spacing: 8)],
+                        alignment: .leading,
+                        spacing: 8
+                    ) {
+                        ForEach(recents, id: \.self) { label in
+                            recentChip(label)
+                        }
+                    }
                 }
             }
         }
-        .presentationDetents([.medium])
-        .buildBadgeOverlay()
+        .padding(EdgeInsets(top: 14, leading: 16, bottom: 16, trailing: 16))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(VoltraColor.bgElev)
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(VoltraColor.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func recentChip(_ label: String) -> some View {
+        Button {
+            // One-tap-start when picking a recent label — the user has
+            // already named this day before, no reason to make them confirm.
+            startCustom(label)
+        } label: {
+            Text(label)
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .foregroundColor(VoltraColor.text)
+                .background(VoltraColor.bgElev2)
+                .overlay(
+                    Capsule().stroke(VoltraColor.border, lineWidth: 1)
+                )
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func startCustom(_ rawLabel: String) {
+        let label = rawLabel.trimmingCharacters(in: .whitespaces)
+        guard !label.isEmpty else { return }
+        logging.startSession(dayType: .custom, customLabel: label)
+        showingCustomInline = false
+        customFieldFocused = false
+        pickedDayType = .custom
     }
 }
 

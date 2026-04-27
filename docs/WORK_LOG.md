@@ -386,3 +386,56 @@ points at it.
 - **Next:** Dry-run on main; if green, the build-30 dual-Voltra UI
   surface is in. Then merge the parallel agent's Group-dropdown PR,
   tag `v0.4.8-build30`, push tag.
+
+## 2026-04-27 — feat(logging): inline custom-day flow (build 30 #7)
+
+- **Why:** Original "workout-creation Group dropdown" task was bounced
+  back by the parallel agent as ambiguous (3+ readings). User picked
+  option 2: keep the existing 4-tile DayType picker untouched, just
+  make the "Custom" day flow more discoverable inline. Pulled the
+  work back into the lead-agent thread to avoid further round-trips
+  (PR #2 from `feat/new-exercise-day-picker` was the wrong scope and
+  has been closed).
+- **What ships:** Tapping the Custom tile in `LoggingHomeView` now
+  expands an inline card directly below the day-tile grid instead
+  of pushing a modal sheet. The card has:
+    • A textfield (focuses automatically after a 150ms delay so
+      SwiftUI has time to insert it into the hierarchy)
+    • A Start button (disabled until the trimmed label is non-empty)
+    • A wrapping chip row of recently-used custom labels — tapping
+      a chip starts a session immediately (zero typing for repeats)
+  Tapping the Custom tile again collapses the card. Submit (Return
+  key) on the textfield also starts the session.
+- **Files changed:**
+  - `VoltraLive/Logging/Persistence/LoggingStore.swift`:
+    new `recentCustomLabels(limit:)` helper. Bounded fetch (300
+    sessions max), trims whitespace, skips empty labels, dedupes
+    while preserving most-recent-first ordering. Safe nil-context
+    fallthrough mirrors the existing `lastSet` / `lastWarmup`
+    pattern.
+  - `VoltraLive/Logging/Views/LoggingHomeView.swift`:
+    - Replaced `showingCustom` (sheet) with `showingCustomInline`
+      (inline expander) + `@FocusState customFieldFocused`.
+    - Removed the `customSheet` body and its `.sheet(isPresented:)`
+      wiring entirely (no longer reachable).
+    - Added `inlineCustomCard` + `recentChip` + `startCustom`.
+    - Custom tile now toggles the inline expander instead of
+      presenting a modal; tile foreground swaps to the accent color
+      and the subtitle updates while the expander is open.
+  - `VoltraLiveTests/RecentCustomLabelsTests.swift` NEW:
+    pins distinct + recency ordering, whitespace handling, the
+    `limit` parameter, ignoring of preset (non-custom) sessions,
+    and the no-context safety fallthrough. Uses an in-memory
+    `ModelContainer` matching the production schema for the
+    SwiftData-backed cases.
+- **Schema:** No change. `WorkoutSession.customLabel: String?`
+  already exists and is what the helper queries.
+- **Sacred files:** untouched.
+- **Single-device flow:** unchanged. The 4 preset day tiles
+  (Leg / Back / Chest / Arm) still call `logging.startSession`
+  with the same args and route into `ExercisePickerView` exactly
+  as before. Existing customLabel data round-trips through the
+  new chip row without any migration.
+- **Next:** Dry-run on main; if green, build 30 has shipped both
+  remaining priorities (#6 dual-Voltra UI and #7 inline custom-day).
+  Then tag `v0.4.8-build30` and push tag.

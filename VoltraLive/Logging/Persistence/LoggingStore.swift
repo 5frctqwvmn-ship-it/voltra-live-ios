@@ -977,6 +977,34 @@ final class LoggingStore: ObservableObject {
         )
     }
 
+    /// Distinct customLabels from past sessions, ordered by most recent use
+    /// first. Used by LoggingHomeView to surface the user's prior custom-day
+    /// names as one-tap chips, eliminating retyping for repeat workouts like
+    /// "Push" or "Mobility". Returns at most `limit` entries.
+    ///
+    /// Build 30 inline-custom-day flow.
+    func recentCustomLabels(limit: Int = 6) -> [String] {
+        guard let ctx = modelContext else { return [] }
+        var desc = FetchDescriptor<WorkoutSession>(
+            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+        )
+        // Bounded fetch — even heavy users won't have >300 recent sessions
+        // and we only need enough to find `limit` distinct labels.
+        desc.fetchLimit = 300
+        let sessions = (try? ctx.fetch(desc)) ?? []
+        var seen = Set<String>()
+        var out: [String] = []
+        for s in sessions {
+            guard let raw = s.customLabel else { continue }
+            let label = raw.trimmingCharacters(in: .whitespaces)
+            guard !label.isEmpty, !seen.contains(label) else { continue }
+            seen.insert(label)
+            out.append(label)
+            if out.count >= limit { break }
+        }
+        return out
+    }
+
     /// Last set logged for a given exercise — used to autofill weight/ecc/reps.
     func lastSet(for exercise: Exercise) -> LoggedSet? {
         guard let ctx = modelContext else { return nil }
