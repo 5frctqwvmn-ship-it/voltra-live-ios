@@ -1169,3 +1169,37 @@ struct DeletedSetSnapshot {
         self.instance = instance
     }
 }
+
+// MARK: - Test hooks (build-30: drop-set regression tests)
+//
+// DEBUG-only surface so XCTest can drive the cascade synchronously without
+// waiting on the real 4s `Timer.publish` recurrence. Production binaries are
+// unaffected: `#if DEBUG` is set by the test target's xcodebuild config and
+// not by Release archives.
+
+#if DEBUG
+extension LoggingStore {
+    /// Minimal in-memory factory for unit tests. Wires a fresh SessionStore
+    /// but does NOT attach a ModelContext — callers must avoid code paths
+    /// that persist (e.g. autoLogDropChain). Sufficient for cascade math
+    /// tests that only exercise startDropSet → fireNextCascadeStep.
+    @MainActor
+    static func makeForTesting() -> LoggingStore {
+        let store = LoggingStore()
+        let session = SessionStore()
+        // wire() expects a ModelContext, but startDropSet only needs the
+        // SessionStore. We reach in directly to avoid forcing a SwiftData
+        // container into every test.
+        store.sessionStore = session
+        return store
+    }
+
+    /// Synchronously advance the cascade by one step. Bypasses the 4s
+    /// recurring timer so tests stay deterministic. Mirrors what the
+    /// internal `Timer.publish` sink would do on each tick.
+    @MainActor
+    func testFireCascadeStep() {
+        fireNextCascadeStep()
+    }
+}
+#endif

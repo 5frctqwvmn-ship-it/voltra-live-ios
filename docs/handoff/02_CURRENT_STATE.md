@@ -36,12 +36,38 @@ opening a fresh one. Old logs are not yet imported — that is a future task
 
 ## Known bugs (must fix in build 30)
 
-1. **Drop-set regression.** Reductions compound off the **current** weight
-   instead of anchoring to the **original** starting weight. Expected:
-   `100 → 80 → 60 → 40` for −20%. Actual: `100 → 80 → 64 → 51.2`.
-   - Suspect file: `VoltraLive/Session/DropBoundary.swift`.
-   - Related: `SetSuggestionEngine.swift` has an `anchorLb` field that
-     should be the source of truth for the original weight.
+1. **Drop-set regression (reported, not yet reproduced in code).** User
+   reports reductions compound off the **current** weight (`100 → 80 → 64`,
+   i.e. −20% twice on rolling current) instead of anchoring to the original
+   starting weight (`100 → 80 → 60 → 40`).
+   - Investigation summary (build 30, day 1): static analysis of the v0.4.7
+     code shows the production cascade goes through
+     `LoggingStore.cascadeAnchoredDeviceWeight(anchor:tier:stepIndex:multiplier:)`,
+     which is mathematically anchor-correct. The non-anchored helper
+     `cascadeNextWeight(from:tier:)` would compound, but it has **no live
+     callers** — only `cascadeNextDeviceWeight` and `dropStepLb`, both also
+     unreferenced in production. `defaultDropPercent` on `Exercise` is
+     declared but never read.
+   - The `100 → 80 → 64` ladder is the canonical artifact of `currentLb × 0.8`
+     compounded twice. The only function in the repo that produces it is
+     `cascadeNextWeight(from: 100, tier: 4)` followed by
+     `cascadeNextWeight(from: 80, tier: 4)`. `bumpCascadeTier` caps tier at
+     3, so this path should be unreachable in shipping code.
+   - Hypotheses still open: (a) user is reading the active-tile **preview**
+     which re-anchors at the post-drop current, making it look like
+     compounding; (b) build 25/early binary still installed; (c) a code path
+     not yet found. Build 30 day 2 should ask the user for a precise
+     reproduction (tap sequence, screen-recorded tile values, build number
+     visible on screen at the time).
+   - Regression tests added in `VoltraLiveTests/DropSetCascadeTests.swift`
+     pin the anchor-correct behavior at all tiers so any future change
+     cannot silently regress to compounding.
+   - Suspect files for any further fix (in priority order):
+     1. `VoltraLive/Logging/Persistence/LoggingStore.swift` cascade math.
+     2. `VoltraLive/Logging/Views/LiveCaptureView.swift` `dropSetTileActive`
+        preview (re-anchors at `pendingPlannedWeightLb` after each drop).
+     3. `VoltraLive/Logging/Model/LoggingModels.swift` — `defaultDropPercent`
+        is dead and should be removed (separate cleanup commit).
 2. **HR is one-shot snapshot.** Heart rate populates once at session start
    then stops updating. Should stream continuously.
    - Suspect file: `VoltraLive/Health/HealthKitStore.swift`.

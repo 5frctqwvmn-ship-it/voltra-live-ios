@@ -64,3 +64,35 @@ points at it.
 - **Risks:** None.
 - **Next step:** Same as previous entry — begin drop-set regression
   investigation. Warmup is no longer blocked.
+
+## 2026-04-27 17:55 UTC — Drop-set regression: investigation + pinning tests
+
+- **Files changed:** `VoltraLive/Logging/Persistence/LoggingStore.swift`
+  (DEBUG-only test hooks at end), `VoltraLiveTests/DropSetCascadeTests.swift`
+  (new), `docs/handoff/02_CURRENT_STATE.md`, `docs/handoff/10_OPEN_QUESTIONS.md`.
+- **What changed:** Investigated the user-reported `100 → 80 → 64` drop-set
+  regression. Static analysis of `54b33b3` shows the production cascade goes
+  through `cascadeAnchoredDeviceWeight` which is anchor-correct at every
+  tier; the only function that produces `100 → 80 → 64` is the unused
+  `cascadeNextWeight(from:tier:)` at tier 4, and `bumpCascadeTier` caps at
+  tier 3. Could not reproduce the bug from the code as committed.
+  Wrote a regression test file pinning the anchor-correct ladder at tiers
+  1–3 plus a hypothetical tier 4 (matching the user's verbal description),
+  plus a live-cascade simulation that drives `startDropSet` + `bumpCascadeTier`
+  and asserts `64` never appears in `dropChainPlannedLb`. Added DEBUG-only
+  test hooks (`makeForTesting`, `testFireCascadeStep`) at the end of
+  `LoggingStore.swift` so prod binaries are unaffected.
+  Updated `02_CURRENT_STATE.md` with the full investigation summary and
+  added the open question to `10_OPEN_QUESTIONS.md` requesting a precise
+  user repro (build number on screen, tap sequence, tile-vs-history).
+- **Verification:** Local static checks of symbols and `@MainActor`
+  isolation. Will trigger a release.yml dry-run after this commit to
+  confirm the test suite builds and passes on macos-26 / Xcode 26.2.
+- **Risks:** If the user can reproduce live, the bug is likely in a path
+  I didn't trace (or in a stale binary). Tests do NOT yet fix anything —
+  they only pin the current intended behavior. If the live cascade truly
+  produces `64`, one of these tests will fail and pinpoint the location.
+- **Next step:** Trigger release.yml dry-run to confirm tests build/pass.
+  Then ask the user for repro details. While waiting, move forward to the
+  HealthKit live-streaming task (build 30 priority #2) since the drop-set
+  fix is now blocked on user input.

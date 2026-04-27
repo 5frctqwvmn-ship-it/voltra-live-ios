@@ -8,6 +8,31 @@ Things blocked on the user. Resolve before the dependent task can ship.
 
 ## Build 30
 
+### Drop-set regression — need precise reproduction
+
+Status: **needs user repro before any code fix.**
+
+Static analysis of `54b33b3` (build 29) shows the production cascade math
+is anchor-correct — see `02_CURRENT_STATE.md` for the full investigation
+and the regression tests now in
+`VoltraLiveTests/DropSetCascadeTests.swift` that pin that behavior. The
+`100 → 80 → 64` ladder the user reported is reproducible only by calling
+the unused helper `cascadeNextWeight(from:tier:)` with `tier=4`, which
+shouldn't be reachable from any UI path (`bumpCascadeTier` caps at 3).
+
+Questions to ask the user:
+
+1. What was the build number visible on screen when this happened?
+   (Build numbers are required on every screen — should be 29 if it's
+   the latest TestFlight.)
+2. Exact tap sequence: did they tap DROP SET once, then watch it
+   auto-cascade, or did they keep tapping?
+3. Did the **logged set's drops** show those weights (in History) or did
+   the **tile preview** show them while still active?
+4. Could they capture a short screen recording of one cascade attempt?
+   The tile shows DROP N + the current weight + the next-2 preview —
+   that's enough to reconstruct what the state machine fired.
+
 ### Old-store import
 
 Status: **needs user answer before any importer code is written.**
