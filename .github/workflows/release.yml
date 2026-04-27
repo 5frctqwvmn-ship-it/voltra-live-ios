@@ -86,7 +86,7 @@ jobs:
           API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
           set +e
-          python3 -m pip install --quiet pyjwt cryptography
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography
           cat > /tmp/asc_smoke.py <<'PY'
           import os, time, jwt, urllib.request, urllib.error, json, sys
           key_id = os.environ['API_KEY_ID']
