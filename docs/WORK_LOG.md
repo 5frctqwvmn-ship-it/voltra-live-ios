@@ -253,3 +253,67 @@ points at it.
   behavior preserved.
 - **Next step:** Commit, push, dry-run. Then dual-Voltra (priority #6) —
   restore from `.dual-voltra-wip/` per `07_DUAL_VOLTRA.md`.
+- **Verification update:** Dry-run `25012670021` PASSED in 4m41s.
+
+---
+
+## 2026-04-27 18:42 UTC — Dual-Voltra restoration (build 30 priority #6, scaffolding only)
+
+- **Goal:** Move the four dual-Voltra source files from
+  `.dual-voltra-wip/` (gitignored) into the real source tree so they
+  compile, and add the supporting `connectKnown` /
+  `retrievePeripheralFromOwnCentral` entry points the WIP code expects on
+  `VoltraBLEManager`. Deliberately NOT yet wired into UI — a separate
+  follow-up commit will add the 3-button Connect screen and the dual
+  capture screen.
+- **Files added:**
+  - `VoltraLive/BLE/Dual/DualMode.swift` — `DualMode`,
+    `DeviceSlot`, `CombinedMath` (split + aggregate helpers).
+  - `VoltraLive/BLE/Dual/MultiDeviceManager.swift` — owns 2
+    `VoltraBLEManager` + 2 `VoltraWriter`, watchdog, telemetry fan-out,
+    `CombinedTelemetry` struct.
+  - `VoltraLive/BLE/Dual/VoltraDiscoveryScanner.swift` — separate
+    `CBCentralManager` instance for tap-to-assign discovery; never
+    auto-connects.
+  - `VoltraLive/Protocol/VoltraControlFrames+LoadUnload.swift` —
+    `loadPayload()` / `unloadPayload()` (PARAM_BP_SET_FITNESS_MODE 0x3E89,
+    values 0x0005 / 0x0004) per Android reference.
+- **VoltraBLEManager additions:**
+  - `connectKnown(identifier:fallback:)` — resolves a peripheral via
+    `central.retrievePeripherals(withIdentifiers:)` first, falls back to
+    the raw `CBPeripheral` if iOS hasn't cached the identifier yet, defers
+    to `didUpdateState` if BT is still warming up. Additive only — the
+    existing single-device `connect(to:)` path is untouched, so the
+    single-Voltra flow has zero regression risk.
+  - `retrievePeripheralFromOwnCentral(identifier:)` — used by the
+    Combined-mode reconnect watchdog so `MultiDeviceManager` never has
+    to touch the private `central` instance.
+- **Sacred files unchanged:** `VoltraProtocol.swift`,
+  `TelemetryExtractor.swift`, `PacketParser.swift`, `FrameAssembler.swift`
+  not touched. The new LOAD/UNLOAD payloads are in a NEW `extension`
+  file, not edits to `VoltraControlFrames.swift`.
+- **Verification:** Static review only. Will dry-run release.yml after
+  commit to catch compile errors. WIP file references
+  (`paramWritePayload`, `uint16Le`, `CMD_PARAM_WRITE`,
+  `BLEConnectionState.isConnected`,
+  `Telemetry.{forceLb,repCount,phase,peakPowerWatts}`,
+  `VoltraDeviceState.weights.{baseLb,eccentricLb,chainsLb}`,
+  `VoltraWriter(writeFrame:log:)`,
+  `VoltraFrameBuilder.build(cmd:payload:seq:)`) all confirmed to exist
+  with matching signatures in current code before the move.
+- **Risks:** (a) `MultiDeviceManager` files compile but are NOT yet
+  referenced from `VoltraLiveApp.swift` or `ConnectView.swift` — dead
+  code at runtime in this commit. That's intentional: the dry-run
+  validates that the new code at least compiles in isolation before
+  wiring it into the UI surface (which is a much larger change). The
+  current commit ships the same user-visible behavior as build 30
+  through the warmup commit. (b) The MDM's reconnect loop holds the
+  outer `[weak self]` via the Task and re-captures inside
+  `await MainActor.run` — reviewed as correct, both early-exits hit if
+  `self` is gone. (c) Sacred-file rule: extension file does not modify
+  any of the four sacred files — it's a NEW file under `Protocol/`.
+- **Next step:** Commit + dry-run. Once green, follow up with
+  3-button ConnectView + DualCaptureView wiring (much larger UI commit
+  with its own dry-run), plus tests for `CombinedMath.splitWeight`
+  (odd-total → left-rounds-up). Then Group dropdown (priority #7) and
+  tag v0.4.8-build30.

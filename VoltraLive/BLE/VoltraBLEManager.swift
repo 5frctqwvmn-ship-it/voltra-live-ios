@@ -93,12 +93,46 @@ final class VoltraBLEManager: NSObject, ObservableObject {
         central.connect(peripheral, options: nil)
     }
 
+    /// Connect by stable peripheral identifier. Used by the dual-Voltra
+    /// flow (`MultiDeviceManager`) where a separate `VoltraDiscoveryScanner`
+    /// instance discovered the device on its own central, and the
+    /// `CBPeripheral` it found can't be passed directly to OUR central
+    /// reliably. We re-resolve via `central.retrievePeripherals` first; if
+    /// that returns an empty list (Bluetooth still warming up, or iOS hasn't
+    /// cached the identifier yet), we fall back to the raw peripheral the
+    /// caller handed us — still better than a hard failure.
+    ///
+    /// This entry point is intentionally additive. It does NOT change the
+    /// existing single-device auto-connect flow that lives in `connect(to:)`
+    /// and the scan didDiscover delegate. Build-29 risk surface is unchanged.
+    func connectKnown(identifier: UUID, fallback: CBPeripheral) {
+        guard central.state == .poweredOn else {
+            addLog("connectKnown deferred — BT state=\(central.state.rawValue)", level: .warn)
+            // Park the fallback so didUpdateState picks it up on power-on.
+            self.peripheral = fallback
+            connectionState = .connecting
+            return
+        }
+        let resolved = central.retrievePeripherals(withIdentifiers: [identifier]).first
+        let target = resolved ?? fallback
+        connect(to: target)
+    }
+
     func disconnect() {
         bootstrapTask?.cancel()
         if let p = peripheral {
             central.cancelPeripheralConnection(p)
         }
         handleDisconnect(reason: nil)
+    }
+
+    /// Internal accessor used by the dual-Voltra reconnect path. Returns
+    /// the cached `CBPeripheral` for an identifier if our own central still
+    /// has it (typical for a device that just dropped). Lives on the type
+    /// (not in `Dual/`) because it needs access to the private `central`.
+    func retrievePeripheralFromOwnCentral(identifier: UUID) -> CBPeripheral? {
+        guard central.state == .poweredOn else { return nil }
+        return central.retrievePeripherals(withIdentifiers: [identifier]).first
     }
 
     // MARK: Control writes
