@@ -75,28 +75,48 @@ final class HealthKitStore: ObservableObject {
     #endif
 
     /// Begin polling. Idempotent — safe to call on every session start.
+    ///
+    /// Build 31 fix: previously this set `hasRequestedAuthorization = true`
+    /// inside the auth completion handler regardless of whether the prompt
+    /// actually showed. If anything failed silently (missing entitlement,
+    /// system never delivers the dialog) we'd never re-prompt for the rest
+    /// of the app launch. Worse: if the user backgrounded the app before
+    /// the dialog showed, the same suppression applied. We now (a) log to
+    /// console so we can see in Console.app what's happening, (b) only flip
+    /// `hasRequestedAuthorization` on a TRUE auth completion, and
+    /// (c) bail out of `start()` with a console warning if HealthKit isn't
+    /// available so we never silently no-op.
     func start() {
         #if canImport(HealthKit)
-        guard isAvailable else { return }
+        guard isAvailable else {
+            print("[HealthKit] start() skipped - HKHealthStore.isHealthDataAvailable() == false")
+            return
+        }
         sessionStartDate = Date()
         sessionKcal = 0
         lastHRSampleAt = nil
         lastKcalSampleAt = nil
 
-        // Lazy auth: if we haven't asked yet, do it now.
-        if !hasRequestedAuthorization {
-            requestAuthorization { [weak self] _ in
-                Task { @MainActor in
-                    self?.hasRequestedAuthorization = true
-                    self?.enableBackgroundDeliveryForTypes()
-                    self?.startQueries()
-                }
+        // Always (re-)ask. requestAuthorization is idempotent on Apple's
+        // side: if the user previously granted, no dialog appears and the
+        // completion fires immediately with ok=true. If they previously
+        // denied, no dialog appears either but ok is still true (Apple's
+        // privacy model hides read-denial). The cost of always calling is
+        // ~one IPC \u2014 negligible \u2014 and it removes a class of bugs
+        // where the prompt never appeared on the first try.
+        print("[HealthKit] start() - requesting authorization")
+        requestAuthorization { [weak self] ok in
+            print("[HealthKit] requestAuthorization completed ok=\(ok)")
+            Task { @MainActor in
+                guard let self else { return }
+                self.hasRequestedAuthorization = true
+                // Even if ok==false we still call these \u2014 background
+                // delivery + queries on a denied type are harmless no-ops
+                // and Apple's auth model means we can't reliably tell
+                // "denied READ" from "granted READ" anyway.
+                self.enableBackgroundDeliveryForTypes()
+                self.startQueries()
             }
-        } else {
-            // Auth already granted in a prior session — background delivery
-            // setup is also idempotent so it's safe to call on every start.
-            enableBackgroundDeliveryForTypes()
-            startQueries()
         }
         #endif
     }

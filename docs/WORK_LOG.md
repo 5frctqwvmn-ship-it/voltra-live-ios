@@ -480,3 +480,40 @@ Tests:
 Files changed:
 - VoltraLive/Logging/Persistence/LoggingStore.swift (extracted helper)
 - VoltraLiveTests/RecentCustomLabelsTests.swift (rewrote)
+
+## 2026-04-27 — Build 31 begins (v0.4.9-build31)
+
+User reported 8 issues in build 30:
+1. ⚠️ Group dropdown on custom-day creation never shipped (got dropped when parallel agent went sideways)
+2. Demo mode missing — needs Skip/Try Demo button on connect
+3. HR not working at all (regression)
+4. No Apple Watch / HealthKit prompt on home screen
+5. Dual-Voltra "Pair 2 (beta)" button broken (no scan, all buttons static) + sizing
+6. Drop-set re-edit bug (changing % mid-drop-set bugs out)
+7. Load/unload button missing on sets
+8. Back-button while in workout needs third "just go back" option
+
+### Commit batch 1: HR diagnosis + CI entitlement verification
+
+User confirmed: never saw HealthKit permission prompt in build 30 even with
+Apple Workout running on Watch. That points to either
+  (a) auth flow wrapping `hasRequestedAuthorization` suppression too early, or
+  (b) HealthKit entitlement not embedded in the signed IPA (silent strip).
+
+Fixes:
+- HealthKitStore.start(): always call requestAuthorization (Apple-side
+  idempotent), only flip hasRequestedAuthorization in the completion, add
+  console logging so we can see in Console.app what's happening live.
+- release.yml: NEW step "Verify embedded entitlements (HealthKit, iCloud)"
+  unzips the signed IPA and runs codesign -d --entitlements :-, hard-fails
+  if com.apple.developer.healthkit or com.apple.developer.icloud-services
+  is missing. This catches the silent regression class going forward.
+
+If the new CI step FAILS, the mobileprovision in APPLE_PROFILE_MOBILEPROV
+needs HealthKit re-enabled in Apple Developer portal.
+
+Files changed:
+- VoltraLive/Health/HealthKitStore.swift
+- .github/workflows/release.yml
+- VoltraLive/Info.plist (version bump 0.4.8 -> 0.4.9)
+- project.yml (version bump 30 -> 31 in 2 places)

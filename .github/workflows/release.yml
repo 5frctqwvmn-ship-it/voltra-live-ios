@@ -566,6 +566,35 @@ jobs:
           test -f build/export/VoltraLive.ipa
           echo "Signed IPA size: $(du -h build/export/VoltraLive.ipa | cut -f1)"
 
+      # Build 31 fix: HR was broken on the shipped build because we had no
+      # way to detect when entitlements got dropped during signing. Unzip
+      # the signed IPA, dump the embedded entitlements, and HARD-FAIL the
+      # build if HealthKit isn't there. Same check for iCloud/CloudKit so
+      # we catch silent regressions on those too.
+      - name: Verify embedded entitlements (HealthKit, iCloud)
+        run: |
+          set -euo pipefail
+          mkdir -p build/verify
+          cd build/verify
+          unzip -q ../export/VoltraLive.ipa
+          APP_PATH="Payload/VOLTRA Live.app"
+          test -d "$APP_PATH" || { echo "FAIL: .app not found inside IPA"; ls -la Payload/; exit 1; }
+          echo "— Embedded entitlements:"
+          codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | tee /tmp/embedded.entitlements
+          MISSING=()
+          grep -q "com.apple.developer.healthkit" /tmp/embedded.entitlements || MISSING+=("healthkit")
+          grep -q "com.apple.developer.icloud-services" /tmp/embedded.entitlements || MISSING+=("icloud-services")
+          if [ ${#MISSING[@]} -ne 0 ]; then
+            echo "FAIL: Signed IPA is MISSING required entitlements: ${MISSING[*]}"
+            echo "   The mobileprovision profile likely doesn't grant these. Re-generate"
+            echo "   the App Store profile in the Apple Developer portal with HealthKit"
+            echo "   capability enabled and update APPLE_PROFILE_MOBILEPROV secret."
+            exit 1
+          fi
+          echo "OK: entitlements verified - HealthKit + iCloud present"
+          cd - >/dev/null
+          rm -rf build/verify
+
       # Diagnostic: inspect the SIGNED, EXPORTED IPA — what actually goes to TestFlight.
       # This must run AFTER export-archive, since signing happens at export time.
       # Upload to TestFlight using the App Store Connect API key (no Apple ID password needed)
