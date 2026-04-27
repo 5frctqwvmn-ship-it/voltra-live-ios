@@ -1,5 +1,11 @@
 // LiveCaptureView.swift
-// v0.4.2 — TestFlight feedback fixes on top of the v0.4.0 rebuild.
+// v0.4.3 — Live force chart restored inside the session.
+//
+// What changed in v0.4.3:
+//   - Re-added the ForceChartView (the same phase-colored 30s rolling waveform
+//     used on DashboardView) below the 2x2 tile grid. Pulls from
+//     session.currentSet.samples + peakLb so it stays in sync with the
+//     dashboard view of the same set.
 //
 // What changed in v0.4.2:
 //   - Weight nudges (−5/−1/+1/+5) now write to the Voltra device IMMEDIATELY
@@ -77,6 +83,7 @@ struct LiveCaptureView: View {
                 VStack(spacing: 18) {
                     header
                     tileGrid
+                    forceChart
                     upcomingSetCard
                     loggedSetsSection
                     bottomActions
@@ -208,6 +215,18 @@ struct LiveCaptureView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    // MARK: - Live force chart
+
+    /// Same component DashboardView uses, fed from the same SessionStore set.
+    /// Keeps the in-session view feature-parity with the dashboard so the user
+    /// can see their realtime waveform without leaving LiveCaptureView.
+    private var forceChart: some View {
+        let samples = session.currentSet?.samples ?? []
+        let peak = session.currentSet?.peakLb ?? 0
+        return ForceChartView(samples: samples, peakLb: peak)
+            .frame(minHeight: 180)
     }
 
     private func phaseLabel(_ p: VoltraPhase) -> String {
