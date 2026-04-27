@@ -138,10 +138,12 @@ struct DualConnectView: View {
     private var actionRow: some View {
         VStack(spacing: 10) {
             // Auto-pair: pick the two strongest discoveries.
+            // Build 39: shortened label so it fits comfortably; the
+            // "top 2 by RSSI" detail moves to the help line below.
             Button {
                 autoPairBoth()
             } label: {
-                buttonLabel(text: "Connect Both (auto-pair top 2)",
+                buttonLabel(text: "Auto-Pair Both",
                             icon: "antenna.radiowaves.left.and.right",
                             primary: true)
             }
@@ -250,14 +252,21 @@ struct DualConnectView: View {
             .foregroundColor(color)
     }
 
+    /// Build 39: pinned to a fixed minHeight so all three action buttons
+    /// (Auto-Pair, Connect Left, Connect Right) match in height regardless
+    /// of label length. User noted in b30 testing that the buttons looked
+    /// uneven — the side-by-side pair was a couple of pixels shorter than
+    /// the primary above them when text auto-sized.
     private func buttonLabel(text: String, icon: String, primary: Bool) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
             Text(text)
                 .font(.system(size: 14, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .padding(.vertical, 8)
         .foregroundColor(primary ? .black : VoltraColor.text)
         .background(primary ? VoltraColor.accent : VoltraColor.bgElev)
         .overlay(

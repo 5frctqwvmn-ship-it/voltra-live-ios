@@ -68,6 +68,16 @@ final class VoltraDiscoveryScanner: NSObject, ObservableObject {
     /// advertisement) get pruned by the periodic sweep.
     @Published private(set) var discovered: [Discovered] = []
 
+    /// Build 39: Set when the caller has asked us to scan. We need this
+    /// because CBCentralManager.state is asynchronous — `start()` is
+    /// usually called before the central reaches `.poweredOn`. Without
+    /// this flag the centralManagerDidUpdateState delegate had no way to
+    /// know it should kick off the scan once the radio came up, so the
+    /// dual-pair view sat forever showing "Scanning for VOLTRA devices…"
+    /// with zero discoveries (was the b30 "no scan, all buttons static"
+    /// report).
+    private var startRequested: Bool = false
+
     // MARK: - Private
 
     private var central: CBCentralManager!
@@ -92,30 +102,38 @@ final class VoltraDiscoveryScanner: NSObject, ObservableObject {
     // MARK: - Public API
 
     func start() {
+        startRequested = true
         guard central.state == .poweredOn else {
-            // Will start once the central comes up via centralManagerDidUpdateState.
+            // Radio not ready yet. centralManagerDidUpdateState will
+            // call beginScanning() when .poweredOn arrives.
             state = mapPoweredState(central.state)
             return
         }
-        if state == .scanning { return }
-        state = .scanning
-        // CBCentralManagerScanOptionAllowDuplicatesKey: we WANT duplicate
-        // advertisements so RSSI updates as the user moves around. Without
-        // this we'd only see each device once and live RSSI would freeze.
-        central.scanForPeripherals(
-            withServices: [VoltraUUID.service],
-            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
-        )
-        startSweep()
+        beginScanning()
     }
 
     func stop() {
+        startRequested = false
         if central.state == .poweredOn {
             central.stopScan()
         }
         sweepTask?.cancel()
         sweepTask = nil
         if state == .scanning { state = .stopped }
+    }
+
+    /// Build 39: actually issue the BLE scan. Split out of start() so the
+    /// delegate can call it once the central reaches .poweredOn.
+    private func beginScanning() {
+        if state == .scanning { return }
+        state = .scanning
+        // CBCentralManagerScanOptionAllowDuplicatesKey: we WANT duplicate
+        // advertisements so RSSI updates as the user moves around.
+        central.scanForPeripherals(
+            withServices: [VoltraUUID.service],
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+        )
+        startSweep()
     }
 
     func clear() {
@@ -180,8 +198,14 @@ extension VoltraDiscoveryScanner: CBCentralManagerDelegate {
         Task { @MainActor in
             switch central.state {
             case .poweredOn:
-                // If caller had already asked us to start, kick the scan now.
-                if self.state == .bluetoothOff || self.state == .idle {
+                // Build 39: if start() was called before the radio came up,
+                // actually kick off the scan now. The original code only
+                // updated the published state — it never called
+                // scanForPeripherals — so the dual-pair view stayed empty
+                // forever even though the radio was ready.
+                if self.startRequested {
+                    self.beginScanning()
+                } else if self.state == .bluetoothOff || self.state == .idle {
                     self.state = .idle
                 }
             case .poweredOff:    self.state = .bluetoothOff

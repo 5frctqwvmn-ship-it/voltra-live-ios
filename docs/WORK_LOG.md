@@ -656,3 +656,10 @@ Files changed:
 - VoltraLive/Logging/Views/LiveCaptureView.swift (call from adjustWeight)
 - VoltraLive/Info.plist (0.4.15 -> 0.4.16, 37 -> 38, label "Drop re-edit")
 - project.yml (same bumps in 2 places)
+
+## 2026-04-27 — b39 "Dual fix"
+Dual-Voltra Connect screen sat empty showing "Scanning..." forever; "Connect Both (auto-pair top 2)" button label wrapped awkwardly and was visually heavier than the per-device buttons.
+Root cause (scan): `VoltraDiscoveryScanner.start()` returned early when `central.state != .poweredOn` (the normal case at first call since CoreBluetooth init is async). `centralManagerDidUpdateState` only flipped published `state` to `.idle` on poweredOn; it never actually invoked `central.scanForPeripherals(...)`. Net result: scan was requested but never began.
+Fix (scan): added `startRequested: Bool` flag, factored the actual scan call into a private `beginScanning()` helper, and made `centralManagerDidUpdateState` call `beginScanning()` when poweredOn arrives if `startRequested` was set. `start()` now sets the flag and either begins immediately or waits for the delegate callback.
+Fix (button): shortened "Connect Both (auto-pair top 2)" -> "Auto-Pair Both" and gave `buttonLabel` a `minHeight: 44` with `lineLimit(1)` + `minimumScaleFactor(0.85)` so the three buttons render at consistent height.
+Files changed: VoltraLive/BLE/Dual/VoltraDiscoveryScanner.swift, VoltraLive/Views/Dual/DualConnectView.swift, VoltraLive/Info.plist, project.yml, docs/WORK_LOG.md
