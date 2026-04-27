@@ -118,13 +118,13 @@ struct ProgressChartView: View {
     private var effectiveRange: ProgressRange {
         if isSample { return range }
         let sortedReal = series.sorted { $0.date < $1.date }
-        guard let oldest = sortedReal.first else { return range }
+        guard !sortedReal.isEmpty else { return range }
         // Try the user's chosen range first; if empty, walk widening.
         let order: [ProgressRange] = [range, .oneMonth, .threeMonth, .oneYear, .all]
         for candidate in order {
             guard let days = candidate.days else { return .all }
             let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
-            if oldest <= Date(), sortedReal.contains(where: { $0.date >= cutoff }) {
+            if sortedReal.contains(where: { $0.date >= cutoff }) {
                 return candidate
             }
         }
