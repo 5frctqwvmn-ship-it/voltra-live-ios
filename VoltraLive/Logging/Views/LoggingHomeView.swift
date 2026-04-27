@@ -297,4 +297,5 @@ struct LoggingHomeView: View {
         .environmentObject(VoltraBLEManager())
         .environmentObject(SessionStore())
         .environmentObject(LoggingStore())
+        .environmentObject(DemoController())
 }

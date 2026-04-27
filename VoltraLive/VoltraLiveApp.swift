@@ -51,8 +51,13 @@ struct VoltraLiveApp: App {
                 .environmentObject(sessionStore)
                 .environmentObject(loggingStore)
                 .environmentObject(healthStore)
-                .environmentObject(demo)
+                // v0.4.6.3: .demoModeOverlay() is a ViewModifier that itself
+                // reads @EnvironmentObject DemoController. Modifiers cannot
+                // see env objects injected ABOVE them in the chain — only
+                // the wrapped content can. So inject `demo` AFTER the
+                // overlay so the overlay's own body can resolve it.
                 .demoModeOverlay()
+                .environmentObject(demo)
                 .onAppear {
                     let ctx = modelContainer.mainContext
 

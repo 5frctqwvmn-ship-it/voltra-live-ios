@@ -292,4 +292,5 @@ struct DebugView: View {
 
 #Preview {
     DebugView()
+        .environmentObject(DemoController())
 }
