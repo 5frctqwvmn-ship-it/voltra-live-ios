@@ -988,6 +988,50 @@ final class LoggingStore: ObservableObject {
         return candidates.first { $0.instance?.exercise?.id == exercise.id }
     }
 
+    /// Most recent warmup set logged for a given exercise.
+    /// Used by SetLogView to pre-fill the warmup weight on the first set of a
+    /// new instance. Returns nil if the user has never logged a warmup for
+    /// this exercise — caller should fall back to 50% of the last working set.
+    func lastWarmup(for exercise: Exercise) -> LoggedSet? {
+        guard let ctx = modelContext else { return nil }
+        var desc = FetchDescriptor<LoggedSet>(
+            sortBy: [SortDescriptor(\.completedAt, order: .reverse)]
+        )
+        // Look back further than lastSet because warmups are rarer than
+        // working sets; 200 covers many months of training history.
+        desc.fetchLimit = 200
+        let candidates = (try? ctx.fetch(desc)) ?? []
+        return candidates.first {
+            $0.instance?.exercise?.id == exercise.id && $0.mode == .warmUp
+        }
+    }
+
+    /// Last *working* set for a given exercise — used as the anchor for the
+    /// 50%-of-working-weight warmup fallback when the user has no prior
+    /// warmup logged for the exercise.
+    func lastWorkingSet(for exercise: Exercise) -> LoggedSet? {
+        guard let ctx = modelContext else { return nil }
+        var desc = FetchDescriptor<LoggedSet>(
+            sortBy: [SortDescriptor(\.completedAt, order: .reverse)]
+        )
+        desc.fetchLimit = 200
+        let candidates = (try? ctx.fetch(desc)) ?? []
+        return candidates.first {
+            guard $0.instance?.exercise?.id == exercise.id else { return false }
+            // Working OR eccentric/dropSet — anything that's not a warmup —
+            // counts as a working anchor.
+            return $0.mode != .warmUp
+        }
+    }
+
+    /// True when the active instance has no logged sets yet — i.e. the next
+    /// set will be the first set on this exercise this session. Used by
+    /// SetLogView to decide whether to auto-suggest warmup mode.
+    var isFirstSetOfActiveInstance: Bool {
+        guard let inst = activeInstance else { return false }
+        return setNumberForCurrentInstance == 1 && (inst.sets?.isEmpty ?? true)
+    }
+
     /// Sets from the most recent prior session that included this exercise,
     /// in 1..N order. Drives the smart-start toggle.
     func previousSetSeries(for exercise: Exercise) -> [LoggedSet] {

@@ -196,3 +196,60 @@ points at it.
   kcal — but anchor-based queries de-duplicate via `kcalAnchor`, so this
   is correct.
 - **Next step:** Commit, push, dry-run. Then move to warmup mode (priority #4).
+
+---
+
+## 2026-04-27 18:32 UTC — Warmup phase auto-detect (build 30 priority #5)
+
+- **Goal:** When the user starts logging on a new exercise, default the Set
+  Log sheet to Warm-Up mode and pre-fill the weight to the last warmup the
+  user logged for that exercise. If they've never logged a warmup, fall
+  back to 50% of the most recent working set, rounded to the nearest 5 lb.
+- **Spec source:** `docs/handoff/10_OPEN_QUESTIONS.md` (resolved earlier this
+  session) and `docs/handoff/03_ROADMAP.md` priority #5.
+- **Implementation:**
+  - `LoggingStore.lastWarmup(for:)` — NEW. Same shape as `lastSet(for:)` but
+    filters fetched LoggedSets by `mode == .warmUp`. fetchLimit raised to
+    200 because warmups are rarer than working sets.
+  - `LoggingStore.lastWorkingSet(for:)` — NEW. Returns the most recent
+    non-warmup set on the exercise; used as the 50% fallback anchor.
+  - `LoggingStore.isFirstSetOfActiveInstance` — NEW computed bool. True
+    when there's an active instance, `setNumberForCurrentInstance == 1`,
+    AND `inst.sets` is empty. The trigger predicate.
+  - `SetLogView.prefillIfNeeded()` — modified. Adds an `autoWarmup` step
+    before the existing weight/eccentric/reps/chains prefill. When
+    autoWarmup is true: sets `mode = .warmUp` and `label = "Warm-Up"`,
+    inserts a new weight branch (telemetry > lastWarmup > 50% of
+    lastWorkingSet rounded to 5 > pendingPlannedWeightLb), and skips the
+    "copy mode/label from last set" branch so yesterday's working mode
+    doesn't override our chosen warmup mode.
+- **Telemetry priority:** When `pendingTelemetrySet.peakLb > 0`, telemetry
+  still wins over the warmup default. Rationale: telemetry means the rep
+  actually happened at that weight (the user is logging from a Voltra set
+  that fired); we trust real data over auto-defaults. The warmup mode chip
+  remains selected regardless — the user can always tap Working to
+  override if they skipped the warmup.
+- **Schema:** No new fields. Reuses the existing `LoggedSet.mode` column
+  (raw value `"warm_up"`) so the migration is zero-cost.
+- **Files changed:**
+  - `VoltraLive/Logging/Persistence/LoggingStore.swift` — added
+    `lastWarmup`, `lastWorkingSet`, `isFirstSetOfActiveInstance` after the
+    existing `lastSet(for:)` at line 989.
+  - `VoltraLive/Logging/Views/SetLogView.swift` — `prefillIfNeeded()`
+    rewritten with autoWarmup branch + 5-lb-rounded 50% fallback.
+  - `VoltraLiveTests/WarmupAutoDetectTests.swift` — NEW. Pins the trigger
+    predicate (no active instance / set #1 alone is not enough) and the
+    nil-modelContext fallthrough contract.
+- **Verification:** Static review + new unit tests. Will dry-run
+  release.yml after commit.
+- **Risks:** (a) The 5-lb rounding could be wrong for very light
+  exercises (e.g. 10 lb working → 5 lb warmup which is fine, but 8 lb
+  working → 0 lb after rounding 4 down to nearest 5). Acceptable because
+  the user can always edit the field. (b) If a user has logged warmups
+  manually as Working in the past, lastWarmup returns nil and we fall
+  back to 50% — also acceptable. (c) Telemetry still overrides: if the
+  Voltra fires a rep before the user opens the sheet, the detected peak
+  force becomes the prefill weight regardless of warmup mode. Pre-build-30
+  behavior preserved.
+- **Next step:** Commit, push, dry-run. Then dual-Voltra (priority #6) —
+  restore from `.dual-voltra-wip/` per `07_DUAL_VOLTRA.md`.

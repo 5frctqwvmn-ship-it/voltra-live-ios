@@ -1,6 +1,6 @@
 # 02 — Current State
 
-_Last updated: 2026-04-27 (build 30 in flight: drop-set fixed, HR/kcal/warmup/dual-Voltra still pending)._
+_Last updated: 2026-04-27 (build 30 in flight: drop-set + HR/kcal/PulseDot + warmup all DONE; dual-Voltra + Group dropdown pending)._
 
 ## Latest shipped build
 

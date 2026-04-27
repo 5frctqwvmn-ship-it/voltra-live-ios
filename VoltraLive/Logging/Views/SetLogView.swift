@@ -226,26 +226,59 @@ struct SetLogView: View {
         guard !didPrefill else { return }
         didPrefill = true
 
+        // v0.4.8 / build 30 — Warmup auto-detect.
+        // When the user is logging the FIRST set of a new exercise this
+        // session (set #1 with no completed sets yet), pre-select Warm-Up
+        // mode. Weight prefers the last warmup logged for this exercise; if
+        // the user has never logged a warmup, fall back to 50% of the most
+        // recent working set (rounded to nearest 5 lb).
+        let autoWarmup: Bool = {
+            guard logging.isFirstSetOfActiveInstance,
+                  logging.activeInstance?.exercise != nil else { return false }
+            return true
+        }()
+        if autoWarmup {
+            label = "Warm-Up"
+            mode = .warmUp
+        }
+
         // 1) Reps from telemetry when available.
         if let pending = logging.pendingTelemetrySet {
             reps = "\(pending.reps)"
         }
 
-        // 2) Weight — prefer the user's planned weight from the smart-start
-        //    toggle, then telemetry-detected weight, then last set on this
-        //    exercise.
+        // 2) Weight — priority order:
+        //    a) Telemetry-detected peak force (the rep actually happened at
+        //       this weight — always trust it most).
+        //    b) Auto-warmup default: last warmup on this exercise, else 50%
+        //       of the most recent working set, rounded to nearest 5 lb.
+        //    c) User's planned weight from the smart-start toggle.
+        //    d) Last set on this exercise.
         if weight.isEmpty {
-            if let planned = logging.pendingPlannedWeightLb, planned > 0 {
-                weight = formatLb(planned)
-            } else if let pending = logging.pendingTelemetrySet, pending.peakLb > 0 {
-                // Voltra reports peak force; round to nearest 5 as a starting hint.
+            if let pending = logging.pendingTelemetrySet, pending.peakLb > 0 {
                 weight = formatLb((pending.peakLb / 5).rounded() * 5)
+            } else if autoWarmup, let ex = logging.activeInstance?.exercise {
+                if let lw = logging.lastWarmup(for: ex), lw.weightLb > 0 {
+                    weight = formatLb(lw.weightLb)
+                } else if let lws = logging.lastWorkingSet(for: ex), lws.weightLb > 0 {
+                    let half = (lws.weightLb * 0.5 / 5).rounded() * 5
+                    weight = formatLb(half)
+                } else if let planned = logging.pendingPlannedWeightLb, planned > 0 {
+                    // No history at all — fall back to planned weight so the
+                    // field isn't empty.
+                    weight = formatLb(planned)
+                }
+            } else if let planned = logging.pendingPlannedWeightLb, planned > 0 {
+                weight = formatLb(planned)
             } else if let last = lastSet {
                 weight = formatLb(last.weightLb)
             }
         }
 
         // 3) Other defaults from previous set on this exercise.
+        //    NOTE: when autoWarmup is true we keep our chosen mode/label and
+        //    skip the "copy mode from last set" branch — otherwise the user
+        //    would get "Working" carried over from yesterday's last set.
         if let last = lastSet {
             if eccentric.isEmpty, let e = last.eccentricLb, e > 0 {
                 eccentric = formatLb(e)
@@ -254,7 +287,7 @@ struct SetLogView: View {
             if chains.isEmpty, let c = last.chainsLb, c > 0 {
                 chains = formatLb(c)
             }
-            if !last.labelText.isEmpty {
+            if !autoWarmup, !last.labelText.isEmpty {
                 label = last.labelText
                 mode = last.mode
             }

@@ -21,10 +21,14 @@ Locked-in priority order:
    while data is fresh (≤8s since last sample), fades to faint grey
    when stale. Wired into HR + KCAL tiles via the `tile()` helper's new
    `freshnessIndicator` parameter.
-4. **Warmup phase.** Auto-engage on a new exercise. Starting weight =
-   **last warmup used for that exercise**. On first-ever warmup for an
-   exercise, fall back to **50% of working weight**. Persist the chosen
-   warmup weight per-exercise in `LoggingStore` so it sticks across sessions.
+4. **Warmup phase.** ✅ DONE. `SetLogView.prefillIfNeeded()` now detects
+   the first-set-of-instance condition (`isFirstSetOfActiveInstance`) and
+   auto-selects Warm-Up mode + label. Weight comes from
+   `LoggingStore.lastWarmup(for:)`; if the user has never logged a warmup
+   for that exercise, falls back to 50% of `lastWorkingSet(for:)` rounded
+   to nearest 5 lb. No new schema — reuses existing `LoggedSet.mode ==
+   .warmUp`. Telemetry-detected peak force still wins over the warmup
+   default; user can always tap Working to override.
 5. **Dual-Voltra.** Restore from `.dual-voltra-wip/`, ship the 3-button
    Connect screen, scanner picker, `MultiDeviceManager`, Independent +
    Combined modes. See `07_DUAL_VOLTRA.md` for the spec.
