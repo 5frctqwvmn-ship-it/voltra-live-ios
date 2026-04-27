@@ -1,0 +1,173 @@
+name: Bootstrap signing assets (one-time)
+
+# Run this manually whenever you need to create or rotate the iOS
+# Distribution certificate. It:
+#   1. Generates a fresh keypair + CSR on the runner
+#   2. Revokes ALL existing DISTRIBUTION certs in the Apple Developer portal
+#      (keeps Apple under their one-cert limit)
+#   3. Creates a new Distribution cert via ASC REST
+#   4. Packages it into a .p12 with a password you provide
+#   5. Prints the base64-encoded .p12 + the password to the workflow log
+#
+# After it runs, copy the printed values into GitHub Secrets:
+#   APPLE_DIST_CERT_P12       <- the printed base64
+#   APPLE_DIST_CERT_P12_PASS  <- the password you typed
+#
+# Then create + download a provisioning profile in developer.apple.com,
+# base64 it (instructions in SIGNING-SETUP.md), set:
+#   APPLE_PROFILE_MOBILEPROV  <- base64 of .mobileprovision
+#   APPLE_PROFILE_NAME        <- exact profile name from Apple portal
+#
+# After all four secrets are set, release.yml will work.
+
+on:
+  workflow_dispatch:
+    inputs:
+      p12_password:
+        description: 'Password for the .p12 (you type this, then paste it into APPLE_DIST_CERT_P12_PASS secret afterward). Avoid characters that fight with shells (like $, ", \\). Keep it 8+ chars.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ASC API key
+        env:
+          API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s\n' "${API_PRIVATE_KEY}" > ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8
+          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8
+
+      - name: Install pyjwt
+        run: python3 -m pip install --break-system-packages pyjwt cryptography
+
+      - name: Revoke + recreate Distribution cert, output .p12 base64
+        env:
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          P12_PASSWORD: ${{ github.event.inputs.p12_password }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/signing
+          cat > /tmp/bootstrap.py <<'PY'
+          import os, time, json, subprocess, base64, urllib.request, urllib.error, sys
+          import jwt
+          key_id = os.environ['API_KEY_ID']
+          iss    = os.environ['API_ISSUER_ID']
+          team   = os.environ['APPLE_TEAM_ID']
+          with open(os.path.expanduser(f"~/.appstoreconnect/private_keys/AuthKey_{key_id}.p8")) as f:
+              pem = f.read()
+          def jwtok():
+              now = int(time.time())
+              return jwt.encode({"iss": iss, "iat": now, "exp": now + 600,
+                                 "aud": "appstoreconnect-v1"},
+                                pem, algorithm="ES256",
+                                headers={"kid": key_id, "typ": "JWT"})
+          def api(method, path, body=None):
+              url = "https://api.appstoreconnect.apple.com" + path
+              data = json.dumps(body).encode() if body is not None else None
+              req = urllib.request.Request(url, data=data, method=method,
+                                           headers={"Authorization": f"Bearer {jwtok()}",
+                                                    "Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      b = r.read()
+                      return r.status, (json.loads(b.decode()) if b else {})
+              except urllib.error.HTTPError as e:
+                  b = e.read()
+                  return e.code, (json.loads(b.decode()) if b else {})
+
+          # Generate RSA 2048 keypair + CSR
+          subprocess.check_call(["openssl", "genrsa", "-out", "build/signing/dist.key", "2048"], stderr=subprocess.DEVNULL)
+          subprocess.check_call(["openssl", "req", "-new",
+              "-key", "build/signing/dist.key",
+              "-out", "build/signing/dist.csr",
+              "-subj", f"/CN=Apple Distribution {team}/C=US"], stderr=subprocess.DEVNULL)
+          with open("build/signing/dist.csr") as f:
+              csr_pem = f.read()
+          csr_inner = (csr_pem
+              .replace("-----BEGIN CERTIFICATE REQUEST-----", "")
+              .replace("-----END CERTIFICATE REQUEST-----", "")
+              .replace("\n", "").strip())
+
+          # Revoke any existing DISTRIBUTION certs (one-active-per-account rule).
+          status, resp = api("GET", "/v1/certificates?limit=200")
+          if status == 200:
+              for c in resp.get("data", []):
+                  if c["attributes"].get("certificateType") == "DISTRIBUTION":
+                      did, _ = api("DELETE", f"/v1/certificates/{c['id']}")
+                      print(f"revoked existing DISTRIBUTION cert {c['id']} -> HTTP {did}")
+
+          # Create new DISTRIBUTION cert
+          status, resp = api("POST", "/v1/certificates", {
+              "data": {
+                  "type": "certificates",
+                  "attributes": {"certificateType": "DISTRIBUTION", "csrContent": csr_inner},
+              }
+          })
+          if status != 201:
+              print(f"create cert failed -> HTTP {status}")
+              print(json.dumps(resp, indent=2)[:1500])
+              sys.exit(10)
+          cert = resp["data"]
+          cert_id = cert["id"]
+          cert_b64_der = cert["attributes"]["certificateContent"]
+          with open("build/signing/dist.cer", "wb") as f:
+              f.write(base64.b64decode(cert_b64_der))
+          print(f"created Distribution cert id={cert_id}, name={cert['attributes'].get('name','?')}")
+          PY
+          python3 /tmp/bootstrap.py
+
+          # Convert DER -> PEM, build the .p12
+          openssl x509 -inform der -in build/signing/dist.cer -out build/signing/dist.pem
+          # -legacy for macOS `security` CLI compatibility (PEP/PBE-SHA1 not AES-256/PBKDF2)
+          openssl pkcs12 -export -legacy \
+            -inkey build/signing/dist.key \
+            -in    build/signing/dist.pem \
+            -out   build/signing/dist.p12 \
+            -name  "Apple Distribution CI" \
+            -password "pass:${P12_PASSWORD}"
+
+          # Sanity check the .p12 actually round-trips
+          openssl pkcs12 -in build/signing/dist.p12 -nokeys -passin "pass:${P12_PASSWORD}" -info -noout 2>&1 | head -5
+
+          # Print the base64 encoded .p12. The human copies this into the
+          # APPLE_DIST_CERT_P12 secret. This is intentionally surfaced in the log.
+          # The .p12 is encrypted with P12_PASSWORD, which is itself a secret —
+          # leaking just the .p12 base64 without the password is not catastrophic,
+          # but DELETE THIS WORKFLOW RUN'S LOGS once you've copied the secret.
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo "  COPY THE FOLLOWING INTO GITHUB SECRETS"
+          echo "  Settings → Secrets and variables → Actions"
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo ""
+          echo "▶ APPLE_DIST_CERT_P12 ◀"
+          echo "(everything between the BEGIN/END markers, no markers)"
+          echo "----- BEGIN APPLE_DIST_CERT_P12 -----"
+          base64 -i build/signing/dist.p12
+          echo "----- END APPLE_DIST_CERT_P12 -----"
+          echo ""
+          echo "▶ APPLE_DIST_CERT_P12_PASS ◀"
+          echo "(use the same password you provided as the workflow input)"
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo "  AFTER COPYING:"
+          echo "  1. Delete this workflow run's logs (Settings → Actions → Runs)"
+          echo "  2. Go to https://developer.apple.com/account/resources/profiles/list"
+          echo "  3. Create an App Store profile for com.voltralive.app"
+          echo "     using the Distribution cert that was just created."
+          echo "  4. Download it, base64-encode it, paste into APPLE_PROFILE_MOBILEPROV"
+          echo "     (see SIGNING-SETUP.md for in-browser base64 instructions)"
+          echo "  5. Paste the exact profile name into APPLE_PROFILE_NAME"
+          echo "═══════════════════════════════════════════════════════════════════"
