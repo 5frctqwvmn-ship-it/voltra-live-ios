@@ -439,3 +439,20 @@ points at it.
 - **Next:** Dry-run on main; if green, build 30 has shipped both
   remaining priorities (#6 dual-Voltra UI and #7 inline custom-day).
   Then tag `v0.4.8-build30` and push tag.
+
+## 2026-04-27 — fix(test): force cloudKitDatabase=.none in RecentCustomLabelsTests
+
+Build 30 dry-run `25019492252` failed: every test that called `makeStoreWithContext()`
+hung for ~55s and tripped the xctest watchdog (logged as "Restarting after
+unexpected exit, crash, or test timeout"). Only `_NoModelContext_ReturnsEmpty`
+passed because it never instantiates a ModelContainer.
+
+Root cause: `ModelConfiguration(schema:isStoredInMemoryOnly:)` defaults
+`cloudKitDatabase` to `.automatic`. On the simulator the CloudKit mirror has
+no entitlements and stalls during init.
+
+Fix: match `VoltraLiveApp.modelContainer.v2Config` exactly — explicitly pass
+`cloudKitDatabase: .none` (and a name + allowsSave for parity).
+
+Files changed:
+- VoltraLiveTests/RecentCustomLabelsTests.swift (makeStoreWithContext)

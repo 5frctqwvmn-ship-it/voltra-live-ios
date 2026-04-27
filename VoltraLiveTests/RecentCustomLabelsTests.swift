@@ -44,10 +44,26 @@ final class RecentCustomLabelsTests: XCTestCase {
     /// (PastSession + PastSet + LoggingSchema.models) so we can insert
     /// WorkoutSession rows and query them through LoggingStore.
     private func makeStoreWithContext() throws -> LoggingStore {
+        // Match VoltraLiveApp's production schema bundle (PastSession + PastSet
+        // alongside LoggingSchema.models) so the registered model graph is
+        // identical — otherwise a model that references another via
+        // @Relationship can fail to materialize during context.insert(_:).
         var allModels: [any PersistentModel.Type] = [PastSession.self, PastSet.self]
         allModels.append(contentsOf: LoggingSchema.models)
         let schema = Schema(allModels)
-        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+
+        // CRITICAL: pass cloudKitDatabase: .none. Without this, SwiftData
+        // defaults to .automatic and tries to spin up a CloudKit mirror —
+        // on the simulator without entitlements this hangs the test for
+        // ~55s and trips the xctest watchdog (looks like a crash). This
+        // matches VoltraLiveApp.modelContainer's v2Config exactly.
+        let config = ModelConfiguration(
+            "voltra-live-test",
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            allowsSave: true,
+            cloudKitDatabase: .none
+        )
         let container = try ModelContainer(for: schema, configurations: config)
         let store = LoggingStore.makeForTesting()
         store.modelContext = container.mainContext
