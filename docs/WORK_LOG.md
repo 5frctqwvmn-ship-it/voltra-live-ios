@@ -317,3 +317,20 @@ points at it.
   with its own dry-run), plus tests for `CombinedMath.splitWeight`
   (odd-total → left-rounds-up). Then Group dropdown (priority #7) and
   tag v0.4.8-build30.
+
+## 2026-04-27 — fix(dual-voltra): \u{XXXX} brace form in string literals (07ffbad)
+
+- **Why:** Dry-run `25012935170` failed at 53s with 6 Swift compile errors:
+  `\u2014`, `\u2192`, `\u2026` are NOT valid Unicode escape syntax inside
+  Swift string literals. Swift requires the brace-delimited form
+  `\u{XXXX}`. (The bare form is a relic of other languages — Swift
+  rejects it specifically to disambiguate from regex-style escapes.)
+- **Lines fixed in `MultiDeviceManager.swift`:**
+  - 272: reconnect status message — em dash + ellipsis
+  - 364–365: combined-mode addLog — right arrow ✕2
+  - 368, 371: single-side addLog — right arrow ✕2
+- **Doc comments left as-is** — they're not parsed for escapes, so the
+  `\u2192` in `DualMode.swift:82` doc comment is harmless.
+- **Verification:** Grep for `"[^"]*\\u[0-9A-Fa-f]{4}[^{]` across the new
+  Dual/ + Protocol/ files returns only the doc-comment line. Triggered
+  dry-run `25013122194` immediately after push.

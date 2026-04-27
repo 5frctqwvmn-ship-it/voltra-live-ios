@@ -302,7 +302,7 @@ final class MultiDeviceManager: ObservableObject {
                 try? await Task.sleep(nanoseconds: delayMs * 1_000_000)
                 if delayMs < 4000 { delayMs = min(4000, delayMs * 2) }
             }
-            await MainActor.run {
+            await MainActor.run { [weak self] in
                 // Final state check after the timeout window.
                 guard let self else { return }
                 let manager: VoltraBLEManager = (slot == .left ? self.left : self.right)
