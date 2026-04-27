@@ -16,31 +16,32 @@ struct VoltraLiveApp: App {
 
     let modelContainer: ModelContainer = {
         // v0.1 dashboard models + v0.2 logging models in one container so
-        // cross-queries (e.g. "last leg-day session") work and CloudKit syncs
-        // everything together.
+        // cross-queries (e.g. "last leg-day session") work.
         var allModels: [any PersistentModel.Type] = [PastSession.self, PastSet.self]
         allModels.append(contentsOf: LoggingSchema.models)
         let schema = Schema(allModels)
 
-        // CloudKit-backed config — automatic mode means SwiftData picks the
-        // default container "iCloud.<bundle-id>" if entitlements include it.
+        // v0.4.6 build 28 hotfix: build 27 crashed on launch with a
+        // _assertionFailure inside SwiftData.DefaultMigrationManager when
+        // cloudKitDatabase: .automatic tried to materialize against the
+        // iCloud.com.voltralive.app container — most likely because the
+        // CloudKit schema hasn't been promoted from Development to
+        // Production yet, so the TestFlight (Production-env) build can't
+        // resolve the schema. Swift assertions are not catchable, so the
+        // do/catch local-only fallback below never ran.
+        //
+        // For now: force local-only on every launch. CloudKit sync gets
+        // re-enabled in a follow-up build once the schema is deployed to
+        // Production via the CloudKit Dashboard. Local data continues to
+        // work; users just don't get cross-device sync until then.
         let config = ModelConfiguration(
             schema: schema,
-            isStoredInMemoryOnly: false,
-            cloudKitDatabase: .automatic
+            isStoredInMemoryOnly: false
         )
         do {
             return try ModelContainer(for: schema, configurations: config)
         } catch {
-            // Fallback: try local-only if CloudKit fails (e.g. user not signed
-            // in to iCloud). Logging still works; sync just won't happen.
-            print("[VoltraLive] CloudKit init failed: \(error). Falling back to local-only.")
-            let localConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-            do {
-                return try ModelContainer(for: schema, configurations: localConfig)
-            } catch {
-                fatalError("[VoltraLive] Failed to create SwiftData ModelContainer: \(error)")
-            }
+            fatalError("[VoltraLive] Failed to create local SwiftData ModelContainer: \(error)")
         }
     }()
 
