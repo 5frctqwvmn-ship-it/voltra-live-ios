@@ -369,6 +369,38 @@ final class LoggingStore: ObservableObject {
         dropFinalizeAt = Date().addingTimeInterval(cascadeIdleFinalizeSec)
     }
 
+    /// Build 38: re-anchor an in-flight drop cascade to a user-edited
+    /// weight. Called by LiveCaptureView.adjustWeight() whenever the
+    /// user nudges the weight ± buttons during an active drop set.
+    ///
+    /// Bug being fixed (b30 testing): the +/- buttons changed
+    /// `pendingPlannedWeightLb` directly, but `chainAnchorLb` was frozen
+    /// at startDropSet. The very next 4s tick would call
+    /// `nextCascadeWeight()` which always computes
+    /// `chainAnchorLb − step × stepIndex`, snapping the device back to
+    /// the original anchor's stepped value and silently undoing the
+    /// user's edit. From the user's perspective, mid-drop weight changes
+    /// "bugged out."
+    ///
+    /// Fix: when the user edits weight mid-cascade, treat the new
+    /// weight as the new anchor and reset the step index to 0. The
+    /// cascade keeps running, the next drop steps off the new anchor,
+    /// and the in-progress chain stays consistent.
+    func reanchorCascadeIfActive(toLb newLb: Double) {
+        guard dropSetActive, newLb > 0 else { return }
+        chainAnchorLb = newLb
+        cascadeStepIndex = 0
+        // Push the chain's planned-weight history so subsequent UI
+        // (preview, snapshots) stays consistent with the new anchor.
+        if let last = dropChainPlannedLb.last, abs(last - newLb) > 0.01 {
+            dropChainPlannedLb.append(newLb)
+        }
+        pendingPlannedWeightLb = newLb
+        // Activity — push the watchdog out so the chain doesn't
+        // finalize because the user paused to retune.
+        dropFinalizeAt = Date().addingTimeInterval(cascadeIdleFinalizeSec)
+    }
+
     /// v0.4.6.1: Called from the BLE pipeline on every telemetry packet.
     /// While a drop cascade is active, ANY packet (motion, force, phase
     /// change) resets BOTH timers:

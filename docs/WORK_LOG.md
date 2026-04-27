@@ -636,3 +636,23 @@ Files changed:
 - VoltraLive/Logging/Views/DebugView.swift (new section + env object)
 - VoltraLive/Info.plist (0.4.14 -> 0.4.15, 36 -> 37, label "HK settings")
 - project.yml (same bumps in 2 places)
+
+## 2026-04-27 — b38 "Drop re-edit"
+
+User-reported (b30): "drop-set re-edit bug — changing weight mid-drop-set
+bugs out." Root cause: adjustWeight() in LiveCaptureView mutated
+pendingPlannedWeightLb directly. During an active cascade,
+nextCascadeWeight() always uses chainAnchorLb (frozen at startDropSet) and
+cascadeStepIndex, so the next 4s tick would snap the device back to the
+original anchor's stepped weight, silently undoing the user's edit.
+
+Fix: new LoggingStore.reanchorCascadeIfActive(toLb:) re-anchors the
+chain to the new weight and resets stepIndex to 0. adjustWeight() now
+calls it after every nudge. No-op when no drop set is active, so single
+sets are unchanged.
+
+Files changed:
+- VoltraLive/Logging/Persistence/LoggingStore.swift (new method)
+- VoltraLive/Logging/Views/LiveCaptureView.swift (call from adjustWeight)
+- VoltraLive/Info.plist (0.4.15 -> 0.4.16, 37 -> 38, label "Drop re-edit")
+- project.yml (same bumps in 2 places)

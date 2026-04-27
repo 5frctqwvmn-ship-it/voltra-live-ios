@@ -1008,6 +1008,13 @@ struct LiveCaptureView: View {
         let cur = Int(logging.pendingPlannedWeightLb ?? 0)
         let next = max(0, min(500, cur + delta))
         logging.pendingPlannedWeightLb = Double(next)
+        // Build 38: if the user nudges weight DURING an active drop
+        // cascade, re-anchor the chain to the new value so the next
+        // 4s tick doesn't snap the device back to the original
+        // anchor's stepped weight (was the b30 "bugs out" report).
+        // No-op when no drop set is active, so single sets behave
+        // exactly as before.
+        logging.reanchorCascadeIfActive(toLb: Double(next))
         // v0.4.2: push the new weight to the Voltra device IMMEDIATELY so the
         // user can adjust mid-rest and the device retargets before the next
         // set begins. VoltraWriter.apply() debounces internally, so even rapid
