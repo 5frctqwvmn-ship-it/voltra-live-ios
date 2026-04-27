@@ -10,6 +10,7 @@ struct VoltraLiveApp: App {
     @StateObject private var bleManager = VoltraBLEManager()
     @StateObject private var sessionStore = SessionStore()
     @StateObject private var loggingStore = LoggingStore()
+    @StateObject private var healthStore = HealthKitStore()
 
     let modelContainer: ModelContainer = {
         // v0.1 dashboard models + v0.2 logging models in one container so
@@ -47,6 +48,7 @@ struct VoltraLiveApp: App {
                 .environmentObject(bleManager)
                 .environmentObject(sessionStore)
                 .environmentObject(loggingStore)
+                .environmentObject(healthStore)
                 .onAppear {
                     let ctx = modelContainer.mainContext
 

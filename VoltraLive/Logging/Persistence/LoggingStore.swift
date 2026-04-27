@@ -53,33 +53,78 @@ final class LoggingStore: ObservableObject {
     @Published var upcomingAddedLoadLb: Double? = nil
     @Published var upcomingAddedLoadType: String? = nil
 
-    // MARK: - v0.4.5: Drop-set state
+    // MARK: - v0.4.6: Pulley Mode
     //
-    // When the user starts a drop set, we hand SessionStore a planned chain
-    // and a boundary callback. SessionStore fires the callback every time
-    // its idle-grace heuristic would normally finalize a set. We advance
-    // through the chain by writing the next planned weight to the device,
-    // buffer the per-drop telemetry snapshot, and on the FINAL drop return
-    // `.finalize` so the parent set finalizes normally and our
-    // `handleCompletedSetsUpdate` hook converts it into a drop-set LoggedSet.
+    // When the user routes the cable through a single pulley on a single
+    // Voltra, the user-felt load is 2× the device's setting. Pulley Mode is
+    // a per-set toggle that's STICKY across sets within an exercise instance
+    // and reset on pickExercise. It affects user-facing display (force chart,
+    // RESISTANCE/TOTAL VOL/FORCE tiles), drop-cascade math (cascade operates
+    // on EFFECTIVE load and back-computes the device setting), and the
+    // persisted weightLb / peakForceLb on each LoggedSet (we store EFFECTIVE
+    // load so analytics reflect what the user actually moved).
+    @Published var pulleyMode: Bool = false
+    /// 2.0 when pulley mode is on, else 1.0.
+    var pulleyMultiplier: Double { pulleyMode ? 2.0 : 1.0 }
 
-    /// Whether the user is currently in a drop-set chain (vs a normal set).
+    // MARK: - v0.4.6: Drop-set state (time-driven cascade)
+    //
+    // v0.4.6 redesign: drop sets are no longer planner-configured & telemetry-
+    // driven. Tap the button → weight drops 20% IMMEDIATELY → an internal 4s
+    // cascade timer keeps dropping another 20% on each tick → a separate 10s
+    // "no movement" watchdog finalizes the set. The user sees a live preview
+    // of the next two upcoming weights and two countdown progress bars on the
+    // DROP SET tile.
+
+    /// Whether the user is currently in a drop-set cascade.
     /// Drives UI affordances on LiveCaptureView.
     @Published var dropSetActive: Bool = false
-    /// Planned per-drop Voltra base weights for the active chain. Populated
-    /// by `startDropSet`; read by the boundary callback to push the next
-    /// weight to the device.
+    /// Realized per-drop Voltra base weights so far in the active cascade.
+    /// Element [0] is the user's starting weight; [1..N] are the cascade
+    /// drops fired by the 4s timer. Read by the UI to render the chain.
     @Published var dropChainPlannedLb: [Double] = []
-    /// 1-based current drop within the active chain. nil when no chain.
+    /// 1-based current drop within the active chain.
     @Published var currentDropIndex: Int = 1
+    /// Cascade tick interval — every 4s we push the next drop using the
+    /// current step tier.
+    private let cascadeIntervalSec: Double = 4.0
+    /// No-movement watchdog — set finalizes after this many seconds with
+    /// no rep increment.
+    private let cascadeIdleFinalizeSec: Double = 10.0
+    /// Tier increment per tap. Tap #1 → 5 lb / 5%, tap #2 → 10/10%, etc.
+    private let cascadeTierStepLb: Double = 5.0
+    private let cascadeTierStepPct: Double = 0.05
+    /// Current step tier. Starts at 1 (= 5 lb / 5%) on first tap; bumped
+    /// by 1 every additional tap while a cascade is active.
+    @Published var cascadeTier: Int = 1
+    /// Human-readable label for the current step ("5 lb / 5%").
+    var cascadeStepLabel: String {
+        let lb = Double(cascadeTier) * cascadeTierStepLb
+        let pct = Double(cascadeTier) * cascadeTierStepPct * 100
+        return "\(formatLb(lb)) lb / \(formatLb(pct))%"
+    }
+    /// Wall-clock at which the next cascade drop will fire. Drives the 4s
+    /// progress bar on the DROP SET tile. nil when cascade isn't running.
+    @Published var nextDropFiresAt: Date? = nil
+    /// Wall-clock at which the no-movement watchdog will finalize the set.
+    /// Reset every time SessionStore reports a rep increment. nil when no
+    /// cascade is running.
+    @Published var dropFinalizeAt: Date? = nil
+    /// Internal timer publishers and rep observation.
+    private var cascadeTimer: AnyCancellable? = nil
+    private var idleWatchdog: AnyCancellable? = nil
+    private var dropRepObserver: AnyCancellable? = nil
+    private var lastObservedReps: Int = 0
+    /// Bridge to the BLE writer captured at startDropSet — invoked on each
+    /// cascade tick to retarget the device.
+    private var dropPushWeight: ((Double) -> Void)? = nil
     /// Per-drop telemetry snapshots collected during the chain. The parent
     /// LoggedSet's top-level fields will be populated from element [0]; any
     /// elements [1..N] become Drop rows.
     private var pendingDropSnapshots: [DropBoundarySnapshot] = []
     /// Per-drop planned weight at index — kept aligned with snapshots so
-    /// the persisted Drop carries the planned Voltra weight (which the user
-    /// configured) rather than relying on `pendingPlannedWeightLb` mutating
-    /// during the chain.
+    /// the persisted Drop carries the planned Voltra weight rather than
+    /// relying on `pendingPlannedWeightLb` mutating during the chain.
     private var pendingDropPlannedWeights: [Double] = []
     /// Bumped each time the user fully exits the post-session export sheet,
     /// so the home view can pop the entire navigation stack back to root.
@@ -154,8 +199,12 @@ final class LoggingStore: ObservableObject {
     func autoLogTelemetrySet(_ telemetry: CompletedSet) {
         guard let ctx = modelContext, let instance = activeInstance else { return }
         let order = (instance.sets?.count ?? 0) + 1
-        let weight = pendingPlannedWeightLb ?? 0
-        let ecc = upcomingEccLb > 0 ? upcomingEccLb : nil
+        // Pulley mode multiplies the user-felt load. We persist EFFECTIVE
+        // weight + EFFECTIVE peak force so analytics reflect what the user
+        // actually moved, not the device setting.
+        let m = pulleyMultiplier
+        let weight = (pendingPlannedWeightLb ?? 0) * m
+        let ecc = upcomingEccLb > 0 ? upcomingEccLb * m : nil
         let reps = telemetry.reps  // telemetry-overridden
         let logged = LoggedSet(
             completedAt: Date(),
@@ -166,7 +215,7 @@ final class LoggingStore: ObservableObject {
             eccentricLb: ecc,
             reps: reps,
             chainsLb: nil,
-            peakForceLb: telemetry.peakLb,
+            peakForceLb: telemetry.peakLb * m,
             avgForceLb: nil,
             mode: upcomingMode,
             labelText: upcomingMode.label,
@@ -193,114 +242,266 @@ final class LoggingStore: ObservableObject {
 
     // MARK: - v0.4.5: Drop-set state machine
 
-    /// Start a drop set with a pre-planned chain of Voltra base weights.
-    /// `plannedDropsLb` is the FULL chain including drop #1, e.g.
-    /// [100, 80, 60] for a 3-drop set. The first weight is written to the
-    /// device immediately so the user lifts at drop #1's load. Each
-    /// subsequent drop is auto-advanced when SessionStore reports an idle
-    /// boundary (>= IDLE_GRACE_MS of no movement).
-    func startDropSet(plannedDropsLb: [Double], pushWeight: @escaping (Double) -> Void) {
-        guard plannedDropsLb.count >= 2 else { return } // a 1-drop "chain" isn't a drop set
+    /// v0.4.6: Start a time-driven drop cascade from the current weight.
+    /// Behavior:
+    ///   1. Drops the device weight by 20% IMMEDIATELY (drop #2).
+    ///   2. Every `cascadeIntervalSec` seconds, drops another 20% until the
+    ///      computed step no longer decreases (rounded to 2.5 lb floor).
+    ///   3. A separate `cascadeIdleFinalizeSec` watchdog finalizes the set
+    ///      when no rep has been seen for that long, finalizing the set
+    ///      via SessionStore's normal flow.
+    /// `pushWeight` bridges to the BLE writer; called on each cascade tick.
+    func startDropSet(startingLb: Double, pushWeight: @escaping (Double) -> Void) {
         guard let session = sessionStore else { return }
+        guard startingLb > 0 else { return }
+
+        // Tear down any prior cascade state defensively.
+        stopCascadeTimers()
 
         dropSetActive = true
-        dropChainPlannedLb = plannedDropsLb
         currentDropIndex = 1
+        cascadeTier = 1            // tap #1 = tier 1 (5 lb / 5%)
         pendingDropSnapshots = []
         pendingDropPlannedWeights = []
+        dropPushWeight = pushWeight
 
-        // Snapshot the upcoming "working set" weight as drop #1 so the
-        // existing nudge UI keeps reflecting drop #1 throughout the chain.
-        // (We track the live device target separately via `pushWeight`.)
-        pendingPlannedWeightLb = plannedDropsLb[0]
+        // Drop #1 = the starting weight (what the user was just lifting).
+        // We seed the chain with it so history rendering stays consistent.
+        dropChainPlannedLb = [startingLb]
+        pendingPlannedWeightLb = startingLb
 
-        // Lock the parent set's logging mode to .dropSet so the row is
-        // labeled correctly in history.
+        // Lock the parent set's logging mode to .dropSet.
         upcomingMode = .dropSet
 
-        // Wire SessionStore: enable mode + register the callback. We use
-        // [weak self] so SessionStore doesn't hold a retain cycle on us.
+        // Tell SessionStore we're in drop mode + register a boundary
+        // callback that ALWAYS returns .advance until we explicitly stop.
+        // This lets us reuse SessionStore's per-drop reps/peak slicing for
+        // the snapshot record while we drive cascade timing ourselves.
         session.beginDropChain()
         session.onDropBoundary = { [weak self] snap in
-            return self?.handleDropBoundary(snap, pushWeight: pushWeight) ?? .finalize
+            self?.recordDropSnapshot(snap)
+            return .advance
         }
 
-        // Push drop #1's weight to the device right now so the user lifts
-        // at the configured load. The caller's pushWeight closure is the
-        // bridge to VoltraWriter.
-        pushWeight(plannedDropsLb[0])
+        // Fire drop #2 IMMEDIATELY (−20%). The user wants the press of
+        // the button to feel instant.
+        fireNextCascadeStep()
+
+        // Start the recurring cascade timer (drops #3, #4, …).
+        scheduleCascadeTimer()
+
+        // Start the no-movement watchdog (10s of no rep increment → finalize).
+        startIdleWatchdog()
     }
 
-    /// Cancel an in-flight drop chain WITHOUT finalizing the set. Used when
-    /// the user backs out of drop-set mode mid-chain. The currently
-    /// in-flight set keeps accumulating but as a normal set; SessionStore
-    /// will finalize it via the standard heuristic on next idle.
+    /// Cancel an in-flight drop cascade WITHOUT finalizing the set. The
+    /// currently in-flight set keeps accumulating but as a normal set.
     func cancelDropSet() {
+        stopCascadeTimers()
         dropSetActive = false
         dropChainPlannedLb = []
         currentDropIndex = 1
+        cascadeTier = 1
         pendingDropSnapshots = []
         pendingDropPlannedWeights = []
+        nextDropFiresAt = nil
+        dropFinalizeAt = nil
+        dropPushWeight = nil
         sessionStore?.endDropChainModeOnly()
     }
 
-    /// Helper: compute the next drop weight given a step percentage and a
-    /// current weight, rounded to 2.5 lb. Exposed so the UI "Add drop"
-    /// button can preview the next planned drop without duplicating the
-    /// rounding rule.
-    static func dropStepLb(stepPercent: Double, from currentLb: Double) -> Double {
-        let raw = currentLb * (1.0 - stepPercent)
-        // Round down to nearest 2.5 (drops should never go HIGHER than the
-        // mathematical step, only at-or-below).
-        let stepped = (raw / 2.5).rounded(.down) * 2.5
+    /// v0.4.6: User tapped the DROP SET tile while a cascade is already
+    /// running. Bump the tier (5→10→15…), fire an immediate drop using
+    /// the new tier, and reset the 4s next-drop fuse so auto-cascade keeps
+    /// pace from now using the new tier.
+    func bumpCascadeTier() {
+        guard dropSetActive else { return }
+        cascadeTier += 1
+        // Cancel and reschedule so the immediate fire below isn't immediately
+        // followed by another auto-tick.
+        cascadeTimer?.cancel(); cascadeTimer = nil
+        fireNextCascadeStep()
+        scheduleCascadeTimer()
+        // Bumping counts as activity — push the no-movement watchdog out.
+        dropFinalizeAt = Date().addingTimeInterval(cascadeIdleFinalizeSec)
+    }
+
+    // MARK: - v0.4.6: Cascade machinery
+
+    /// Compute the next cascade step from the current trailing DEVICE weight,
+    /// using the active `cascadeTier` and the active pulley multiplier.
+    /// Drop math runs on EFFECTIVE load and back-computes the device setting,
+    /// so a 100 lb effective set under 2× pulley drops as 100→95 effective
+    /// (= 50→47.5 on the device), not 50→45.
+    private func nextCascadeWeight() -> Double? {
+        guard let cur = dropChainPlannedLb.last, cur > 0 else { return nil }
+        let next = LoggingStore.cascadeNextDeviceWeight(
+            fromDeviceLb: cur,
+            tier: cascadeTier,
+            multiplier: pulleyMultiplier
+        )
+        if next <= 0 || next >= cur { return nil }
+        return next
+    }
+
+    /// Compute a preview of the upcoming next-N cascade weights using the
+    /// caller-supplied tier (defaults to current `cascadeTier`). Pure —
+    /// does not mutate state. Returns EFFECTIVE (user-felt) weights so the UI
+    /// tile shows what the user will actually be lifting under pulley mode.
+    /// `currentLb` is the current EFFECTIVE weight (i.e. already multiplied).
+    func previewNextCascade(from currentLb: Double, count: Int, tier: Int? = nil) -> [Double] {
+        let useTier = tier ?? cascadeTier
+        var out: [Double] = []
+        var cur = currentLb
+        for _ in 0..<count {
+            // Cascade on effective load directly (multiplier=1 so the math
+            // stays on the input's coordinate space).
+            let next = LoggingStore.cascadeNextDeviceWeight(
+                fromDeviceLb: cur,
+                tier: useTier,
+                multiplier: 1.0
+            )
+            if next <= 0 || next >= cur { break }
+            out.append(next)
+            cur = next
+        }
+        return out
+    }
+
+    /// Push the next cascade step (−20%) to the device. Updates state and
+    /// the next-fire timestamp. If the cascade can't go any lower, stops
+    /// the cascade timer (the watchdog will eventually finalize).
+    private func fireNextCascadeStep() {
+        guard let next = nextCascadeWeight() else {
+            // Bottomed out — stop dropping but leave watchdog running so
+            // the set can still finalize on idle.
+            cascadeTimer?.cancel()
+            cascadeTimer = nil
+            nextDropFiresAt = nil
+            return
+        }
+        dropChainPlannedLb.append(next)
+        currentDropIndex = dropChainPlannedLb.count
+        pendingPlannedWeightLb = next
+        dropPushWeight?(next)
+        nextDropFiresAt = Date().addingTimeInterval(cascadeIntervalSec)
+    }
+
+    /// Schedule a recurring 4s timer that fires the next cascade step.
+    private func scheduleCascadeTimer() {
+        nextDropFiresAt = Date().addingTimeInterval(cascadeIntervalSec)
+        cascadeTimer = Timer.publish(every: cascadeIntervalSec, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.fireNextCascadeStep()
+            }
+    }
+
+    /// Start a periodic check that finalizes the set when no rep has been
+    /// observed for `cascadeIdleFinalizeSec`. We DON'T finalize via
+    /// SessionStore's normal idle path (which is 4s) — cascade sets get a
+    /// longer fuse so a slow last drop isn't cut off.
+    private func startIdleWatchdog() {
+        lastObservedReps = sessionStore?.currentSet?.reps ?? 0
+        dropFinalizeAt = Date().addingTimeInterval(cascadeIdleFinalizeSec)
+        idleWatchdog = Timer.publish(every: 0.5, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.checkCascadeIdle()
+            }
+    }
+
+    /// 0.5s tick: if reps incremented, reset the no-movement deadline.
+    /// Otherwise, if the deadline has passed, finalize the set.
+    private func checkCascadeIdle() {
+        guard dropSetActive, let session = sessionStore else { return }
+        let reps = session.currentSet?.reps ?? 0
+        if reps > lastObservedReps {
+            lastObservedReps = reps
+            dropFinalizeAt = Date().addingTimeInterval(cascadeIdleFinalizeSec)
+            return
+        }
+        if let deadline = dropFinalizeAt, Date() >= deadline {
+            finalizeCascade()
+        }
+    }
+
+    /// Cleanly end the cascade and finalize the parent set.
+    private func finalizeCascade() {
+        // Stop our own timers FIRST so we don't re-enter.
+        stopCascadeTimers()
+        nextDropFiresAt = nil
+        dropFinalizeAt = nil
+        // Tell SessionStore to drop boundary mode (so the next idle goes
+        // through the normal finalize path) then trigger finalize via the
+        // public path. SessionStore's onDropBoundary is wired to .advance,
+        // so we have to clear it before letting normal finalize fire.
+        sessionStore?.endDropChainModeOnly()
+        sessionStore?.forceFinalizeCurrentSet()
+        // Drop UI state cleared in autoLogDropChain when handleCompletedSetsUpdate
+        // routes the just-finalized parent telemetry through us.
+    }
+
+    /// Cancel all timers but leave dropSetActive untouched (caller decides).
+    private func stopCascadeTimers() {
+        cascadeTimer?.cancel(); cascadeTimer = nil
+        idleWatchdog?.cancel(); idleWatchdog = nil
+    }
+
+    /// SessionStore boundary callback handler. Buffers the per-drop snapshot
+    /// so autoLogDropChain can persist Drop rows.
+    private func recordDropSnapshot(_ snap: DropBoundarySnapshot) {
+        pendingDropSnapshots.append(snap)
+        let plannedThis = (snap.order - 1) < dropChainPlannedLb.count
+            ? dropChainPlannedLb[snap.order - 1]
+            : (pendingPlannedWeightLb ?? 0)
+        pendingDropPlannedWeights.append(plannedThis)
+    }
+
+    /// v0.4.6 cascade rule: drop = MAX(absoluteLb, percent × current).
+    /// We take the LARGER drop — the user wants aggressive cascades.
+    /// `tier` multiplies the base step (5 lb / 5%): tier 1 = 5/5%, tier 2 =
+    /// 10/10%, etc. Operates on the input coordinate space directly.
+    static func cascadeNextWeight(from currentLb: Double, tier: Int,
+                                  baseLb: Double = 5.0,
+                                  basePct: Double = 0.05) -> Double {
+        guard currentLb > 0, tier >= 1 else { return 0 }
+        let absDrop = baseLb * Double(tier)
+        let pctDrop = currentLb * basePct * Double(tier)
+        let drop = max(absDrop, pctDrop)
+        let raw = currentLb - drop
+        // Round to 2.5 lb. Round to nearest (not down) so 47.5 stays 47.5
+        // and 48.7 → 50 only when the rounded result is still < current.
+        let stepped = (raw / 2.5).rounded() * 2.5
+        // Guard against rounding pushing the result back up to/above current.
+        if stepped >= currentLb { return max(0, currentLb - 2.5) }
         return max(0, stepped)
     }
 
-    /// Build a default 3-drop chain from a starting weight using the
-    /// exercise's `defaultDropPercent` (or 0.20 if the exercise is unknown).
-    func defaultDropChain(startingLb: Double, exercise: Exercise?) -> [Double] {
-        let pct = exercise?.defaultDropPercent ?? 0.20
-        var chain: [Double] = [startingLb]
-        var cur = startingLb
-        for _ in 0..<2 {
-            let next = LoggingStore.dropStepLb(stepPercent: pct, from: cur)
-            // Stop the chain if we'd hit zero or fail to actually drop.
-            if next <= 0 || next >= cur { break }
-            chain.append(next)
-            cur = next
-        }
-        return chain
+    /// Cascade variant that respects pulley mode. Converts device weight →
+    /// effective, applies the tiered drop on EFFECTIVE load, back-computes
+    /// the device weight (effective / multiplier), and re-rounds to 2.5 lb.
+    /// Pass `multiplier: 1.0` to operate directly on whatever coordinate
+    /// space `fromDeviceLb` is already in (effective or device).
+    static func cascadeNextDeviceWeight(fromDeviceLb deviceLb: Double,
+                                        tier: Int,
+                                        multiplier: Double) -> Double {
+        guard deviceLb > 0, tier >= 1, multiplier > 0 else { return 0 }
+        let effective = deviceLb * multiplier
+        let nextEffective = cascadeNextWeight(from: effective, tier: tier)
+        if nextEffective <= 0 || nextEffective >= effective { return 0 }
+        let backToDevice = nextEffective / multiplier
+        // Re-round to 2.5 lb on the device coordinate.
+        let stepped = (backToDevice / 2.5).rounded() * 2.5
+        if stepped >= deviceLb { return max(0, deviceLb - 2.5) }
+        return max(0, stepped)
     }
 
-    /// Boundary callback registered with SessionStore. Invoked every time
-    /// the idle-grace heuristic would normally finalize a set during a drop
-    /// chain. We buffer the snapshot, advance to the next planned weight
-    /// (or finalize if this was the last drop), and tell SessionStore which
-    /// path to take.
-    private func handleDropBoundary(
-        _ snap: DropBoundarySnapshot,
-        pushWeight: @escaping (Double) -> Void
-    ) -> DropDecision {
-        // Buffer this drop's telemetry. `currentDropIndex` is 1-based; the
-        // first time the callback fires, we're recording drop #1's slice.
-        pendingDropSnapshots.append(snap)
-        let plannedThis = (currentDropIndex - 1) < dropChainPlannedLb.count
-            ? dropChainPlannedLb[currentDropIndex - 1]
-            : (pendingPlannedWeightLb ?? 0)
-        pendingDropPlannedWeights.append(plannedThis)
-
-        // Was this the last drop in the planned chain?
-        if currentDropIndex >= dropChainPlannedLb.count {
-            // Final drop — fall through to normal finalize.
-            // `handleCompletedSetsUpdate` will then route to autoLogDropChain.
-            return .finalize
-        }
-
-        // Advance: write the next drop's weight to the device, bump index.
-        currentDropIndex += 1
-        let nextLb = dropChainPlannedLb[currentDropIndex - 1]
-        pushWeight(nextLb)
-        return .advance
+    /// Legacy helper kept for any callers that still reference flat-percent
+    /// drop math (e.g. preview computations on initial entry). Forwards to
+    /// the new max(abs, pct) rule using tier 1 by default.
+    static func dropStepLb(stepPercent: Double, from currentLb: Double) -> Double {
+        return cascadeNextWeight(from: currentLb, tier: 1)
     }
 
     /// Build a drop-set LoggedSet from the buffered per-drop snapshots and
@@ -309,21 +510,28 @@ final class LoggingStore: ObservableObject {
     private func autoLogDropChain(parentTelemetry telemetry: CompletedSet) {
         guard let ctx = modelContext, let instance = activeInstance else {
             // Defensive: if we can't persist, at least clear state.
+            stopCascadeTimers()
             pendingDropSnapshots = []
             pendingDropPlannedWeights = []
             dropSetActive = false
             dropChainPlannedLb = []
             currentDropIndex = 1
+            cascadeTier = 1
+            nextDropFiresAt = nil
+            dropFinalizeAt = nil
+            dropPushWeight = nil
             return
         }
 
         let order = (instance.sets?.count ?? 0) + 1
+        // Pulley mode → persist EFFECTIVE load on every drop row.
+        let m = pulleyMultiplier
         // Drop #1 source-of-truth: prefer the buffered snapshot; fall back
         // to the parent telemetry if for some reason we missed buffering.
         let firstSnap = pendingDropSnapshots.first
-        let drop1Weight = pendingDropPlannedWeights.first ?? (pendingPlannedWeightLb ?? 0)
+        let drop1Weight = (pendingDropPlannedWeights.first ?? (pendingPlannedWeightLb ?? 0)) * m
         let drop1Reps = firstSnap?.reps ?? telemetry.reps
-        let drop1Peak = firstSnap?.peakLb ?? telemetry.peakLb
+        let drop1Peak = (firstSnap?.peakLb ?? telemetry.peakLb) * m
         let drop1Started = firstSnap?.startedAt ?? telemetry.startedAt
         let drop1Ended = firstSnap?.endedAt ?? telemetry.endedAt
 
@@ -333,7 +541,7 @@ final class LoggingStore: ObservableObject {
             endedAt: drop1Ended,
             orderIndex: order,
             weightLb: drop1Weight,
-            eccentricLb: upcomingEccLb > 0 ? upcomingEccLb : nil,
+            eccentricLb: upcomingEccLb > 0 ? upcomingEccLb * m : nil,
             reps: drop1Reps,
             chainsLb: nil,
             peakForceLb: drop1Peak,
@@ -357,17 +565,17 @@ final class LoggingStore: ObservableObject {
         for i in 1..<pendingDropSnapshots.count {
             let snap = pendingDropSnapshots[i]
             let plannedW = i < pendingDropPlannedWeights.count
-                ? pendingDropPlannedWeights[i]
+                ? pendingDropPlannedWeights[i] * m
                 : 0
             let drop = Drop(
                 order: i + 1,                       // 2..N (1-based)
                 weightLb: plannedW,
                 addedPlatesLb: upcomingAddedLoadLb,  // inherit from parent
-                eccentricLb: upcomingEccLb > 0 ? upcomingEccLb : nil,
+                eccentricLb: upcomingEccLb > 0 ? upcomingEccLb * m : nil,
                 reps: snap.reps,
                 startedAt: snap.startedAt,
                 endedAt: snap.endedAt,
-                peakForceLb: snap.peakLb,
+                peakForceLb: snap.peakLb * m,
                 avgForceLb: nil,
                 loggedSet: parent
             )
@@ -379,11 +587,16 @@ final class LoggingStore: ObservableObject {
         pendingTelemetrySet = nil
 
         // Reset drop state — chain is done.
+        stopCascadeTimers()
         pendingDropSnapshots = []
         pendingDropPlannedWeights = []
         dropSetActive = false
         dropChainPlannedLb = []
         currentDropIndex = 1
+        cascadeTier = 1
+        nextDropFiresAt = nil
+        dropFinalizeAt = nil
+        dropPushWeight = nil
         // Restore upcoming mode to .working so the next set isn't accidentally
         // a drop set unless the user explicitly starts another one.
         upcomingMode = .working
@@ -538,6 +751,9 @@ final class LoggingStore: ObservableObject {
         // v0.4.0 — added-load is per-instance. New exercise, fresh start.
         upcomingAddedLoadLb = nil
         upcomingAddedLoadType = nil
+        // v0.4.6 — pulley mode is sticky-to-next-set within an instance,
+        // but resets on a new exercise.
+        pulleyMode = false
 
         // Bump exercise recency.
         exercise.lastUsedAt = Date()

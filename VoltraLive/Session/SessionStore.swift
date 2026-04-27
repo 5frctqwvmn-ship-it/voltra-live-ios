@@ -52,7 +52,7 @@ final class SessionStore: ObservableObject {
     private var restTimer: AnyCancellable? = nil
 
     // Set-complete idle tracking
-    private var idleSince: Date? = nil
+    @Published private(set) var idleSince: Date? = nil
 
     // Last-rep-count for new-set detection
     private var lastRepCount: Int = 0
@@ -256,6 +256,31 @@ final class SessionStore: ObservableObject {
     var restFormatted: String {
         let sec = Int(restElapsedSeconds)
         return "\(sec / 60):\(String(format: "%02d", sec % 60))"
+    }
+
+    // MARK: - v0.4.6: External finalize hook (drop cascade watchdog)
+
+    /// Forcibly finalize the in-flight set as if the idle-grace heuristic
+    /// fired. Used by LoggingStore's drop-cascade watchdog (10s of no rep
+    /// increment finalizes the set). Safe to call when no set is active.
+    func forceFinalizeCurrentSet() {
+        guard currentSet != nil else { return }
+        // Defensive: clear drop-mode hooks first so finalize takes the
+        // normal path (LoggingStore's caller is responsible for clearing
+        // its own drop state via the completedSets observer).
+        dropSetMode = false
+        onDropBoundary = nil
+        finalizeSet()
+    }
+
+    /// 0–1 progress through the idle-grace window (`IDLE_GRACE_MS`).
+    /// 0 = not idle yet; 1 = about to finalize. Drives the under-REPS
+    /// idle countdown bar on LiveCaptureView. Returns 0 when no set is
+    /// active or the user is mid-rep.
+    var idleProgress01: Double {
+        guard currentSet != nil, let since = idleSince else { return 0 }
+        let elapsed = Date().timeIntervalSince(since)
+        return min(1.0, max(0, elapsed / IDLE_GRACE_MS))
     }
 
     // MARK: - Session management

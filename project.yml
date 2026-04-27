@@ -56,16 +56,19 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         DEVELOPMENT_TEAM: "${APPLE_TEAM_ID:-}"
-        MARKETING_VERSION: "0.4.5"
-        CURRENT_PROJECT_VERSION: "22"
+        MARKETING_VERSION: "0.4.6"
+        CURRENT_PROJECT_VERSION: "23"
     dependencies:
       - sdk: CoreBluetooth.framework
       - sdk: CloudKit.framework
+      - sdk: HealthKit.framework
     info:
       path: VoltraLive/Info.plist
       properties:
         NSBluetoothAlwaysUsageDescription: "VOLTRA Live needs Bluetooth to connect to your VOLTRA device and receive live workout telemetry."
         NSBluetoothPeripheralUsageDescription: "VOLTRA Live needs Bluetooth to connect to your VOLTRA device."
+        NSHealthShareUsageDescription: "VOLTRA Live reads heart rate and active energy from your Apple Watch workout so you can see live BPM and calories during a session."
+        NSHealthUpdateUsageDescription: "VOLTRA Live does not write to Health — this entry is required by the platform."
         UILaunchStoryboardName: ""
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -81,8 +84,8 @@ targets:
         UIUserInterfaceStyle: Dark
         CFBundleDisplayName: "VOLTRA Live"
         CFBundleName: "VoltraLive"
-        CFBundleShortVersionString: "0.4.5"
-        CFBundleVersion: "22"
+        CFBundleShortVersionString: "0.4.6"
+        CFBundleVersion: "23"
 
   VoltraLiveTests:
     type: bundle.unit-test

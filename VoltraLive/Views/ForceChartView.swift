@@ -30,6 +30,12 @@ struct ForceChartView: View {
     /// weight (e.g. DashboardView) to preserve the prior 40 lb floor behavior.
     var plannedCeilingLb: Double? = nil
 
+    /// v0.4.6: Pulley mode. When the cable runs through a pulley, the user
+    /// feels 2× the cable force, but the device still reports the cable
+    /// force. Multiply incoming sample forces by this to display EFFECTIVE
+    /// load. Default 1.0 = no transform.
+    var forceMultiplier: Double = 1.0
+
     private var now: Date { Date() }
 
     /// v0.4.5: All samples are visible — no 30s cutoff. The chart auto-spans
@@ -39,7 +45,7 @@ struct ForceChartView: View {
     }
 
     private var maxForce: Double {
-        let maxVisible = visibleSamples.map(\.forceLb).max() ?? 0
+        let maxVisible = smoothedSamples.map(\.forceLb).max() ?? 0
         if let planned = plannedCeilingLb, planned > 0 {
             // Planned-weight + 15% headroom OR observed peak + 15% headroom,
             // whichever is greater — so a strong overshoot doesn't clip the
@@ -52,13 +58,44 @@ struct ForceChartView: View {
         return max(40, maxVisible) * 1.1
     }
 
+    /// v0.4.6: 3-sample moving average smoothing applied to the visible
+    /// samples and their force values are pre-multiplied by `forceMultiplier`
+    /// so the chart shows EFFECTIVE load (matters for pulley mode). Phase +
+    /// timestamp are passed through unchanged.
+    private var smoothedSamples: [ForceSample] {
+        let m = forceMultiplier
+        let raw = visibleSamples
+        guard !raw.isEmpty else { return [] }
+        if raw.count == 1 {
+            let s = raw[0]
+            return [ForceSample(timestamp: s.timestamp, forceLb: s.forceLb * m, phase: s.phase)]
+        }
+        var out: [ForceSample] = []
+        out.reserveCapacity(raw.count)
+        for i in 0..<raw.count {
+            let lo = max(0, i - 1)
+            let hi = min(raw.count - 1, i + 1)
+            var sum = 0.0
+            var n = 0
+            for j in lo...hi { sum += raw[j].forceLb; n += 1 }
+            let avg = n > 0 ? sum / Double(n) : raw[i].forceLb
+            out.append(ForceSample(
+                timestamp: raw[i].timestamp,
+                forceLb: avg * m,
+                phase: raw[i].phase
+            ))
+        }
+        return out
+    }
+
     // Build chart points with segment grouping for phase-colored segments
     private var chartPoints: [ChartPoint] {
-        guard !visibleSamples.isEmpty else { return [] }
+        let src = smoothedSamples
+        guard !src.isEmpty else { return [] }
         var points = [ChartPoint]()
         var segIdx = 0
         var lastPhase: VoltraPhase? = nil
-        for (i, s) in visibleSamples.enumerated() {
+        for (i, s) in src.enumerated() {
             if let lp = lastPhase, lp != s.phase { segIdx += 1 }
             points.append(ChartPoint(
                 id: i,
@@ -115,7 +152,7 @@ struct ForceChartView: View {
                     legendDot(color: VoltraColor.pull, label: "Pull")
                     legendDot(color: VoltraColor.returnPhase, label: "Return")
                     if peakLb > 0 {
-                        Text("peak \(String(format: "%.1f", peakLb)) lb")
+                        Text("peak \(String(format: "%.1f", peakLb * forceMultiplier)) lb")
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundColor(VoltraColor.accent)
                     }
@@ -124,7 +161,7 @@ struct ForceChartView: View {
             }
             .padding(.bottom, 8)
 
-            if visibleSamples.isEmpty {
+            if smoothedSamples.isEmpty {
                 // Empty state
                 ZStack {
                     RoundedRectangle(cornerRadius: 8)
@@ -136,8 +173,8 @@ struct ForceChartView: View {
             } else {
                 // v0.4.5: X domain spans the actual sample range (full set),
                 // not a fixed 30s rolling window.
-                let firstTS = visibleSamples.first?.timestamp ?? now
-                let lastTS = visibleSamples.last?.timestamp ?? now
+                let firstTS = smoothedSamples.first?.timestamp ?? now
+                let lastTS = smoothedSamples.last?.timestamp ?? now
                 let windowStart = firstTS
                 // Guard against degenerate single-point ranges (Swift Charts
                 // crashes if domain is empty). Also pad a small trailing

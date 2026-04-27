@@ -119,12 +119,17 @@ struct ProgressChartView: View {
         if isSample { return range }
         let sortedReal = series.sorted { $0.date < $1.date }
         guard !sortedReal.isEmpty else { return range }
-        // Try the user's chosen range first; if empty, walk widening.
+        // v0.4.6: Require ≥3 points in the candidate window before stopping
+        // — a single dot (or two) renders as an empty-looking chart, so we'd
+        // rather widen to a range that has enough history to draw a real
+        // trendline. The user can still tap any range chip to override.
+        let minPoints = 3
         let order: [ProgressRange] = [range, .oneMonth, .threeMonth, .oneYear, .all]
         for candidate in order {
             guard let days = candidate.days else { return .all }
             let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
-            if sortedReal.contains(where: { $0.date >= cutoff }) {
+            let count = sortedReal.reduce(0) { $1.date >= cutoff ? $0 + 1 : $0 }
+            if count >= minPoints {
                 return candidate
             }
         }
