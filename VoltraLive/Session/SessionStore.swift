@@ -9,6 +9,15 @@
 //   - idle duration >= 4000ms (IDLE_GRACE_MS)
 // When finalized: archive set, start rest timer.
 // Rest timer stops on next Pull or rep increment.
+//
+// v0.4.5 — Drop-set mode:
+//   When `dropSetMode == true`, the SAME idle-grace heuristic that normally
+//   finalizes a set instead invokes `onDropBoundary` with a snapshot of the
+//   reps/peak/samples since the previous drop boundary (or set start). The
+//   callback returns either `.advance` (more drops remain — keep currentSet
+//   open, reset reps/peak, no rest timer) or `.finalize` (last drop — fall
+//   through to normal finalize, which starts the rest timer). LoggingStore
+//   wires this to its planned drop chain and the BLE writer.
 
 import Foundation
 import SwiftData
@@ -26,6 +35,16 @@ final class SessionStore: ObservableObject {
     @Published var completedSets: [CompletedSet] = []
     @Published var currentSet: CurrentSet? = nil
 
+    /// v0.4.5: After a set finalizes, we keep the just-completed set's
+    /// samples around so the live chart can keep displaying the waveform
+    /// until the next set starts. Cleared on the first sample of the next
+    /// set. Without this, the chart blanked the moment the idle-grace
+    /// finalize fired and the user lost their post-set review window.
+    @Published var lastFinalizedSamples: [ForceSample] = []
+    @Published var lastFinalizedPeakLb: Double = 0
+    @Published var lastFinalizedStartedAt: Date? = nil
+    @Published var lastFinalizedEndedAt: Date? = nil
+
     // Rest timer
     @Published var restActive: Bool = false
     @Published var restElapsedSeconds: Double = 0
@@ -37,6 +56,28 @@ final class SessionStore: ObservableObject {
 
     // Last-rep-count for new-set detection
     private var lastRepCount: Int = 0
+
+    // MARK: - v0.4.5: Drop-set mode
+    /// True while a drop set is in flight. Flipped on by LoggingStore at the
+    /// start of the chain and flipped off after the final drop fires.
+    @Published var dropSetMode: Bool = false
+    /// Telemetry-aware boundary callback. SessionStore invokes this in place
+    /// of `finalizeSet()` when `dropSetMode == true`. The callback may return
+    /// `.advance` to continue the chain (we keep currentSet open and reset
+    /// the per-drop counters) or `.finalize` to fall through to normal
+    /// finalize (last drop — starts rest timer).
+    var onDropBoundary: ((DropBoundarySnapshot) -> DropDecision)? = nil
+    /// Marker for slicing per-drop telemetry. Set when a drop chain begins
+    /// and re-set on every advance. nil when no drop set is active.
+    private var currentDropStartedAt: Date? = nil
+    /// Per-drop reps/peak baselines so we can compute the drop's slice
+    /// without separating sample arrays. (We snapshot reps/peak DELTAS by
+    /// resetting these on each advance.)
+    private var currentDropPeakLb: Double = 0
+    private var currentDropReps: Int = 0
+    /// 1-based drop index within the active chain. Drop #1 is implicit
+    /// (the parent set’s top-level fields); subsequent drops are 2..N.
+    private var currentDropOrder: Int = 1
 
     // SwiftData context — injected from app
     var modelContext: ModelContext?
@@ -57,6 +98,12 @@ final class SessionStore: ObservableObject {
             currentSet = CurrentSet(startedAt: now)
             restStartedAt = nil
             setRestActive(false)
+            // v0.4.5: clear the post-finalize trace so the chart
+            // transitions cleanly to the new set.
+            lastFinalizedSamples = []
+            lastFinalizedPeakLb = 0
+            lastFinalizedStartedAt = nil
+            lastFinalizedEndedAt = nil
         }
 
         // Accumulate into current set
@@ -64,6 +111,11 @@ final class SessionStore: ObservableObject {
             let sample = ForceSample(timestamp: now, forceLb: forceLb, phase: phase)
             currentSet!.addSample(sample)
             if repCount > currentSet!.reps { currentSet!.reps = repCount }
+            // Track per-drop peak relative to the in-flight drop (used when
+            // the user is in a drop set so we can attribute force per drop
+            // rather than only per parent set).
+            if forceLb > currentDropPeakLb { currentDropPeakLb = forceLb }
+            currentDropReps = currentSet!.reps - dropRepBaseline
         }
 
         // Set-complete heuristic (verbatim logic from app.js)
@@ -71,13 +123,76 @@ final class SessionStore: ObservableObject {
            phase == .idle && forceLb < 5 && cs.reps > 0 {
             if idleSince == nil { idleSince = now }
             if let since = idleSince, now.timeIntervalSince(since) >= IDLE_GRACE_MS {
-                finalizeSet()
+                // v0.4.5: in drop-set mode, defer to the boundary callback.
+                // The callback decides whether this is another drop (keep set
+                // open) or the final drop (fall through to normal finalize).
+                if dropSetMode, let cb = onDropBoundary {
+                    let snap = DropBoundarySnapshot(
+                        order: currentDropOrder,
+                        reps: currentDropReps > 0 ? currentDropReps : cs.reps,
+                        peakLb: currentDropPeakLb,
+                        startedAt: currentDropStartedAt ?? cs.startedAt,
+                        endedAt: now
+                    )
+                    let decision = cb(snap)
+                    switch decision {
+                    case .advance:
+                        advanceDropSubSet(now: now)
+                    case .finalize:
+                        finalizeSet()
+                    }
+                } else {
+                    finalizeSet()
+                }
             }
         } else {
             idleSince = nil
         }
 
         lastRepCount = repCount
+    }
+
+    // MARK: - v0.4.5: Drop-set advance
+
+    /// Per-drop rep baseline. `currentSet.reps` is the total across drops in
+    /// the chain; per-drop reps = total - this baseline. Recomputed on each
+    /// advance.
+    private var dropRepBaseline: Int = 0
+
+    /// Called by LoggingStore when a drop chain begins. Resets per-drop
+    /// counters but does NOT touch `currentSet` — the in-flight set keeps
+    /// accumulating samples normally.
+    func beginDropChain() {
+        dropSetMode = true
+        currentDropOrder = 1
+        currentDropStartedAt = currentSet?.startedAt ?? Date()
+        currentDropPeakLb = 0
+        currentDropReps = 0
+        dropRepBaseline = currentSet?.reps ?? 0
+    }
+
+    /// Called automatically when `onDropBoundary` returns `.advance`. Keeps
+    /// currentSet open (no finalize, no rest timer), resets the per-drop
+    /// slice counters so the next drop is measured cleanly.
+    private func advanceDropSubSet(now: Date) {
+        currentDropOrder += 1
+        currentDropStartedAt = now
+        currentDropPeakLb = 0
+        currentDropReps = 0
+        dropRepBaseline = currentSet?.reps ?? 0
+        idleSince = nil
+    }
+
+    /// Called by LoggingStore when the chain unconditionally ends (e.g. user
+    /// taps a Stop button). Clears drop-set mode without finalizing.
+    func endDropChainModeOnly() {
+        dropSetMode = false
+        onDropBoundary = nil
+        currentDropStartedAt = nil
+        currentDropPeakLb = 0
+        currentDropReps = 0
+        currentDropOrder = 1
+        dropRepBaseline = 0
     }
 
     // MARK: - Set finalization
@@ -92,11 +207,27 @@ final class SessionStore: ObservableObject {
             endedAt: ended
         )
         completedSets.append(done)
+        // v0.4.5: stash this set's samples so the chart keeps showing the
+        // trace through the rest period instead of blanking.
+        lastFinalizedSamples = cs.samples
+        lastFinalizedPeakLb = cs.peakLb
+        lastFinalizedStartedAt = cs.startedAt
+        lastFinalizedEndedAt = ended
         currentSet = nil
         idleSince = nil
         restStartedAt = Date()
         setRestActive(true)
         persistDraft()
+        // v0.4.5: clear drop-set mode after finalize so the next set isn't
+        // accidentally treated as part of a chain. LoggingStore is also
+        // responsible for clearing its own drop state.
+        dropSetMode = false
+        onDropBoundary = nil
+        currentDropStartedAt = nil
+        currentDropPeakLb = 0
+        currentDropReps = 0
+        currentDropOrder = 1
+        dropRepBaseline = 0
     }
 
     // MARK: - Rest timer

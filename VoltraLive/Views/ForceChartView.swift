@@ -1,6 +1,8 @@
 // ForceChartView.swift
-// Swift Charts line chart with phase-colored segments, last 30s rolling window.
-// 5 horizontal grid lines with lb labels.
+// Swift Charts line chart with phase-colored segments.
+// v0.4.5: chart now spans the entire set (no 30s rolling window) so the user
+// can review the full waveform after finishing. The X domain is anchored to
+// the first/last sample timestamps. 5 horizontal grid lines with lb labels.
 // Phase colors: pull=#00d4aa, return=#ffb84d, transition=#6c8de0, idle=#4a5f5b
 
 import SwiftUI
@@ -30,9 +32,10 @@ struct ForceChartView: View {
 
     private var now: Date { Date() }
 
+    /// v0.4.5: All samples are visible — no 30s cutoff. The chart auto-spans
+    /// the entire set so the user can review the full rep pattern.
     private var visibleSamples: [ForceSample] {
-        let cutoff = now.addingTimeInterval(-30)
-        return samples.filter { $0.timestamp >= cutoff }
+        samples
     }
 
     private var maxForce: Double {
@@ -99,7 +102,7 @@ struct ForceChartView: View {
         VStack(spacing: 0) {
             // Chart header
             HStack(alignment: .firstTextBaseline) {
-                Text("FORCE — 30s")
+                Text("FORCE")
                     .font(.system(size: 14, weight: .semibold))
                     .kerning(1.5)
                     .foregroundColor(VoltraColor.textDim)
@@ -131,7 +134,16 @@ struct ForceChartView: View {
                         .foregroundColor(VoltraColor.textFaint)
                 }
             } else {
-                let windowStart = now.addingTimeInterval(-30)
+                // v0.4.5: X domain spans the actual sample range (full set),
+                // not a fixed 30s rolling window.
+                let firstTS = visibleSamples.first?.timestamp ?? now
+                let lastTS = visibleSamples.last?.timestamp ?? now
+                let windowStart = firstTS
+                // Guard against degenerate single-point ranges (Swift Charts
+                // crashes if domain is empty). Also pad a small trailing
+                // gutter so the most-recent sample isn't flush to the edge.
+                let span = max(lastTS.timeIntervalSince(firstTS), 1.0)
+                let windowEnd = firstTS.addingTimeInterval(span + span * 0.04)
 
                 Chart {
                     // Horizontal grid lines
@@ -157,7 +169,7 @@ struct ForceChartView: View {
                     }
                 }
                 .chartYScale(domain: 0...maxForce)
-                .chartXScale(domain: windowStart...now)
+                .chartXScale(domain: windowStart...windowEnd)
                 .chartXAxis(.hidden)
                 .chartYAxis {
                     AxisMarks(values: gridValues) { value in

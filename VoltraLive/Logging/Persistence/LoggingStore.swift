@@ -52,6 +52,35 @@ final class LoggingStore: ObservableObject {
     /// Reset to nil on `pickExercise`.
     @Published var upcomingAddedLoadLb: Double? = nil
     @Published var upcomingAddedLoadType: String? = nil
+
+    // MARK: - v0.4.5: Drop-set state
+    //
+    // When the user starts a drop set, we hand SessionStore a planned chain
+    // and a boundary callback. SessionStore fires the callback every time
+    // its idle-grace heuristic would normally finalize a set. We advance
+    // through the chain by writing the next planned weight to the device,
+    // buffer the per-drop telemetry snapshot, and on the FINAL drop return
+    // `.finalize` so the parent set finalizes normally and our
+    // `handleCompletedSetsUpdate` hook converts it into a drop-set LoggedSet.
+
+    /// Whether the user is currently in a drop-set chain (vs a normal set).
+    /// Drives UI affordances on LiveCaptureView.
+    @Published var dropSetActive: Bool = false
+    /// Planned per-drop Voltra base weights for the active chain. Populated
+    /// by `startDropSet`; read by the boundary callback to push the next
+    /// weight to the device.
+    @Published var dropChainPlannedLb: [Double] = []
+    /// 1-based current drop within the active chain. nil when no chain.
+    @Published var currentDropIndex: Int = 1
+    /// Per-drop telemetry snapshots collected during the chain. The parent
+    /// LoggedSet's top-level fields will be populated from element [0]; any
+    /// elements [1..N] become Drop rows.
+    private var pendingDropSnapshots: [DropBoundarySnapshot] = []
+    /// Per-drop planned weight at index — kept aligned with snapshots so
+    /// the persisted Drop carries the planned Voltra weight (which the user
+    /// configured) rather than relying on `pendingPlannedWeightLb` mutating
+    /// during the chain.
+    private var pendingDropPlannedWeights: [Double] = []
     /// Bumped each time the user fully exits the post-session export sheet,
     /// so the home view can pop the entire navigation stack back to root.
     /// Avoids the user being stranded on the (now-empty) capture screen.
@@ -103,9 +132,17 @@ final class LoggingStore: ObservableObject {
         // upcoming-set context (weight/ecc/mode/added-load) overlaid by
         // telemetry reps + peak force. They can tap a row to edit or swipe
         // to delete (with undo).
+        //
+        // v0.4.5: when a drop chain JUST finalized, route through the
+        // drop-aware logger which builds the parent LoggedSet from drop #1
+        // and attaches Drop rows for drops 2..N.
         let newOnes = sets[consumedSetCount..<sets.count]
         for telemetrySet in newOnes {
-            autoLogTelemetrySet(telemetrySet)
+            if !pendingDropSnapshots.isEmpty {
+                autoLogDropChain(parentTelemetry: telemetrySet)
+            } else {
+                autoLogTelemetrySet(telemetrySet)
+            }
         }
         consumedSetCount = sets.count
     }
@@ -151,6 +188,206 @@ final class LoggingStore: ObservableObject {
         // Clear the one-shot pending-set indicator so any old code paths
         // that still react to it stop showing the SetLogView sheet.
         pendingTelemetrySet = nil
+        try? ctx.save()
+    }
+
+    // MARK: - v0.4.5: Drop-set state machine
+
+    /// Start a drop set with a pre-planned chain of Voltra base weights.
+    /// `plannedDropsLb` is the FULL chain including drop #1, e.g.
+    /// [100, 80, 60] for a 3-drop set. The first weight is written to the
+    /// device immediately so the user lifts at drop #1's load. Each
+    /// subsequent drop is auto-advanced when SessionStore reports an idle
+    /// boundary (>= IDLE_GRACE_MS of no movement).
+    func startDropSet(plannedDropsLb: [Double], pushWeight: @escaping (Double) -> Void) {
+        guard plannedDropsLb.count >= 2 else { return } // a 1-drop "chain" isn't a drop set
+        guard let session = sessionStore else { return }
+
+        dropSetActive = true
+        dropChainPlannedLb = plannedDropsLb
+        currentDropIndex = 1
+        pendingDropSnapshots = []
+        pendingDropPlannedWeights = []
+
+        // Snapshot the upcoming "working set" weight as drop #1 so the
+        // existing nudge UI keeps reflecting drop #1 throughout the chain.
+        // (We track the live device target separately via `pushWeight`.)
+        pendingPlannedWeightLb = plannedDropsLb[0]
+
+        // Lock the parent set's logging mode to .dropSet so the row is
+        // labeled correctly in history.
+        upcomingMode = .dropSet
+
+        // Wire SessionStore: enable mode + register the callback. We use
+        // [weak self] so SessionStore doesn't hold a retain cycle on us.
+        session.beginDropChain()
+        session.onDropBoundary = { [weak self] snap in
+            return self?.handleDropBoundary(snap, pushWeight: pushWeight) ?? .finalize
+        }
+
+        // Push drop #1's weight to the device right now so the user lifts
+        // at the configured load. The caller's pushWeight closure is the
+        // bridge to VoltraWriter.
+        pushWeight(plannedDropsLb[0])
+    }
+
+    /// Cancel an in-flight drop chain WITHOUT finalizing the set. Used when
+    /// the user backs out of drop-set mode mid-chain. The currently
+    /// in-flight set keeps accumulating but as a normal set; SessionStore
+    /// will finalize it via the standard heuristic on next idle.
+    func cancelDropSet() {
+        dropSetActive = false
+        dropChainPlannedLb = []
+        currentDropIndex = 1
+        pendingDropSnapshots = []
+        pendingDropPlannedWeights = []
+        sessionStore?.endDropChainModeOnly()
+    }
+
+    /// Helper: compute the next drop weight given a step percentage and a
+    /// current weight, rounded to 2.5 lb. Exposed so the UI "Add drop"
+    /// button can preview the next planned drop without duplicating the
+    /// rounding rule.
+    static func dropStepLb(stepPercent: Double, from currentLb: Double) -> Double {
+        let raw = currentLb * (1.0 - stepPercent)
+        // Round down to nearest 2.5 (drops should never go HIGHER than the
+        // mathematical step, only at-or-below).
+        let stepped = (raw / 2.5).rounded(.down) * 2.5
+        return max(0, stepped)
+    }
+
+    /// Build a default 3-drop chain from a starting weight using the
+    /// exercise's `defaultDropPercent` (or 0.20 if the exercise is unknown).
+    func defaultDropChain(startingLb: Double, exercise: Exercise?) -> [Double] {
+        let pct = exercise?.defaultDropPercent ?? 0.20
+        var chain: [Double] = [startingLb]
+        var cur = startingLb
+        for _ in 0..<2 {
+            let next = LoggingStore.dropStepLb(stepPercent: pct, from: cur)
+            // Stop the chain if we'd hit zero or fail to actually drop.
+            if next <= 0 || next >= cur { break }
+            chain.append(next)
+            cur = next
+        }
+        return chain
+    }
+
+    /// Boundary callback registered with SessionStore. Invoked every time
+    /// the idle-grace heuristic would normally finalize a set during a drop
+    /// chain. We buffer the snapshot, advance to the next planned weight
+    /// (or finalize if this was the last drop), and tell SessionStore which
+    /// path to take.
+    private func handleDropBoundary(
+        _ snap: DropBoundarySnapshot,
+        pushWeight: @escaping (Double) -> Void
+    ) -> DropDecision {
+        // Buffer this drop's telemetry. `currentDropIndex` is 1-based; the
+        // first time the callback fires, we're recording drop #1's slice.
+        pendingDropSnapshots.append(snap)
+        let plannedThis = (currentDropIndex - 1) < dropChainPlannedLb.count
+            ? dropChainPlannedLb[currentDropIndex - 1]
+            : (pendingPlannedWeightLb ?? 0)
+        pendingDropPlannedWeights.append(plannedThis)
+
+        // Was this the last drop in the planned chain?
+        if currentDropIndex >= dropChainPlannedLb.count {
+            // Final drop — fall through to normal finalize.
+            // `handleCompletedSetsUpdate` will then route to autoLogDropChain.
+            return .finalize
+        }
+
+        // Advance: write the next drop's weight to the device, bump index.
+        currentDropIndex += 1
+        let nextLb = dropChainPlannedLb[currentDropIndex - 1]
+        pushWeight(nextLb)
+        return .advance
+    }
+
+    /// Build a drop-set LoggedSet from the buffered per-drop snapshots and
+    /// the parent's combined telemetry. Called by `handleCompletedSetsUpdate`
+    /// when a drop chain has just finalized.
+    private func autoLogDropChain(parentTelemetry telemetry: CompletedSet) {
+        guard let ctx = modelContext, let instance = activeInstance else {
+            // Defensive: if we can't persist, at least clear state.
+            pendingDropSnapshots = []
+            pendingDropPlannedWeights = []
+            dropSetActive = false
+            dropChainPlannedLb = []
+            currentDropIndex = 1
+            return
+        }
+
+        let order = (instance.sets?.count ?? 0) + 1
+        // Drop #1 source-of-truth: prefer the buffered snapshot; fall back
+        // to the parent telemetry if for some reason we missed buffering.
+        let firstSnap = pendingDropSnapshots.first
+        let drop1Weight = pendingDropPlannedWeights.first ?? (pendingPlannedWeightLb ?? 0)
+        let drop1Reps = firstSnap?.reps ?? telemetry.reps
+        let drop1Peak = firstSnap?.peakLb ?? telemetry.peakLb
+        let drop1Started = firstSnap?.startedAt ?? telemetry.startedAt
+        let drop1Ended = firstSnap?.endedAt ?? telemetry.endedAt
+
+        let parent = LoggedSet(
+            completedAt: Date(),
+            startedAt: drop1Started,
+            endedAt: drop1Ended,
+            orderIndex: order,
+            weightLb: drop1Weight,
+            eccentricLb: upcomingEccLb > 0 ? upcomingEccLb : nil,
+            reps: drop1Reps,
+            chainsLb: nil,
+            peakForceLb: drop1Peak,
+            avgForceLb: nil,
+            mode: .dropSet,
+            labelText: SetMode.dropSet.label,
+            notes: nil,
+            autofilledFromTelemetry: true,
+            importedFromHistory: false,
+            inverseChains: false,
+            damperLevel: nil,
+            bandMaxForceLb: nil,
+            addedLoadLb: upcomingAddedLoadLb,
+            addedLoadType: upcomingAddedLoadType,
+            instance: instance
+        )
+        ctx.insert(parent)
+
+        // Persist drops 2..N as Drop rows. Snapshots are 1-indexed by chain
+        // order; index [0] is drop #1 and lives on the parent.
+        for i in 1..<pendingDropSnapshots.count {
+            let snap = pendingDropSnapshots[i]
+            let plannedW = i < pendingDropPlannedWeights.count
+                ? pendingDropPlannedWeights[i]
+                : 0
+            let drop = Drop(
+                order: i + 1,                       // 2..N (1-based)
+                weightLb: plannedW,
+                addedPlatesLb: upcomingAddedLoadLb,  // inherit from parent
+                eccentricLb: upcomingEccLb > 0 ? upcomingEccLb : nil,
+                reps: snap.reps,
+                startedAt: snap.startedAt,
+                endedAt: snap.endedAt,
+                peakForceLb: snap.peakLb,
+                avgForceLb: nil,
+                loggedSet: parent
+            )
+            ctx.insert(drop)
+        }
+
+        setNumberForCurrentInstance = order + 1
+        restAnchor = telemetry.endedAt
+        pendingTelemetrySet = nil
+
+        // Reset drop state — chain is done.
+        pendingDropSnapshots = []
+        pendingDropPlannedWeights = []
+        dropSetActive = false
+        dropChainPlannedLb = []
+        currentDropIndex = 1
+        // Restore upcoming mode to .working so the next set isn't accidentally
+        // a drop set unless the user explicitly starts another one.
+        upcomingMode = .working
+
         try? ctx.save()
     }
 
@@ -493,9 +730,30 @@ final class LoggingStore: ObservableObject {
             for s in inst.orderedSets {
                 let w = s.weightLb > 0 ? "\(formatLb(s.weightLb)) lbs" : "—"
                 let e = (s.eccentricLb ?? 0) > 0 ? "+\(formatLb(s.eccentricLb!)) ecc" : "—"
-                let label = s.labelText.isEmpty ? s.mode.label : s.labelText
+                let baseLabel = s.labelText.isEmpty ? s.mode.label : s.labelText
+                let chain = s.fullDropChain
+                let label: String = {
+                    if chain.count > 1 {
+                        return "\(baseLabel) (drop×\(chain.count))"
+                    }
+                    return baseLabel
+                }()
                 let notes = s.notes ?? ""
                 out += "\(s.orderIndex)      \(label.padded(8))  \(w.padded(10))  \(e.padded(11))  \(s.reps)     \(notes)\n"
+
+                // v0.4.5: Drop-set chain. Render an indented arrow line
+                // listing each drop's weight×reps, plus a per-drop peak
+                // force line below it for the data nerds.
+                if chain.count > 1 {
+                    let arrow = chain
+                        .map { "\(formatLb($0.weightLb))×\($0.reps)" }
+                        .joined(separator: " → ")
+                    out += "         ↳ \(arrow)\n"
+                    let peaks = chain
+                        .map { "\(formatLb($0.peakForceLb))" }
+                        .joined(separator: " / ")
+                    out += "         peak lb: \(peaks)\n"
+                }
             }
             out += "\n"
         }

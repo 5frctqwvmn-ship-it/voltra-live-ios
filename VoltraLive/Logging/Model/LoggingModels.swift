@@ -123,6 +123,13 @@ final class Exercise {
     var notes: String? = nil
     /// True if this row was created by the history seeder, false if user-added.
     var seededFromHistory: Bool = false
+    /// v0.4.5: Default drop-set step percentage for this exercise.
+    /// Used as the default when the user starts a drop set without
+    /// explicitly configuring per-drop weights — each subsequent drop
+    /// reduces by `currentLb * defaultDropPercent`, rounded to 2.5 lb.
+    /// Stored as a Double so the migration is additive (existing rows
+    /// decode with the default 0.20 = 20%).
+    var defaultDropPercent: Double = 0.20
 
     // Inverse — populated automatically by ExerciseInstance.
     @Relationship(deleteRule: .cascade, inverse: \ExerciseInstance.exercise)
@@ -342,6 +349,15 @@ final class LoggedSet {
     /// True if this set was reconstructed from the history.md import.
     var importedFromHistory: Bool = false
 
+    /// v0.4.5: Drop-set chain. Empty (or nil) = normal single set; non-empty
+    /// = drop set, where the parent's weight/reps/peak/avg represent DROP #1
+    /// and `drops` carries drops 2..N (or 1..N including a mirror — both
+    /// patterns are tolerated; see `orderedDrops`/`isDropSet` helpers below).
+    /// Optional + cascade-delete so the migration is additive and removing
+    /// a drop set cleans up its children.
+    @Relationship(deleteRule: .cascade, inverse: \Drop.loggedSet)
+    var drops: [Drop]? = nil
+
     var instance: ExerciseInstance? = nil
 
     init(
@@ -399,6 +415,42 @@ final class LoggedSet {
 
     /// Total effective weight = weight + chains (eccentric is reported separately).
     var totalLb: Double { weightLb + (chainsLb ?? 0) }
+
+    // MARK: - v0.4.5: Drop-set helpers
+
+    /// True if this set has a multi-drop chain attached.
+    var isDropSet: Bool { (drops?.count ?? 0) > 0 }
+
+    /// All drops sorted by order. The parent set itself represents drop #1
+    /// (mirrored), so `orderedDrops` returns ONLY the additional drops 2..N
+    /// stored as `Drop` rows. UI that wants the full chain (including drop #1)
+    /// should call `fullDropChain`.
+    var orderedDrops: [Drop] {
+        (drops ?? []).sorted { $0.order < $1.order }
+    }
+
+    /// Full chain including a synthetic Drop #1 built from the parent fields.
+    /// Use this when rendering the chain in UI / markdown / charts so we
+    /// don't have to special-case drop #1 everywhere.
+    var fullDropChain: [Drop] {
+        guard isDropSet else { return [] }
+        let head = Drop(
+            order: 1,
+            weightLb: weightLb,
+            addedPlatesLb: addedLoadLb,
+            eccentricLb: eccentricLb,
+            reps: reps,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            peakForceLb: peakForceLb,
+            avgForceLb: avgForceLb,
+            loggedSet: self
+        )
+        // Filter out any stored drop with order==1 (defensive — head is the
+        // canonical mirror) and prepend the synthesized head.
+        let tail = orderedDrops.filter { $0.order > 1 }
+        return [head] + tail
+    }
 }
 
 // MARK: - PR record (cached, derived)
@@ -444,6 +496,7 @@ enum LoggingSchema {
         WorkoutSession.self,
         ExerciseInstance.self,
         LoggedSet.self,
+        Drop.self,            // v0.4.5
         PRRecord.self,
     ]
 }

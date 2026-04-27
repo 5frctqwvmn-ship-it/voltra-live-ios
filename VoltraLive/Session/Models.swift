@@ -61,10 +61,12 @@ struct CurrentSet {
     var endedAt: Date?
     var reps: Int = 0
     var peakLb: Double = 0
-    /// Rolling buffer: last ~30s at ~20Hz = 600 samples max
+    /// Rolling buffer sized for a long set: ~3 min at ~20Hz = 3600 samples.
+    /// v0.4.5: bumped from 600 (30s) so the chart can show the entire set —
+    /// a hard set with long eccentrics + rest-pauses can easily exceed 30s.
     var samples: [ForceSample] = []
 
-    static let maxSamples = 600
+    static let maxSamples = 3600
 
     mutating func addSample(_ sample: ForceSample) {
         samples.append(sample)

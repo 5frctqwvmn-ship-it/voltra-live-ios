@@ -69,6 +69,9 @@ struct LiveCaptureView: View {
     /// Added-plates chip expansion state.
     @State private var addWeightOpen: Bool = false
 
+    /// v0.4.5: Drop-set planner sheet.
+    @State private var showingDropPlanner: Bool = false
+
     /// VoltraWriter for live mid-session weight changes. v0.4.2: every nudge
     /// fires through this writer so the device updates immediately during
     /// rest. Held in an ObservableObject so the BLE manager can be attached
@@ -85,6 +88,7 @@ struct LiveCaptureView: View {
                     tileGrid
                     forceChart
                     upcomingSetCard
+                    dropSetSection
                     loggedSetsSection
                     bottomActions
                     Spacer(minLength: 60)
@@ -138,6 +142,55 @@ struct LiveCaptureView: View {
             // Attach BLE to the writer once env is available. Idempotent.
             writerHolder.attach(ble: ble)
         }
+        .sheet(isPresented: $showingDropPlanner) {
+            DropSetPlannerSheet(
+                startingLb: logging.pendingPlannedWeightLb ?? 0,
+                exercise: logging.activeInstance?.exercise,
+                defaultChain: defaultDropChainForUI()
+            ) { plannedChain in
+                // User confirmed: start the chain. The pushWeight closure
+                // bridges to our writer for live device updates.
+                logging.startDropSet(plannedDropsLb: plannedChain) { lb in
+                    pushWeightToDevice(lb)
+                }
+                showingDropPlanner = false
+            } onCancel: {
+                showingDropPlanner = false
+            }
+        }
+    }
+
+    private func defaultDropChainForUI() -> [Double] {
+        let starting = logging.pendingPlannedWeightLb ?? 0
+        return logging.defaultDropChain(
+            startingLb: starting,
+            exercise: logging.activeInstance?.exercise
+        )
+    }
+
+    /// Used as the bridge for drop-chain advances — each time SessionStore
+    /// reports a drop boundary, LoggingStore calls this with the next
+    /// planned weight so the device retargets.
+    private func pushWeightToDevice(_ lb: Double) {
+        // Update LoggingStore's internal pending weight so the upcoming-set
+        // card mirrors what's on the device. We DO NOT modify
+        // pendingPlannedWeightLb here — that's bound to drop #1 for the
+        // parent set's record. The device target is computed below from
+        // the explicit lb argument.
+        let baseLb = Int(lb.rounded())
+        let eccLb  = Int(logging.upcomingEccLb.rounded())
+        let state = VoltraDeviceState(
+            mode: .weight,
+            modifiers: VoltraModifiers(eccentric: eccLb > 0, chains: false, inverse: false),
+            weights: VoltraWeights(
+                baseLb: baseLb,
+                eccentricLb: eccLb,
+                chainsLb: 0,
+                bandMaxForceLb: 0,
+                damperLevel: 0
+            )
+        )
+        writerHolder.writer?.apply(state)
     }
 
     // MARK: - Header
@@ -176,11 +229,37 @@ struct LiveCaptureView: View {
         return prev > 0 ? prev : nil
     }
 
-    // MARK: - 2×2 tile grid (REPS / PHASE / FORCE / REST)
+    // MARK: - 2×3 tile grid (REPS / PHASE / FORCE / RESISTANCE / TOTAL VOL / REST)
 
     private var tileGrid: some View {
         let live = ble.telemetry
         let cols = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
+        // v0.4.5: Per-rep total weight = Voltra base concentric + eccentric
+        // overload + any plates already on the rig. This is what the user is
+        // actually pushing each rep.
+        let perRepTotalLb = (logging.pendingPlannedWeightLb ?? 0)
+            + logging.upcomingEccLb
+            + (logging.upcomingAddedLoadLb ?? 0)
+        // v0.4.5: Total volume = per-rep total × reps so far this set.
+        // Falls back to the just-finalized set's reps so the tile stays
+        // populated through rest. CompletedSet is value-typed; reps lives
+        // on it directly.
+        let liveSetReps = session.currentSet?.reps
+            ?? session.completedSets.last?.reps
+            ?? 0
+        let totalVolumeLb = perRepTotalLb * Double(liveSetReps)
+        // Build a subline that explains the math in compact form, e.g.
+        // "5 × 5 + 5 ecc". Hide if ambiguous.
+        let resistanceSubline: String? = {
+            let base = logging.pendingPlannedWeightLb ?? 0
+            let ecc = logging.upcomingEccLb
+            let plates = logging.upcomingAddedLoadLb ?? 0
+            var pieces: [String] = []
+            if base > 0 { pieces.append(formatLbCompact(base)) }
+            if ecc > 0 { pieces.append("+\(formatLbCompact(ecc)) ecc") }
+            if plates > 0 { pieces.append("+\(formatLbCompact(plates)) pl") }
+            return pieces.isEmpty ? nil : pieces.joined(separator: " ")
+        }()
         return LazyVGrid(columns: cols, spacing: 10) {
             tile(
                 label: "REPS",
@@ -197,6 +276,26 @@ struct LiveCaptureView: View {
                 value: String(format: "%.0f", live.forceLb),
                 unit: "lb",
                 color: VoltraColor.accent
+            )
+            // v0.4.5: RESISTANCE = total per-rep load (con + ecc + plates).
+            // This is the Vulture-equivalent "how much you're actually
+            // pushing each rep" readout.
+            tile(
+                label: "RESISTANCE",
+                value: formatLbCompact(perRepTotalLb),
+                unit: "lb",
+                color: VoltraColor.text,
+                subline: resistanceSubline
+            )
+            // v0.4.5: TOTAL VOLUME = resistance × reps so far this set.
+            tile(
+                label: "TOTAL VOL",
+                value: formatLbCompact(totalVolumeLb),
+                unit: "lb",
+                color: VoltraColor.pull,
+                subline: liveSetReps > 0
+                    ? "\(formatLbCompact(perRepTotalLb)) × \(liveSetReps) reps"
+                    : nil
             )
             // REST tile is tap-to-reset (parity with DashboardView). Tapping
             // restarts the rest countdown via SessionStore.tapRestTile().
@@ -217,6 +316,13 @@ struct LiveCaptureView: View {
         }
     }
 
+    /// Compact lb formatter: integer when whole, one decimal otherwise.
+    /// Used by the live tiles so 5.0 → "5" and 7.5 → "7.5".
+    private func formatLbCompact(_ d: Double) -> String {
+        if d == d.rounded() { return String(Int(d)) }
+        return String(format: "%.1f", d)
+    }
+
     // MARK: - Live force chart
 
     /// Same component DashboardView uses, fed from the same SessionStore set.
@@ -226,8 +332,14 @@ struct LiveCaptureView: View {
     /// added plates) + 15% headroom so light lifts (e.g. 10 lb total) no longer
     /// look tiny against a 40 lb default floor.
     private var forceChart: some View {
-        let samples = session.currentSet?.samples ?? []
-        let peak = session.currentSet?.peakLb ?? 0
+        // v0.4.5: While a set is in flight we use currentSet; once finalize
+        // fires (4s of no movement), SessionStore stashes the trace into
+        // lastFinalizedSamples so the chart KEEPS displaying the rep pattern
+        // through the rest period instead of blanking. Cleared on next set.
+        let samples = session.currentSet?.samples
+            ?? session.lastFinalizedSamples
+        let peak = session.currentSet?.peakLb
+            ?? session.lastFinalizedPeakLb
         let planned = (logging.pendingPlannedWeightLb ?? 0)
             + logging.upcomingEccLb
             + (logging.upcomingAddedLoadLb ?? 0)
@@ -236,7 +348,7 @@ struct LiveCaptureView: View {
             peakLb: peak,
             plannedCeilingLb: planned > 0 ? planned : nil
         )
-        .frame(minHeight: 180)
+        .frame(minHeight: 280)
     }
 
     private func phaseLabel(_ p: VoltraPhase) -> String {
@@ -687,6 +799,128 @@ struct LiveCaptureView: View {
         }
     }
 
+    // MARK: - Drop-set section (v0.4.5)
+
+    /// Either: a "Add drop set" button (no chain active) or an in-flight
+    /// drop-chain progress card (chain active).
+    @ViewBuilder
+    private var dropSetSection: some View {
+        if logging.dropSetActive {
+            dropChainProgressCard
+        } else {
+            addDropSetButton
+        }
+    }
+
+    private var addDropSetButton: some View {
+        Button {
+            showingDropPlanner = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.down.right.circle.fill")
+                    .font(.system(size: 16))
+                Text("Add drop set")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                if let starting = logging.pendingPlannedWeightLb, starting > 0 {
+                    let preview = defaultDropChainForUI()
+                    if preview.count >= 2 {
+                        Text(preview.map { "\(Int($0))" }.joined(separator: " → "))
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(VoltraColor.textFaint)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .foregroundColor(VoltraColor.transition)
+            .background(VoltraColor.transition.opacity(0.08))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(VoltraColor.transition.opacity(0.4), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var dropChainProgressCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("DROP SET IN PROGRESS")
+                    .font(.system(size: 11, weight: .bold))
+                    .kerning(1.5)
+                    .foregroundColor(VoltraColor.transition)
+                Spacer()
+                Text("DROP \(logging.currentDropIndex) / \(logging.dropChainPlannedLb.count)")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(VoltraColor.transition)
+            }
+
+            // Visual chain: each drop as a pill, current highlighted.
+            HStack(spacing: 6) {
+                ForEach(Array(logging.dropChainPlannedLb.enumerated()), id: \.offset) { idx, lb in
+                    let dropOrder = idx + 1
+                    let isCurrent = dropOrder == logging.currentDropIndex
+                    let isDone = dropOrder < logging.currentDropIndex
+                    Text("\(Int(lb))")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            isCurrent ? VoltraColor.transition.opacity(0.30)
+                            : isDone   ? VoltraColor.bgElev2
+                                       : VoltraColor.bg
+                        )
+                        .foregroundColor(
+                            isCurrent ? VoltraColor.transition
+                            : isDone   ? VoltraColor.textFaint
+                                       : VoltraColor.textDim
+                        )
+                        .overlay(
+                            Capsule().stroke(
+                                isCurrent ? VoltraColor.transition : VoltraColor.border,
+                                lineWidth: 1
+                            )
+                        )
+                        .clipShape(Capsule())
+                    if idx < logging.dropChainPlannedLb.count - 1 {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(VoltraColor.textFaint)
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                Text("Lift to failure, rest 4 s, next drop fires automatically.")
+                    .font(.system(size: 11))
+                    .foregroundColor(VoltraColor.textDim)
+                Spacer()
+                Button {
+                    logging.cancelDropSet()
+                } label: {
+                    Text("Cancel")
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(VoltraColor.bgElev2)
+                        .foregroundColor(VoltraColor.textDim)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .background(VoltraColor.bgElev)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(VoltraColor.transition.opacity(0.5), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
     // MARK: - Bottom actions
 
     private var bottomActions: some View {
@@ -1045,6 +1279,225 @@ private struct SwipeableSetRow: View {
 
     private func formatLb(_ d: Double) -> String {
         d == d.rounded() ? "\(Int(d))" : String(format: "%.1f", d)
+    }
+}
+
+// MARK: - DropSetPlannerSheet (v0.4.5)
+
+/// Modal where the user configures the drop chain before starting it.
+/// Shows the proposed chain (default = 3 drops at -20% each), lets them
+/// add/remove drops, and tweak each drop's weight individually. Confirming
+/// hands the chain back to LiveCaptureView which calls
+/// LoggingStore.startDropSet.
+private struct DropSetPlannerSheet: View {
+    let startingLb: Double
+    let exercise: Exercise?
+    let defaultChain: [Double]
+    let onConfirm: ([Double]) -> Void
+    let onCancel: () -> Void
+
+    @State private var chain: [Double] = []
+    @State private var stepPercent: Double = 0.20
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    intro
+                    chainEditor
+                    stepRow
+                    Spacer(minLength: 12)
+                }
+                .padding(16)
+            }
+            .background(VoltraColor.bg)
+            .navigationTitle("Drop set")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                        .foregroundColor(VoltraColor.textDim)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Start") {
+                        let cleaned = chain
+                            .filter { $0 > 0 }
+                            .map { ($0 / 2.5).rounded() * 2.5 }
+                        if cleaned.count >= 2 { onConfirm(cleaned) }
+                    }
+                    .font(.system(size: 14, weight: .bold))
+                    .disabled(chain.filter { $0 > 0 }.count < 2)
+                }
+            }
+            .onAppear {
+                if chain.isEmpty {
+                    chain = defaultChain.isEmpty
+                        ? buildFallbackChain(starting: startingLb)
+                        : defaultChain
+                    stepPercent = exercise?.defaultDropPercent ?? 0.20
+                }
+            }
+        }
+    }
+
+    private var intro: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Auto-advance on rest")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(VoltraColor.text)
+            Text("Lift each drop to failure. After 4 s of no movement, Voltra steps down to the next weight automatically. Rest only starts after the final drop.")
+                .font(.system(size: 12))
+                .foregroundColor(VoltraColor.textDim)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var chainEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("CHAIN")
+                    .font(.system(size: 11, weight: .bold))
+                    .kerning(1.5)
+                    .foregroundColor(VoltraColor.textDim)
+                Spacer()
+                Button {
+                    addDrop()
+                } label: {
+                    Label("Add drop", systemImage: "plus.circle")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(VoltraColor.accent)
+                }
+                .disabled(chain.count >= 5)
+            }
+            ForEach(Array(chain.enumerated()), id: \.offset) { idx, _ in
+                dropRow(idx: idx)
+            }
+        }
+    }
+
+    private func dropRow(idx: Int) -> some View {
+        HStack(spacing: 10) {
+            Text("#\(idx + 1)")
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .foregroundColor(VoltraColor.transition)
+                .frame(width: 30, alignment: .leading)
+            Button {
+                let cur = Int(chain[idx])
+                chain[idx] = Double(max(0, cur - 5))
+            } label: {
+                Text("−5")
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .frame(width: 40, height: 32)
+                    .background(VoltraColor.bgElev2)
+                    .foregroundColor(VoltraColor.text)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            Text("\(Int(chain[idx])) lb")
+                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                .foregroundColor(VoltraColor.text)
+                .frame(maxWidth: .infinity)
+            Button {
+                let cur = Int(chain[idx])
+                chain[idx] = Double(min(500, cur + 5))
+            } label: {
+                Text("+5")
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .frame(width: 40, height: 32)
+                    .background(VoltraColor.bgElev2)
+                    .foregroundColor(VoltraColor.text)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            if chain.count > 2 {
+                Button {
+                    chain.remove(at: idx)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14))
+                        .foregroundColor(VoltraColor.danger)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(VoltraColor.bgElev)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var stepRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("DEFAULT DROP")
+                    .font(.system(size: 11, weight: .bold))
+                    .kerning(1.5)
+                    .foregroundColor(VoltraColor.textDim)
+                Spacer()
+                Text("\(Int(stepPercent * 100))%")
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundColor(VoltraColor.text)
+            }
+            HStack(spacing: 8) {
+                ForEach([0.10, 0.15, 0.20, 0.25, 0.30], id: \.self) { p in
+                    Button {
+                        stepPercent = p
+                        if let ex = exercise { ex.defaultDropPercent = p }
+                        rebuildChainFromStep()
+                    } label: {
+                        Text("\(Int(p * 100))%")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                abs(stepPercent - p) < 0.001 ? VoltraColor.accent : VoltraColor.bgElev2
+                            )
+                            .foregroundColor(
+                                abs(stepPercent - p) < 0.001 ? VoltraColor.bg : VoltraColor.text
+                            )
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Text("Saved per exercise. Tap to rebuild the chain at this step.")
+                .font(.system(size: 10))
+                .foregroundColor(VoltraColor.textFaint)
+        }
+    }
+
+    private func addDrop() {
+        guard chain.count < 5 else { return }
+        let last = chain.last ?? startingLb
+        let next = LoggingStore.dropStepLb(stepPercent: stepPercent, from: last)
+        chain.append(max(0, next))
+    }
+
+    private func rebuildChainFromStep() {
+        guard startingLb > 0 else { return }
+        var newChain: [Double] = [startingLb]
+        var cur = startingLb
+        for _ in 0..<2 {
+            let next = LoggingStore.dropStepLb(stepPercent: stepPercent, from: cur)
+            if next <= 0 || next >= cur { break }
+            newChain.append(next)
+            cur = next
+        }
+        if newChain.count >= 2 { chain = newChain }
+    }
+
+    private func buildFallbackChain(starting: Double) -> [Double] {
+        let base = starting > 0 ? starting : 100
+        var c: [Double] = [base]
+        var cur = base
+        for _ in 0..<2 {
+            let next = LoggingStore.dropStepLb(stepPercent: 0.20, from: cur)
+            if next <= 0 || next >= cur { break }
+            c.append(next)
+            cur = next
+        }
+        return c
     }
 }
 

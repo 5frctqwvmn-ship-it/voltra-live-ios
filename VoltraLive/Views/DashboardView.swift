@@ -23,12 +23,14 @@ struct DashboardView: View {
 
     private var live: LiveTelemetry { ble.telemetry }
 
-    // Current-set samples for chart
+    // Current-set samples for chart. v0.4.5: falls back to the last
+    // finalized set so the trace persists through rest instead of blanking
+    // when the idle-grace finalize fires.
     private var chartSamples: [ForceSample] {
-        session.currentSet?.samples ?? []
+        session.currentSet?.samples ?? session.lastFinalizedSamples
     }
     private var chartPeak: Double {
-        session.currentSet?.peakLb ?? 0
+        session.currentSet?.peakLb ?? session.lastFinalizedPeakLb
     }
 
     var body: some View {
