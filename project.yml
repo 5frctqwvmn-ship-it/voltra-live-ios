@@ -91,6 +91,9 @@ targets:
         CFBundleName: "VoltraLive"
         CFBundleShortVersionString: "0.4.9"
         CFBundleVersion: "31"
+        # Build 31: per-build feature label shown in the on-screen badge so
+        # the user knows exactly which one feature this build is testing.
+        VOLTRAFeatureLabel: "HR test"
 
   VoltraLiveTests:
     type: bundle.unit-test

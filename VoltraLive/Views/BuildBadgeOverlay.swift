@@ -52,7 +52,15 @@ private struct BuildBadgeChip: View {
         let info = Bundle.main.infoDictionary ?? [:]
         let short = info["CFBundleShortVersionString"] as? String ?? "?"
         let build = info["CFBundleVersion"] as? String ?? "?"
-        return "v\(short) (\(build))"
+        // Build 31: optional per-build feature label so the user can tell
+        // at a glance which single feature this build is testing. Set via
+        // VOLTRAFeatureLabel in Info.plist (kept short to avoid wrapping).
+        // Empty / missing = no label, behaves like prior builds.
+        let feature = (info["VOLTRAFeatureLabel"] as? String) ?? ""
+        if feature.isEmpty {
+            return "v\(short) (\(build))"
+        }
+        return "v\(short) (\(build)) · \(feature)"
     }
 }
 

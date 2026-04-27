@@ -517,3 +517,39 @@ Files changed:
 - .github/workflows/release.yml
 - VoltraLive/Info.plist (version bump 0.4.8 -> 0.4.9)
 - project.yml (version bump 30 -> 31 in 2 places)
+
+## 2026-04-27 — Process change: ONE feature per build, labeled
+
+User asked to switch from batched builds to one-feature-per-build so they
+can test each fix in isolation and tell me succinctly what works/doesn't.
+
+NEW: Info.plist key `VOLTRAFeatureLabel` shows up in the corner badge next
+to the version, e.g. "v0.4.9 (31) · HR test". Update the label in BOTH
+VoltraLive/Info.plist AND project.yml info.properties for every build.
+
+Build plan (sequential, one feature per build):
+- b31 "HR test" — HR auth retry + entitlement verification (THIS BUILD)
+- b32 "Demo mode" — Skip-Try-Demo button + ContentView routing fix
+- b33 "Group dropdown" — picker on inline custom card (4 presets + Custom)
+- b34 "Back peek" — third option on workout back-confirm
+- b35 "Drop-set re-edit" — fix mid-drop-set weight change bug
+- b36 "Load/unload" — visible button on each set row
+- b37 "Watch chip" — HealthKit chip on home + Settings entry
+- b38 "Dual fix" — make Pair 2 actually scan + work, equal sizing
+
+The b32+ fixes are stashed locally as `stash@{0}: b31-extras: ...` ready
+to bring back one at a time once b31 ships clean.
+
+### Build 31 ships
+
+CI dry-run 25022146919 PASSED, including the new entitlement verification
+step. So HealthKit IS embedded in the signed binary - the build 30 HR
+regression is NOT an entitlement strip. The remaining hypothesis is that
+the auth completion handler path was suppressing re-prompts. Build 31 fix
+addresses that and adds console logging so we can see what's happening on
+device this time.
+
+Files changed for label system:
+- VoltraLive/Views/BuildBadgeOverlay.swift (read VOLTRAFeatureLabel)
+- VoltraLive/Info.plist (NEW key, set to "HR test")
+- project.yml info.properties (NEW key, set to "HR test")
