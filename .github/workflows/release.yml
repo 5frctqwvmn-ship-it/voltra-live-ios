@@ -23,14 +23,25 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-15
+    # macos-26 runner ships with Xcode 26 + iOS 26 SDK preinstalled.
+    # Required by Apple's April 28, 2026 ITMS-90725 SDK cutoff — apps built
+    # with iOS 18.5 SDK (Xcode 16 on macos-15) are rejected from App Store
+    # Connect uploads after that date.
+    runs-on: macos-26
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select latest Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+      - name: Select Xcode 26 (iOS 26 SDK)
+        run: |
+          # Prefer the explicitly-versioned Xcode 26 install; fall back to the
+          # 'Xcode.app' default on macos-26 (which is also Xcode 26).
+          if [ -d /Applications/Xcode_26.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.app/Contents/Developer
+          else
+            sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          fi
 
       - name: Print Xcode version
         run: xcodebuild -version
