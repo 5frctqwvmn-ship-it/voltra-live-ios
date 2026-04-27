@@ -57,6 +57,31 @@ jobs:
           export APPLE_TEAM_ID="${APPLE_TEAM_ID}"
           xcodegen generate
 
+      # v0.4.6.3: substitute Demo Mode trace-relay placeholders in Info.plist.
+      # The DemoTraceEndpoint and DemoTraceSharedToken values come from
+      # GitHub Secrets so they don't have to be committed. Empty values are
+      # tolerated by the iOS uploader — it just surfaces a clear error.
+      - name: Inject Demo Mode trace relay config into Info.plist
+        env:
+          DEMO_TRACE_ENDPOINT: ${{ secrets.DEMO_TRACE_ENDPOINT }}
+          DEMO_TRACE_SHARED_TOKEN: ${{ secrets.DEMO_TRACE_SHARED_TOKEN }}
+        run: |
+          set -euo pipefail
+          PLIST=VoltraLive/Info.plist
+          # plutil -replace handles the value safely without re-formatting
+          # the rest of the plist. Use empty string when secret is unset.
+          plutil -replace DemoTraceEndpoint -string "${DEMO_TRACE_ENDPOINT:-}" "$PLIST"
+          plutil -replace DemoTraceSharedToken -string "${DEMO_TRACE_SHARED_TOKEN:-}" "$PLIST"
+          # Sanity-print whether values were set, without echoing them.
+          plutil -extract DemoTraceEndpoint xml1 -o - "$PLIST" \
+            | grep -q '<string></string>' \
+            && echo "DemoTraceEndpoint: <empty>" \
+            || echo "DemoTraceEndpoint: set ($(plutil -extract DemoTraceEndpoint raw -o - "$PLIST" | wc -c | tr -d ' ') bytes)"
+          plutil -extract DemoTraceSharedToken xml1 -o - "$PLIST" \
+            | grep -q '<string></string>' \
+            && echo "DemoTraceSharedToken: <empty>" \
+            || echo "DemoTraceSharedToken: set"
+
       # Write the .p8 key file where xcodebuild expects it
       - name: Install App Store Connect API key
         env:
