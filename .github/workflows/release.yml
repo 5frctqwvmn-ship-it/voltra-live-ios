@@ -33,6 +33,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Cache Xcode DerivedData + Swift Package Manager artifacts between runs
+      # to avoid recompiling unchanged sources/dependencies. Keyed on the SHA
+      # of every Swift source + project.yml so any change invalidates the
+      # cache; falls back to most recent partial match. Saves ~2-3 min on
+      # warm runs.
+      - name: Cache Xcode DerivedData
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/org.swift.swiftpm
+          key: derived-${{ runner.os }}-xcode26-${{ hashFiles('**/*.swift', 'project.yml', 'VoltraLive/Info.plist', 'VoltraLive/VoltraLive.entitlements') }}
+          restore-keys: |
+            derived-${{ runner.os }}-xcode26-
+
       - name: Select Xcode 26 (iOS 26 SDK)
         run: |
           # Prefer the explicitly-versioned Xcode 26 install; fall back to the
@@ -552,24 +568,6 @@ jobs:
 
       # Diagnostic: inspect the SIGNED, EXPORTED IPA — what actually goes to TestFlight.
       # This must run AFTER export-archive, since signing happens at export time.
-      - name: Dump signed entitlements (diagnostic)
-        run: |
-          set +e
-          mkdir -p build/inspect
-          unzip -q -o build/export/VoltraLive.ipa -d build/inspect
-          APP_PATH=$(find build/inspect/Payload -maxdepth 2 -name '*.app' -type d | head -1)
-          echo "=== App bundle: $APP_PATH ==="
-          ls "$APP_PATH" | head
-          echo "=== Embedded.mobileprovision Entitlements ==="
-          security cms -D -i "$APP_PATH/embedded.mobileprovision" | plutil -p - 2>/dev/null | sed -n '/Entitlements/,/^  }/p' | head -60
-          echo "=== codesign -d --entitlements (signed binary) ==="
-          codesign -d --entitlements :- "$APP_PATH" 2>&1
-          echo "=== HealthKit grep ==="
-          codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | grep -i healthkit && echo "HEALTHKIT IS PRESENT" || echo "NO HEALTHKIT ENTITLEMENT IN SIGNED BINARY"
-          echo "=== App Info.plist NSHealth keys ==="
-          plutil -p "$APP_PATH/Info.plist" | grep -i health || echo "no NSHealth keys in Info.plist"
-          set -e
-
       # Upload to TestFlight using the App Store Connect API key (no Apple ID password needed)
       # Skipped on dry-run dispatch — lets us validate the signing pipeline without burning a build number.
       - name: Upload to TestFlight via altool
