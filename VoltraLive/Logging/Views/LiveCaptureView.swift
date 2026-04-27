@@ -703,6 +703,15 @@ struct LiveCaptureView: View {
             // Mode chips
             modeChipsRow
 
+            // Build 36: LOAD / UNLOAD pair on the upcoming set card.
+            // User asked for a way to engage and release the cable
+            // between sets without having to use the device's
+            // physical button. Both buttons are fire-and-forget BLE
+            // writes; nothing in the app tracks device load state
+            // (the device doesn't echo it back), so we render them
+            // side-by-side rather than as a toggle.
+            loadUnloadRow
+
             // Added-weight chip + inline picker
             addedWeightSection
         }
@@ -736,6 +745,52 @@ struct LiveCaptureView: View {
 
     private var showsEccentric: Bool {
         logging.upcomingMode == .eccentric || logging.upcomingEccLb > 0
+    }
+
+    /// Build 36: LOAD / UNLOAD pair. Disabled when not BLE-connected
+    /// because writeControlFrame would just log a warning and no-op,
+    /// which is confusing UX. Demo mode also disables — demo doesn't
+    /// have a real device to engage. Long enough labels and icons that
+    /// the user can tell at a glance which one engages vs releases.
+    private var loadUnloadRow: some View {
+        let isLive = ble.isConnected && !demo.isActive
+        return HStack(spacing: 10) {
+            Button {
+                ble.sendUnload()
+            } label: {
+                Label("Unload", systemImage: "arrow.up.to.line")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(VoltraColor.bgElev2)
+                    .foregroundColor(isLive ? VoltraColor.text : VoltraColor.textFaint)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(VoltraColor.border, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(.plain)
+            .disabled(!isLive)
+
+            Button {
+                ble.sendLoad()
+            } label: {
+                Label("Load", systemImage: "arrow.down.to.line")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(VoltraColor.accent.opacity(isLive ? 0.18 : 0.06))
+                    .foregroundColor(isLive ? VoltraColor.accent : VoltraColor.textFaint)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(VoltraColor.accent.opacity(isLive ? 0.5 : 0.2), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(.plain)
+            .disabled(!isLive)
+        }
     }
 
     private var weightNudgerRow: some View {

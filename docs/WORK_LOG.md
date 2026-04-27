@@ -602,3 +602,24 @@ Files changed:
 - VoltraLive/Logging/Views/LoggingHomeView.swift (healthPill + env object)
 - VoltraLive/Info.plist (0.4.12 -> 0.4.13, 34 -> 35, label "HK prompt")
 - project.yml (same bumps in 2 places)
+
+## 2026-04-27 — b36 "Load/unload"
+
+User-reported (b30): "no load/unload button on sets". The protocol payloads
+(VoltraControlFrames+LoadUnload.swift) and MultiDeviceManager API existed
+since b29 but the single-device VoltraBLEManager had no public method, so
+the LiveCaptureView couldn't fire them.
+
+Fixes:
+- NEW VoltraBLEManager+LoadUnload.swift: sendLoad() / sendUnload() that
+  frame the existing payloads via VoltraFrameBuilder + writeControlFrame,
+  using a per-class ad-hoc seq starting at 0xC000 to stay clear of
+  VoltraWriter's counter (matching MultiDeviceManager's pattern).
+- LiveCaptureView upcoming-set card now has a Load/Unload button pair
+  below the mode chips. Disabled when not connected or in demo mode.
+
+Files changed:
+- VoltraLive/BLE/VoltraBLEManager+LoadUnload.swift (new)
+- VoltraLive/Logging/Views/LiveCaptureView.swift (loadUnloadRow)
+- VoltraLive/Info.plist (0.4.13 -> 0.4.14, 35 -> 36, label "Load/unload")
+- project.yml (same bumps in 2 places)
