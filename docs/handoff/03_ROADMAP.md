@@ -4,9 +4,12 @@
 
 Locked-in priority order:
 
-1. **Drop-set fix.** Anchor reductions to the original starting weight
-   (`anchorLb`), not the current weight. Add a regression test:
-   `100 lb base, three −20% drops → 100, 80, 60, 40`.
+1. **Drop-set fix.** ✅ DONE. Real bug was UX, not math: every tap on the
+   active tile was both bumping the tier AND firing a drop, because
+   `bumpCascadeTier()` called `fireNextCascadeStep()`. Fixed by making
+   tier-bump preview-only; the 4s fuse remains the sole drop trigger.
+   Cascade math was already anchor-correct. Regression tests pin the new
+   behavior in `VoltraLiveTests/DropSetCascadeTests.swift`.
 2. **Live HealthKit streaming.** Replace one-shot reads with
    `HKAnchoredObjectQuery` (or `HKObserverQuery` + anchored read) for both
    heart rate and active energy burned. Continue updating until session ends.

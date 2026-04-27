@@ -96,3 +96,54 @@ points at it.
   Then ask the user for repro details. While waiting, move forward to the
   HealthKit live-streaming task (build 30 priority #2) since the drop-set
   fix is now blocked on user input.
+
+---
+
+## 2026-04-27 14:05 PDT — Drop-set fix: tier bump is preview-only (build 30)
+
+- **Goal:** Fix the user-reported drop-set bug: tapping the active tile to
+  adjust the drop %/lb was lowering the weight on every tap. User sent
+  screenshots IMG_2241–2244 showing the regression: tap 1 → DROP 2/95 lb,
+  tap 2 → DROP 3/80 lb, tap 3 → DROP 4/55 lb. Three taps fired three drops.
+- **Root cause:** `bumpCascadeTier()` in `LoggingStore.swift` was calling
+  `fireNextCascadeStep()` directly. Combined with `startDropSet`'s own
+  immediate fire, every tap fired a drop AND advanced the tier label, so
+  the tile became unusable as a tier selector. The cascade *math* was
+  always anchor-correct (no compounding) — that part of my prior
+  investigation was right; the bug was strictly UX/wiring, not arithmetic.
+  My screenshots-confirmed ladder 100 → 95 → 80 → 55 is exactly what
+  `cascadeAnchoredDeviceWeight` produces at tier 1 step 1, tier 2 step 2,
+  tier 3 step 3 — the user's verbal "100 → 80 → 64" was an approximation
+  of what they thought they were seeing.
+- **Fix:** `bumpCascadeTier()` now ONLY rolls the tier 1→2→3→1 and resets
+  the 4s fuse. It no longer calls `fireNextCascadeStep`. `startDropSet`'s
+  immediate fire of drop #2 stays (that's the desired "TAP TO START"
+  feel — confirmed by IMG_2241→2242). The 4s fuse remains the sole
+  trigger for committing further drops once the cascade is active.
+  Tile gesture comment in `LiveCaptureView.swift` updated to match.
+  User confirmed this behavior via question prompt before I wrote code.
+- **Files changed:**
+  - `VoltraLive/Logging/Persistence/LoggingStore.swift` — `bumpCascadeTier`
+    no longer fires; doc comment updated to call out the build-30 change.
+  - `VoltraLive/Logging/Views/LiveCaptureView.swift` — tile gesture
+    comment updated from "fire an immediate drop" → "PREVIEW ONLY".
+  - `VoltraLiveTests/DropSetCascadeTests.swift` — replaced
+    `testLiveCascade_BumpedTier_DoesNotCompound` (which assumed bump fires)
+    with `testLiveCascade_BumpedTier_DoesNotFireDrop` (asserts chain stays
+    `[100, 95]` after start + 3 tier bumps). Added
+    `testLiveCascade_FuseFiresAtCurrentTier_AnchorRelative` to verify the
+    fuse still commits drops at the tier current at fire-time.
+  - `VoltraLive/Info.plist`, `project.yml` — bumped 0.4.7/29 → 0.4.8/30
+    in all three required places (Info.plist + project.yml settings +
+    project.yml info.properties).
+- **Verification:** Static review only (no Mac). The new regression tests
+  encode the exact pre-fix ladder (80, 55) as forbidden values in
+  `dropChainPlannedLb`, so any reintroduction of the bug fails the suite.
+  Will trigger release.yml dry-run after commit to validate on macos-26.
+- **Risks:** The 4s fuse may now feel slow if the user wants to chain
+  drops faster than once-per-4s after bumping to a deeper tier. Possible
+  follow-up: add a "fire now" gesture (double-tap or a small fire button)
+  if user reports the new behavior feels too passive. Long-press still
+  cancels, unchanged.
+- **Next step:** Commit the fix + version bump, push, trigger dry-run,
+  then move to HealthKit live HR/kcal streaming (build-30 priority #2).

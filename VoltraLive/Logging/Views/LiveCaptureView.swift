@@ -431,8 +431,9 @@ struct LiveCaptureView: View {
                 // Tap behavior:
                 //  - inactive → start a cascade at the current planned weight
                 //  - active   → bump the cascade tier (5/5% → 10/10% → 15/15%)
-                //               and fire an immediate drop at the new tier,
-                //               resetting the 4s fuse.
+                //               PREVIEW ONLY. The weight does not change on
+                //               tap; the 4s fuse fires the drop at whatever
+                //               tier is current when it elapses. (build 30)
                 if logging.dropSetActive {
                     logging.bumpCascadeTier()
                 } else {

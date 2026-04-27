@@ -349,14 +349,21 @@ final class LoggingStore: ObservableObject {
     /// v0.4.6.2: tap rolls 5→10→15→5 (mod 3). Each fired drop is computed
     /// as `anchor − stepSize×index` so subsequent taps don't compound off
     /// the previously-dropped weight.
+    ///
+    /// v0.4.8 (build 30): tier bump is now PREVIEW-ONLY. It does NOT fire a
+    /// cascade step — earlier behavior fired one drop per tap, which made it
+    /// impossible to use tap as a tier selector (every tap dropped the
+    /// weight). The 4s fuse (`scheduleCascadeTimer` / `nextDropFiresAt`)
+    /// remains the sole trigger for committing a drop. The fuse is reset
+    /// here so the user has a fresh 4s window to bump again before any
+    /// drop commits at the new tier.
     func bumpCascadeTier() {
         guard dropSetActive else { return }
         // Roll 1 → 2 → 3 → 1… (5/10/15 lb steps).
         cascadeTier = (cascadeTier % 3) + 1
-        // Cancel and reschedule so the immediate fire below isn't immediately
-        // followed by another auto-tick.
+        // Reset the 4s fuse so the user has a full window after each bump
+        // to keep tapping. Do NOT fire a step here.
         cascadeTimer?.cancel(); cascadeTimer = nil
-        fireNextCascadeStep()
         scheduleCascadeTimer()
         // Bumping counts as activity — push the no-movement watchdog out.
         dropFinalizeAt = Date().addingTimeInterval(cascadeIdleFinalizeSec)
@@ -1179,19 +1186,27 @@ struct DeletedSetSnapshot {
 
 #if DEBUG
 extension LoggingStore {
-    /// Minimal in-memory factory for unit tests. Wires a fresh SessionStore
-    /// but does NOT attach a ModelContext — callers must avoid code paths
-    /// that persist (e.g. autoLogDropChain). Sufficient for cascade math
-    /// tests that only exercise startDropSet → fireNextCascadeStep.
+    /// Test-only pair: a LoggingStore plus the SessionStore it depends on.
+    /// `LoggingStore.sessionStore` is declared `weak`, so the test owner
+    /// MUST hold the returned `session` for the lifetime of the test —
+    /// otherwise the weak ref deallocates the moment the factory returns
+    /// and `startDropSet` early-exits at `guard let session = sessionStore`.
     @MainActor
-    static func makeForTesting() -> LoggingStore {
+    static func makeForTestingWithSession() -> (store: LoggingStore, session: SessionStore) {
         let store = LoggingStore()
         let session = SessionStore()
-        // wire() expects a ModelContext, but startDropSet only needs the
-        // SessionStore. We reach in directly to avoid forcing a SwiftData
-        // container into every test.
         store.sessionStore = session
-        return store
+        return (store, session)
+    }
+
+    /// Convenience for callers that don't need a handle on the SessionStore.
+    /// Note: with this overload the SessionStore is owned only by the
+    /// LoggingStore's weak ref, so it deallocates immediately. Tests that
+    /// drive `startDropSet` MUST use `makeForTestingWithSession()` and
+    /// retain the returned session.
+    @MainActor
+    static func makeForTesting() -> LoggingStore {
+        return makeForTestingWithSession().store
     }
 
     /// Synchronously advance the cascade by one step. Bypasses the 4s

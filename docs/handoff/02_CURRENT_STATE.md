@@ -1,6 +1,6 @@
 # 02 — Current State
 
-_Last updated: 2026-04-27 (after build 29 ship + drop-set/HR bugs reported)._
+_Last updated: 2026-04-27 (build 30 in flight: drop-set fixed, HR/kcal/warmup/dual-Voltra still pending)._
 
 ## Latest shipped build
 
@@ -36,38 +36,28 @@ opening a fresh one. Old logs are not yet imported — that is a future task
 
 ## Known bugs (must fix in build 30)
 
-1. **Drop-set regression (reported, not yet reproduced in code).** User
-   reports reductions compound off the **current** weight (`100 → 80 → 64`,
-   i.e. −20% twice on rolling current) instead of anchoring to the original
-   starting weight (`100 → 80 → 60 → 40`).
-   - Investigation summary (build 30, day 1): static analysis of the v0.4.7
-     code shows the production cascade goes through
-     `LoggingStore.cascadeAnchoredDeviceWeight(anchor:tier:stepIndex:multiplier:)`,
-     which is mathematically anchor-correct. The non-anchored helper
-     `cascadeNextWeight(from:tier:)` would compound, but it has **no live
-     callers** — only `cascadeNextDeviceWeight` and `dropStepLb`, both also
-     unreferenced in production. `defaultDropPercent` on `Exercise` is
-     declared but never read.
-   - The `100 → 80 → 64` ladder is the canonical artifact of `currentLb × 0.8`
-     compounded twice. The only function in the repo that produces it is
-     `cascadeNextWeight(from: 100, tier: 4)` followed by
-     `cascadeNextWeight(from: 80, tier: 4)`. `bumpCascadeTier` caps tier at
-     3, so this path should be unreachable in shipping code.
-   - Hypotheses still open: (a) user is reading the active-tile **preview**
-     which re-anchors at the post-drop current, making it look like
-     compounding; (b) build 25/early binary still installed; (c) a code path
-     not yet found. Build 30 day 2 should ask the user for a precise
-     reproduction (tap sequence, screen-recorded tile values, build number
-     visible on screen at the time).
-   - Regression tests added in `VoltraLiveTests/DropSetCascadeTests.swift`
-     pin the anchor-correct behavior at all tiers so any future change
-     cannot silently regress to compounding.
-   - Suspect files for any further fix (in priority order):
-     1. `VoltraLive/Logging/Persistence/LoggingStore.swift` cascade math.
-     2. `VoltraLive/Logging/Views/LiveCaptureView.swift` `dropSetTileActive`
-        preview (re-anchors at `pendingPlannedWeightLb` after each drop).
-     3. `VoltraLive/Logging/Model/LoggingModels.swift` — `defaultDropPercent`
-        is dead and should be removed (separate cleanup commit).
+1. **Drop-set tap-fires-drop bug (FIXED in build 30).** User reported with
+   screenshots IMG_2241–2244 that tapping the active drop-set tile to
+   adjust the drop %/lb was lowering the weight on every tap, producing
+   the visible ladder `100 → 95 (DROP 2, tier 1) → 80 (DROP 3, tier 2) →
+   55 (DROP 4, tier 3)` across just three taps.
+   - Root cause: `LoggingStore.bumpCascadeTier()` was calling
+     `fireNextCascadeStep()` directly, so each tap both bumped the tier
+     AND committed a drop. The tile was unusable as a tier selector.
+   - The cascade *math* was always anchor-correct —
+     `cascadeAnchoredDeviceWeight(...)` produces exactly `95, 80, 55` at
+     (tier 1, step 1), (tier 2, step 2), (tier 3, step 3) anchored to
+     100. The user's verbal description "100 → 80 → 64" was an
+     approximation; the screenshots show the real values.
+   - Fix: `bumpCascadeTier()` now ONLY rolls tier 1→2→3→1 and resets the
+     4s fuse. The fuse is the sole trigger for committing further drops.
+     `startDropSet`'s immediate fire of drop #2 stays (intentional tap-to-
+     start feel). User confirmed this UX before code was written.
+   - Regression tests in `VoltraLiveTests/DropSetCascadeTests.swift`:
+     `testLiveCascade_BumpedTier_DoesNotFireDrop` asserts the chain stays
+     `[100, 95]` after start + 3 tier bumps and explicitly forbids 80, 55,
+     and 64 from appearing. `testLiveCascade_FuseFiresAtCurrentTier_AnchorRelative`
+     verifies the fuse still commits anchor-relative drops at the current tier.
 2. **HR is one-shot snapshot.** Heart rate populates once at session start
    then stops updating. Should stream continuously.
    - Suspect file: `VoltraLive/Health/HealthKitStore.swift`.

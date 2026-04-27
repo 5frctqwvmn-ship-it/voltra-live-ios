@@ -85,7 +85,8 @@ final class DropSetCascadeTests: XCTestCase {
     /// machine starts feeding it the wrong anchor (e.g. the just-dropped
     /// weight instead of the original starting weight).
     func testLiveCascade_Tier1_BuildsAnchoredLadder() {
-        let store = LoggingStore.makeForTesting()
+        let (store, session) = LoggingStore.makeForTestingWithSession()
+        _ = session // retained for the duration of the test (weak ref on store)
         var pushedWeights: [Double] = []
         store.startDropSet(startingLb: 100.0) { lb in
             pushedWeights.append(lb)
@@ -105,23 +106,67 @@ final class DropSetCascadeTests: XCTestCase {
                        "device pushes must follow the anchored ladder")
     }
 
-    /// User-reported scenario: starting at 100, tier-bumped twice (so each
-    /// tap fires at the new tier). The chain must follow the anchored
-    /// progression — NEVER 100 → 80 → 64 (which is 20% compounded).
-    func testLiveCascade_BumpedTier_DoesNotCompound() {
-        let store = LoggingStore.makeForTesting()
-        store.startDropSet(startingLb: 100.0) { _ in }
-        // After start: tier 1, drop #2 fired = 95. cascadeStepIndex = 1.
-        // First bump → tier 2, fires drop #3 anchored at step 2 → 100 - max(10, 100*0.10*2) = 80.
-        store.bumpCascadeTier()
-        // Second bump → tier 3, fires drop #4 anchored at step 3 → 100 - max(15, 100*0.15*3) = 55.
-        store.bumpCascadeTier()
+    /// v0.4.8 (build 30) regression test for the user-reported bug shown in
+    /// screenshots IMG_2241–2244. Each tap on the active drop-set tile was
+    /// firing a drop AND bumping the tier, producing the ladder
+    /// 100 → 95 (DROP 2, tier 1) → 80 (DROP 3, tier 2) → 55 (DROP 4, tier 3)
+    /// across just three taps. After the fix, `bumpCascadeTier` is
+    /// preview-only: it cycles 5%→10%→15% but does NOT fire a step. The
+    /// 4s fuse remains the only path to commit a drop.
+    ///
+    /// Expected chain after start + 3 bumps: only the start's immediate
+    /// fire of drop #2 at tier 1 is on the chain. Subsequent bumps add
+    /// nothing.
+    func testLiveCascade_BumpedTier_DoesNotFireDrop() {
+        let (store, session) = LoggingStore.makeForTestingWithSession()
+        _ = session
+        var pushed: [Double] = []
+        store.startDropSet(startingLb: 100.0) { lb in pushed.append(lb) }
+        // startDropSet fires drop #2 immediately at tier 1: 100 → 95. This
+        // is intentional ("the user wants the press of the button to feel
+        // instant" — LoggingStore.startDropSet comment).
+        XCTAssertEqual(store.dropChainPlannedLb, [100.0, 95.0],
+                       "startDropSet fires drop #2 immediately at tier 1")
+        XCTAssertEqual(pushed, [95.0],
+                       "startDropSet's immediate fire pushes 95 to the device")
 
-        XCTAssertEqual(store.dropChainPlannedLb, [100.0, 95.0, 80.0, 55.0],
-                       "tier-bump fires must remain anchor-relative; compounding would yield ...80, 64...")
-        // Specifically: assert the compounding artifact never appears.
+        // Three tier bumps: tier cycles 1→2→3→1. No further drops fire.
+        store.bumpCascadeTier() // tier 2
+        store.bumpCascadeTier() // tier 3
+        store.bumpCascadeTier() // tier 1 (rolled)
+
+        XCTAssertEqual(store.dropChainPlannedLb, [100.0, 95.0],
+                       "tier bumps must NOT extend the drop chain past startDropSet's initial fire")
+        XCTAssertEqual(pushed, [95.0],
+                       "tier bumps must NOT push additional weights to the device")
+        XCTAssertEqual(store.cascadeTier, 1, "three bumps cycles 1→2→3→1")
+        // The canonical pre-fix ladder (...80, 55) must not appear.
+        XCTAssertFalse(store.dropChainPlannedLb.contains(80.0),
+                       "80 lb would only appear if bumpCascadeTier still fired (pre-build-30 bug)")
+        XCTAssertFalse(store.dropChainPlannedLb.contains(55.0),
+                       "55 lb would only appear if bumpCascadeTier still fired at tier 3 (pre-build-30 bug)")
+    }
+
+    /// When the 4s fuse fires (simulated via `testFireCascadeStep`), the
+    /// drop committed must use whatever tier is current at fire time, and
+    /// must remain anchor-relative — never compounding off prior drops.
+    /// After bumping to tier 3, the fuse should fire 85, then 70 (= 100
+    /// minus 15 × stepIndex), anchored to the original 100.
+    func testLiveCascade_FuseFiresAtCurrentTier_AnchorRelative() {
+        let (store, session) = LoggingStore.makeForTestingWithSession()
+        _ = session
+        store.startDropSet(startingLb: 100.0) { _ in }
+        // Chain after start: [100, 95]. cascadeStepIndex = 1, tier = 1.
+        store.bumpCascadeTier() // tier 2 (no fire)
+        store.bumpCascadeTier() // tier 3 (no fire)
+        store.testFireCascadeStep() // fuse: tier 3, step 2 → 100 - 15*2 = 70
+        // Hmm — stepIndex went from 1→2, so the fired weight is anchored
+        // at step 2 of tier 3: 100 - max(15, 100*0.15*2) = 100 - 30 = 70.
+
+        XCTAssertEqual(store.dropChainPlannedLb.last, 70.0,
+                       "fuse-fired drop at tier 3, step 2 must be 70 (anchor-relative)")
         XCTAssertFalse(store.dropChainPlannedLb.contains(64.0),
-                       "64 lb is the canonical compounding artifact (100 × 0.8 × 0.8) and must never appear")
+                       "64 lb (100 × 0.8 × 0.8) is the compounding artifact and must never appear")
     }
 
     /// The 20%-per-drop ladder the user described in plain language
