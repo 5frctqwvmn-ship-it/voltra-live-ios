@@ -102,14 +102,38 @@ struct ProgressChartView: View {
     @State private var range: ProgressRange = .threeMonth
     @State private var selectedDate: Date? = nil
 
+    /// v0.4.4: Sample data ONLY shows when there's truly no logged history at
+    /// all — a brand-new exercise the user has never touched. Real exercises
+    /// with history (even if all of it falls outside the default range) show
+    /// real data with the range auto-promoted instead of leaking sample points.
     private var isSample: Bool { series.isEmpty }
     private var effectiveSeries: [ProgressPoint] {
         isSample ? Self.samplePoints() : series
     }
 
+    /// v0.4.4: When real history exists but the currently-selected range
+    /// happens to be empty (e.g. last logged set is 7 months old, default 3M),
+    /// auto-promote to the smallest range that contains data. The user can
+    /// still tap any range chip to override.
+    private var effectiveRange: ProgressRange {
+        if isSample { return range }
+        let sortedReal = series.sorted { $0.date < $1.date }
+        guard let oldest = sortedReal.first else { return range }
+        // Try the user's chosen range first; if empty, walk widening.
+        let order: [ProgressRange] = [range, .oneMonth, .threeMonth, .oneYear, .all]
+        for candidate in order {
+            guard let days = candidate.days else { return .all }
+            let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+            if oldest <= Date(), sortedReal.contains(where: { $0.date >= cutoff }) {
+                return candidate
+            }
+        }
+        return .all
+    }
+
     private var visiblePoints: [ProgressPoint] {
         let sorted = effectiveSeries.sorted { $0.date < $1.date }
-        guard let days = range.days else { return sorted }
+        guard let days = effectiveRange.days else { return sorted }
         let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
         return sorted.filter { $0.date >= cutoff }
     }
@@ -157,8 +181,11 @@ struct ProgressChartView: View {
     }
 
     private var trendChip: some View {
+        // v0.4.4: Don't render a trend on synthetic sample data — it's
+        // misleading on a brand-new exercise.
         let pts = visiblePoints
-        guard pts.count >= 3,
+        guard !isSample,
+              pts.count >= 3,
               let first = pts.first,
               let last = pts.last
         else {
@@ -346,18 +373,23 @@ struct ProgressChartView: View {
     }
 
     private var rangeToggles: some View {
-        HStack(spacing: 6) {
+        // v0.4.4: Highlight the *effective* range so the user can see at a
+        // glance which range is actually showing data when auto-promotion
+        // kicks in (e.g. they tap 3M but their only history is 7 mo. old
+        // — the chart silently shows 1Y / All instead).
+        let active = effectiveRange
+        return HStack(spacing: 6) {
             ForEach(ProgressRange.allCases) { r in
                 Button { range = r; selectedDate = nil } label: {
                     Text(r.rawValue)
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 5)
-                        .background(range == r ? VoltraColor.bgElev2 : Color.clear)
-                        .foregroundColor(range == r ? VoltraColor.text : VoltraColor.textDim)
+                        .background(active == r ? VoltraColor.bgElev2 : Color.clear)
+                        .foregroundColor(active == r ? VoltraColor.text : VoltraColor.textDim)
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
-                                .stroke(range == r ? VoltraColor.border : Color.clear, lineWidth: 1)
+                                .stroke(active == r ? VoltraColor.border : Color.clear, lineWidth: 1)
                         )
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }

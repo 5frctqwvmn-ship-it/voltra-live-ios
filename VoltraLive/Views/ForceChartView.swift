@@ -19,6 +19,15 @@ struct ForceChartView: View {
     let samples: [ForceSample]
     let peakLb: Double
 
+    /// v0.4.4: When provided, the Y-axis ceiling is anchored to the planned
+    /// total weight (Voltra base + eccentric + added plates) plus 15% headroom.
+    /// This keeps the waveform from looking tiny when the user lifts a small
+    /// weight — e.g. 5 lb base + 5 ecc no longer scales against a 40 lb floor.
+    /// If the user's actual peak exceeds the planned ceiling, the chart still
+    /// expands to fit. Pass nil from contexts that don't know the planned
+    /// weight (e.g. DashboardView) to preserve the prior 40 lb floor behavior.
+    var plannedCeilingLb: Double? = nil
+
     private var now: Date { Date() }
 
     private var visibleSamples: [ForceSample] {
@@ -28,6 +37,15 @@ struct ForceChartView: View {
 
     private var maxForce: Double {
         let maxVisible = visibleSamples.map(\.forceLb).max() ?? 0
+        if let planned = plannedCeilingLb, planned > 0 {
+            // Planned-weight + 15% headroom OR observed peak + 15% headroom,
+            // whichever is greater — so a strong overshoot doesn't clip the
+            // waveform. Floor at 12 lb so an empty chart still has a sane
+            // axis (smaller floor than the dashboard since planned-anchored
+            // mode is used inside a session with light loads).
+            return max(12, planned * 1.15, maxVisible * 1.15)
+        }
+        // Legacy behavior for callers that don't pass a planned ceiling.
         return max(40, maxVisible) * 1.1
     }
 

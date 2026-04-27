@@ -222,11 +222,21 @@ struct LiveCaptureView: View {
     /// Same component DashboardView uses, fed from the same SessionStore set.
     /// Keeps the in-session view feature-parity with the dashboard so the user
     /// can see their realtime waveform without leaving LiveCaptureView.
+    /// v0.4.4: Y-axis is anchored to planned total weight (Voltra base + ecc +
+    /// added plates) + 15% headroom so light lifts (e.g. 10 lb total) no longer
+    /// look tiny against a 40 lb default floor.
     private var forceChart: some View {
         let samples = session.currentSet?.samples ?? []
         let peak = session.currentSet?.peakLb ?? 0
-        return ForceChartView(samples: samples, peakLb: peak)
-            .frame(minHeight: 180)
+        let planned = (logging.pendingPlannedWeightLb ?? 0)
+            + logging.upcomingEccLb
+            + (logging.upcomingAddedLoadLb ?? 0)
+        return ForceChartView(
+            samples: samples,
+            peakLb: peak,
+            plannedCeilingLb: planned > 0 ? planned : nil
+        )
+        .frame(minHeight: 180)
     }
 
     private func phaseLabel(_ p: VoltraPhase) -> String {
