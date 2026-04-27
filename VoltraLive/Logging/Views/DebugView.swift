@@ -14,6 +14,11 @@ struct DebugView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var demo: DemoController
+    /// Build 37: HealthKit access for the Settings/Debug status panel so
+    /// the user can see at a glance whether HK has been authorized,
+    /// whether the paired Watch is streaming HR samples, and re-prompt
+    /// from one consistent place.
+    @EnvironmentObject private var health: HealthKitStore
 
     @State private var counts: (sessions: Int, exercises: Int, sets: Int, legTagged: Int) = (0, 0, 0, 0)
     @State private var stubCount: Int = 0
@@ -101,6 +106,40 @@ struct DebugView: View {
                                 .tint(VoltraColor.accent)
                             }
                             Text("While active, no logs, sets, or settings are written to disk. The session is captured to a JSON trace you can send to the developer.")
+                                .font(.system(size: 12))
+                                .foregroundColor(VoltraColor.textDim)
+                        }
+
+                        // Build 37: HealthKit / Apple Watch status panel.
+                        // Mirrors the home-screen healthPill but with full
+                        // text and a 'Request again' button, so anyone
+                        // looking for HK state has one obvious place to
+                        // check on top of the chip on the home header.
+                        section("APPLE WATCH / HEALTHKIT") {
+                            row("HealthKit available", health.isAvailable ? "yes" : "no")
+                            row("Authorization requested", health.hasRequestedAuthorization ? "yes" : "not yet")
+                            if let hr = health.currentHR {
+                                row("Current HR (bpm)", "\(hr)")
+                            } else {
+                                row("Current HR (bpm)", "\u{2014}")
+                            }
+                            if let last = health.lastHRSampleAt {
+                                let secs = Int(Date().timeIntervalSince(last))
+                                row("Last HR sample", "\(secs)s ago")
+                            } else {
+                                row("Last HR sample", "never")
+                            }
+                            row("Session kcal", String(format: "%.1f", health.sessionKcal))
+                            actionButton(
+                                title: health.hasRequestedAuthorization
+                                    ? "Re-request HealthKit access"
+                                    : "Request HealthKit access",
+                                systemImage: "heart.text.square",
+                                tint: VoltraColor.accent
+                            ) {
+                                health.requestAuthIfNeeded()
+                            }
+                            Text("If the system permission sheet didn't appear on first launch, tap the button above. iOS may also require you to enable HealthKit access in Settings \u2192 Privacy & Security \u2192 Health \u2192 VOLTRA Live.")
                                 .font(.system(size: 12))
                                 .foregroundColor(VoltraColor.textDim)
                         }

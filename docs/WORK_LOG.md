@@ -623,3 +623,16 @@ Files changed:
 - VoltraLive/Logging/Views/LiveCaptureView.swift (loadUnloadRow)
 - VoltraLive/Info.plist (0.4.13 -> 0.4.14, 35 -> 36, label "Load/unload")
 - project.yml (same bumps in 2 places)
+
+## 2026-04-27 — b37 "HK settings"
+
+User asked for a HealthKit/Watch chip on home AND in settings. b35 added
+the home chip; b37 adds the Settings entry. New "APPLE WATCH / HEALTHKIT"
+section in DebugView shows availability, auth state, current HR, last
+sample age, and session kcal, with a re-request button so the user can
+recover from a missed prompt without leaving the app.
+
+Files changed:
+- VoltraLive/Logging/Views/DebugView.swift (new section + env object)
+- VoltraLive/Info.plist (0.4.14 -> 0.4.15, 36 -> 37, label "HK settings")
+- project.yml (same bumps in 2 places)
