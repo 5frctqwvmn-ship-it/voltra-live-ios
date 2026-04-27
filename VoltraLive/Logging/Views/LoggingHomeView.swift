@@ -22,6 +22,14 @@ struct LoggingHomeView: View {
     @State private var showingDashboard = false
     @State private var showingDebug = false
 
+    // v0.4.8 (build 30): optional training-split tag the user can apply to
+    // the workout BEFORE picking a day-type tile. Flows into
+    // `LoggingStore.startSession(…)` for both the preset day tiles and the
+    // custom-day sheet.
+    @State private var pickedGroup: WorkoutGroup? = nil
+    @State private var groupCustomLabel: String = ""
+    @State private var showingGroupCustom = false
+
     private let primaryDayTypes: [DayType] = [.leg, .back, .chest, .arm]
 
     var body: some View {
@@ -31,6 +39,12 @@ struct LoggingHomeView: View {
                 ScrollView {
                     VStack(spacing: 24) {
                         header
+
+                        WorkoutGroupPicker(
+                            group: $pickedGroup,
+                            customLabel: $groupCustomLabel,
+                            onRequestCustom: { showingGroupCustom = true }
+                        )
 
                         VStack(spacing: 14) {
                             Text("PICK A DAY")
@@ -109,6 +123,13 @@ struct LoggingHomeView: View {
             .sheet(isPresented: $showingCustom) {
                 customSheet
             }
+            .sheet(isPresented: $showingGroupCustom) {
+                WorkoutGroupCustomSheet(
+                    customLabel: $groupCustomLabel,
+                    group: $pickedGroup,
+                    isPresented: $showingGroupCustom
+                )
+            }
             .sheet(isPresented: $showingDebug) {
                 DebugView()
             }
@@ -180,7 +201,11 @@ struct LoggingHomeView: View {
 
     private func dayTile(_ dt: DayType) -> some View {
         Button {
-            logging.startSession(dayType: dt)
+            logging.startSession(
+                dayType: dt,
+                group: pickedGroup,
+                customGroupLabel: pickedGroup == .custom ? groupCustomLabel : nil
+            )
             pickedDayType = dt
         } label: {
             VStack(alignment: .leading, spacing: 12) {
@@ -262,7 +287,12 @@ struct LoggingHomeView: View {
                     Button {
                         let label = customLabel.trimmingCharacters(in: .whitespaces)
                         guard !label.isEmpty else { return }
-                        logging.startSession(dayType: .custom, customLabel: label)
+                        logging.startSession(
+                            dayType: .custom,
+                            customLabel: label,
+                            group: pickedGroup,
+                            customGroupLabel: pickedGroup == .custom ? groupCustomLabel : nil
+                        )
                         showingCustom = false
                         pickedDayType = .custom
                     } label: {

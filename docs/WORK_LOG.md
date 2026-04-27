@@ -334,3 +334,80 @@ points at it.
 - **Verification:** Grep for `"[^"]*\\u[0-9A-Fa-f]{4}[^{]` across the new
   Dual/ + Protocol/ files returns only the doc-comment line. Triggered
   dry-run `25013122194` immediately after push.
+
+---
+
+## 2026-04-27 18:58 UTC — Workout-creation Group dropdown (build 30 priority #6, parallel branch)
+
+- **Goal:** Add the optional training-split tag (Push / Pull / Legs / Upper /
+  Lower / Full Body / Custom) to workout creation, orthogonal to the
+  existing `DayType`. Path C from the plan: typed enum, additive
+  optional fields, no schema migration, importer/seed/exercise-tags
+  untouched. Runs on parallel branch `feat/group-dropdown` while the
+  lead agent finishes the dual-Voltra UI wiring on `main`.
+- **Files changed:**
+  - `VoltraLive/Logging/Model/LoggingModels.swift` — added
+    `WorkoutGroup` enum (presets + `.custom`); added
+    `groupRaw: String?` and `customGroupLabel: String?` fields on
+    `WorkoutSession` with nil defaults; added `group` and `groupLabel`
+    computed accessors; init normalizes empty/whitespace
+    `customGroupLabel` to nil.
+  - `VoltraLive/Logging/Persistence/LoggingStore.swift` —
+    `startSession` accepts optional `group` + `customGroupLabel`
+    (additive params with nil defaults; no existing call site breaks).
+  - `VoltraLive/Logging/Views/WorkoutGroupPicker.swift` — NEW. Menu-style
+    picker + `WorkoutGroupCustomSheet` for the inline text-entry route.
+  - `VoltraLive/Logging/Views/LoggingHomeView.swift` — picker rendered
+    above the day-type grid; selected group flows into both the preset
+    `dayTile` taps and the existing custom-day sheet's Start button.
+  - `VoltraLive/Logging/Views/LiveCaptureView.swift` — new chip next to
+    the day label in `header` when the active session has a group set.
+    Hidden (zero layout impact) for sessions without a group.
+  - `VoltraLiveTests/WorkoutGroupTests.swift` — NEW. Pins the four
+    requested round-trip cases plus a setter-clears-customLabel guard
+    and a no-group-stale-customLabel guard.
+  - `docs/handoff/03_ROADMAP.md` — mark priority #6 `DONE` and link to
+    this entry.
+- **Schema:** Two new optional fields on `WorkoutSession` (`groupRaw`,
+  `customGroupLabel`), both `nil` by default. SwiftData treats this
+  as additive — no migration code needed; old rows decode with both nil.
+  CloudKit-safe per the file's stated constraints (every property
+  optional or has a default, no `@Attribute(.unique)`).
+- **UI placement:** Picker sits in `LoggingHomeView` between the
+  header and the "PICK A DAY" tile grid, so users tag the workout's
+  split BEFORE picking a body-part day. The chip surfaces in
+  `LiveCaptureView.header` next to the existing day label.
+  `BuildBadgeOverlay` (global) covers the build-number-on-every-screen
+  rule — no new build chip needed (the new sheet calls
+  `.buildBadgeOverlay()` for parity with `customSheet`).
+- **Sacred files unchanged:** Protocol/* (4 sacred files) untouched.
+  Off-limits per the parallel-task contract: BLE/Dual/* untouched,
+  `VoltraBLEManager.swift` untouched, `VoltraControlFrames+LoadUnload.swift`
+  untouched, `Views/ConnectView.swift` untouched.
+- **Why typed enum, not free String:** Surfacing reasoning back in case
+  a later agent asks: a free `String` field would have shipped a
+  stringly-typed schema where "Push" / "push" / "PUSH" all coexist.
+  Enum-with-raw-strings keeps presets type-safe, lets switch statements
+  be exhaustive, and still gives custom-label flexibility through the
+  separate `customGroupLabel` field. Stable raw values
+  ("Push", "Pull", \u2026) mean the JSON / future export round-trip is
+  stable across enum-case renames.
+- **Verification:** Static review + new unit tests. Will dry-run
+  release.yml after push.
+- **Risks:** (a) The chip in `LiveCaptureView.header` is rendered in an
+  `HStack` that previously was a single `Text` — for sessions without
+  a group it's identical visually (the optional unwrap returns nothing
+  and HStack collapses). For sessions WITH a group on a very narrow
+  device, the chip + day label could wrap; both are short-strings so
+  this is unlikely but unverified. (b) `HistoryImporter` does not
+  populate `group` for imported sessions — intentional, history.md
+  predates the field. Imported rows render without a chip, same as
+  pre-build-30 sessions. (c) `startSession` signature gained two
+  optional trailing params; called from two sites in
+  `LoggingHomeView`, both updated. No other callers (verified via
+  grep).
+- **Next step:** Commit, push `feat/group-dropdown`, dry-run
+  `release.yml -f dry_run=true` against the branch, iterate to
+  green, open PR against `main` (do NOT merge, do NOT tag — lead
+  agent coordinates with dual-Voltra branch before tagging
+  v0.4.8-build30).

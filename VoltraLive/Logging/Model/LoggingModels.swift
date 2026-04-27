@@ -70,6 +70,36 @@ enum DayType: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Workout group (training split)
+
+/// Training-split tag the user can apply to a workout, orthogonal to `DayType`.
+/// `DayType` answers "which body part(s)"; `WorkoutGroup` answers "which split
+/// philosophy" (PPL, Upper/Lower, Full Body, custom). Optional — sessions
+/// without a group behave identically to pre-build-30 sessions.
+///
+/// Stored as String raw values (`groupRaw`) so additions to this enum stay
+/// CloudKit-safe and old rows decode cleanly.
+enum WorkoutGroup: String, Codable, CaseIterable, Identifiable {
+    case push     = "Push"
+    case pull     = "Pull"
+    case legs     = "Legs"
+    case upper    = "Upper"
+    case lower    = "Lower"
+    case fullBody = "Full Body"
+    case custom   = "Custom"
+
+    var id: String { rawValue }
+
+    /// Display name for chips and pickers. For `.custom`, callers should fall
+    /// back to `WorkoutSession.customGroupLabel` when present.
+    var displayName: String { rawValue }
+
+    /// Presets shown in the picker, in the order the user expects.
+    /// `.custom` is appended separately by the picker UI so it can route to
+    /// the inline text-entry sheet.
+    static let presets: [WorkoutGroup] = [.push, .pull, .legs, .upper, .lower, .fullBody]
+}
+
 // MARK: - Set mode
 
 /// Mode/modifier from the user's logs (band, eccentric, pause, etc.).
@@ -191,6 +221,14 @@ final class WorkoutSession {
     var dayTypeRaw: String = DayType.custom.rawValue
     /// Free-form custom-day-type label when dayType == .custom (e.g. "Push").
     var customLabel: String? = nil
+    /// v0.4.8 (build 30): training-split tag, orthogonal to `dayType`.
+    /// Nil for sessions that don't have a group set (default; pre-build-30
+    /// rows decode here). Stored as raw string for CloudKit-safe additive
+    /// migration; access via the `group` computed property.
+    var groupRaw: String? = nil
+    /// v0.4.8 (build 30): user-typed label when `group == .custom`.
+    /// Trimmed and normalized to nil-if-empty by the setter.
+    var customGroupLabel: String? = nil
     /// Imported from history.md? If true, the session lives only for compare/PR
     /// lookups — it didn't come from real telemetry.
     var importedFromHistory: Bool = false
@@ -207,6 +245,8 @@ final class WorkoutSession {
         endedAt: Date? = nil,
         dayType: DayType = .custom,
         customLabel: String? = nil,
+        group: WorkoutGroup? = nil,
+        customGroupLabel: String? = nil,
         importedFromHistory: Bool = false,
         importSourceID: String? = nil
     ) {
@@ -215,6 +255,11 @@ final class WorkoutSession {
         self.endedAt = endedAt
         self.dayTypeRaw = dayType.rawValue
         self.customLabel = customLabel
+        self.groupRaw = group?.rawValue
+        // Normalize empty/whitespace custom labels to nil so the chip helper
+        // doesn't render a blank pill. Test #4 pins this contract.
+        let trimmed = customGroupLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.customGroupLabel = (trimmed?.isEmpty == false) ? trimmed : nil
         self.importedFromHistory = importedFromHistory
         self.importSourceID = importSourceID
     }
@@ -227,6 +272,29 @@ final class WorkoutSession {
     var displayLabel: String {
         if dayType == .custom, let c = customLabel, !c.isEmpty { return c }
         return dayType.displayName
+    }
+
+    /// Typed accessor for the v0.4.8 training-split tag. Nil for sessions
+    /// without a group set. Setting nil clears `customGroupLabel` too so the
+    /// pair stays consistent.
+    var group: WorkoutGroup? {
+        get {
+            guard let raw = groupRaw else { return nil }
+            return WorkoutGroup(rawValue: raw)
+        }
+        set {
+            groupRaw = newValue?.rawValue
+            if newValue != .custom { customGroupLabel = nil }
+        }
+    }
+
+    /// User-facing label for the training-split tag. Returns the custom
+    /// string when `group == .custom` and a non-empty `customGroupLabel`
+    /// is set; otherwise the preset's display name; nil when no group set.
+    var groupLabel: String? {
+        guard let g = group else { return nil }
+        if g == .custom, let c = customGroupLabel, !c.isEmpty { return c }
+        return g.displayName
     }
 
     var isActive: Bool { endedAt == nil }

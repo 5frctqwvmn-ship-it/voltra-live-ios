@@ -180,6 +180,9 @@ struct LiveCaptureView: View {
     private var header: some View {
         let exName = logging.activeInstance?.exercise?.name ?? "Exercise"
         let dayLabel = logging.activeSession?.displayLabel ?? ""
+        // v0.4.8 (build 30): optional training-split chip rendered next to
+        // the day label when the active session has a group set.
+        let groupLabel = logging.activeSession?.groupLabel
         let setNum = logging.setNumberForCurrentInstance
         let plannedTotal = plannedSetCount
         let counterText: String = {
@@ -189,10 +192,25 @@ struct LiveCaptureView: View {
             return "SET \(setNum)"
         }()
         return VStack(alignment: .leading, spacing: 6) {
-            Text(dayLabel.uppercased())
-                .font(.system(size: 11, weight: .bold))
-                .kerning(2)
-                .foregroundColor(VoltraColor.accent)
+            HStack(spacing: 8) {
+                Text(dayLabel.uppercased())
+                    .font(.system(size: 11, weight: .bold))
+                    .kerning(2)
+                    .foregroundColor(VoltraColor.accent)
+                if let groupLabel {
+                    Text(groupLabel.uppercased())
+                        .font(.system(size: 10, weight: .bold))
+                        .kerning(1.5)
+                        .foregroundColor(VoltraColor.textDim)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(VoltraColor.bgElev)
+                        .overlay(
+                            Capsule().stroke(VoltraColor.border, lineWidth: 1)
+                        )
+                        .clipShape(Capsule())
+                }
+            }
             Text(exName)
                 .font(.system(size: 22, weight: .bold))
                 .foregroundColor(VoltraColor.text)

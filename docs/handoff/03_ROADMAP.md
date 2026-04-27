@@ -32,8 +32,16 @@ Locked-in priority order:
 5. **Dual-Voltra.** Restore from `.dual-voltra-wip/`, ship the 3-button
    Connect screen, scanner picker, `MultiDeviceManager`, Independent +
    Combined modes. See `07_DUAL_VOLTRA.md` for the spec.
-6. **Workout-creation Group dropdown.** Existing tags ("Back Day", "Chest
-   Day", "Leg Day") + ability to create a new group inline.
+6. **Workout-creation Group dropdown.** ✅ DONE (parallel branch
+   `feat/group-dropdown`, awaiting PR merge before tag). New typed
+   `WorkoutGroup` enum (Push / Pull / Legs / Upper / Lower / Full Body /
+   Custom) on `WorkoutSession`, orthogonal to the existing `DayType`
+   (which stays untouched so the history importer + Exercise dayTypeTags
+   keep working). Picker rendered in `LoggingHomeView` above the
+   day-type grid; chip surfaces in `LiveCaptureView.header`. Schema is
+   additive optional fields (`groupRaw`, `customGroupLabel`) — no
+   migration. Tests in `VoltraLiveTests/WorkoutGroupTests.swift` pin
+   the four round-trip cases. See WORK_LOG entry of 2026-04-27.
 
 After all six land:
 

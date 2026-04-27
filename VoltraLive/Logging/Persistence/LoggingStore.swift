@@ -799,12 +799,19 @@ final class LoggingStore: ObservableObject {
 
     // MARK: - Session lifecycle
 
-    func startSession(dayType: DayType, customLabel: String? = nil) {
+    func startSession(
+        dayType: DayType,
+        customLabel: String? = nil,
+        group: WorkoutGroup? = nil,
+        customGroupLabel: String? = nil
+    ) {
         guard let ctx = modelContext else { return }
         let s = WorkoutSession(
             startedAt: Date(),
             dayType: dayType,
-            customLabel: customLabel
+            customLabel: customLabel,
+            group: group,
+            customGroupLabel: customGroupLabel
         )
         ctx.insert(s)
         activeSession = s
