@@ -139,7 +139,7 @@ struct DebugView: View {
                             ) {
                                 health.requestAuthIfNeeded()
                             }
-                            Text("If the system permission sheet didn't appear on first launch, tap the button above. iOS may also require you to enable HealthKit access in Settings \u2192 Privacy & Security \u2192 Health \u2192 VOLTRA Live.")
+                            Text("If the system permission sheet didn't appear on first launch, tap the button above. iOS may also require you to enable HealthKit access in Settings -> Privacy & Security -> Health -> VOLTRA Live.")
                                 .font(.system(size: 12))
                                 .foregroundColor(VoltraColor.textDim)
                         }
