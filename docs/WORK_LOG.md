@@ -386,3 +386,52 @@ points at it.
 - **Next:** Dry-run on main; if green, the build-30 dual-Voltra UI
   surface is in. Then merge the parallel agent's Group-dropdown PR,
   tag `v0.4.8-build30`, push tag.
+
+---
+
+## 2026-04-27 20:39 UTC — New-Exercise sheet: day-type dropdown above name field (build 30 #6, replaces closed PR #1)
+
+- **Goal:** Replace the static "Adds to: Leg Day" footer in
+  `NewExerciseSheet` with a Menu-style dropdown rendered as the FIRST
+  field in the sheet. User picks a day (Leg / Back / Chest / Arm /
+  Custom), then types the exercise name. Day is seeded from the
+  picker's context (e.g. tapping "+" on the Leg Day picker
+  pre-selects `.leg`) but overridable.
+- **Why this replaces PR #1:** PR #1 built a parallel `WorkoutGroup`
+  enum on top of `DayType`, which was the wrong reading of the
+  roadmap. The actual user intent is much smaller: when creating a
+  new \*\*exercise template\*\* (not a session), the day-type should
+  be a dropdown above the name field so a user can categorize before
+  naming. Same `Exercise` model, no schema change at all.
+- **Files changed:**
+  - `VoltraLive/Logging/Views/ExercisePickerView.swift` \u2014
+    `NewExerciseSheet` reworked: `dayType` is now `@State`
+    seeded via a custom init; new `dayTypeField` Menu picker
+    rendered before the Name field; static "Adds to:" line removed.
+    `ExercisePickerView`'s sheet call site is unchanged \u2014 the
+    init still accepts a `dayType:` argument, just stored as state
+    now instead of `let`.
+  - `VoltraLiveTests/NewExerciseDayPickerTests.swift` \u2014 NEW.
+    Pins (a) primaryDayType + dayTypeTags reflect the dropdown
+    selection, (b) all DayType cases round-trip, (c) name/equipment
+    trimming.
+- **Schema:** Zero changes. `Exercise.primaryDayType` and
+  `Exercise.dayTypeTags` already exist. `createNewExercise`
+  signature unchanged.
+- **Sacred files unchanged.** Off-limits files (BLE/Dual/*,
+  VoltraBLEManager, VoltraControlFrames+LoadUnload, ConnectView)
+  unchanged.
+- **Verification:** Static review + new unit tests. Will dry-run
+  release.yml after push.
+- **Risks:** (a) The seed value behavior \u2014 if a user lands on the
+  Leg Day picker and taps "+", they see the dropdown pre-selected
+  to Leg and can change it before naming. They might find this
+  unexpected ("I'm on Leg Day, why is there a dropdown?") but the
+  override case (oops, this is actually a Back exercise) is more
+  important than the no-op case. (b) Dropdown includes `.custom`
+  which routes through the existing custom-day code path on
+  `Exercise` \u2014 the picker filter at line 30 already special-
+  cases `.custom` (returns all exercises), so creating a custom-
+  day exercise from this sheet works the same as the old static
+  path.
+- **Next step:** Commit, push, dry-run, open PR. Do NOT merge or tag.

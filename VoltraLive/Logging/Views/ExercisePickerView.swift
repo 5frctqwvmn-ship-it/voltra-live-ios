@@ -213,13 +213,22 @@ struct ExercisePickerView: View {
 // MARK: - New exercise sheet
 
 struct NewExerciseSheet: View {
-    let dayType: DayType
     let onCreate: (Exercise) -> Void
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var logging: LoggingStore
 
+    // v0.4.8 (build 30): day-type is now a Menu-style dropdown shown FIRST
+    // in the sheet so the user can categorize the new exercise before naming
+    // it. Seeded from the day-type the user came from (e.g. tapping "+" on
+    // the Leg Day picker pre-selects .leg) but overridable.
+    @State private var dayType: DayType
     @State private var name: String = ""
     @State private var equipment: String = ""
+
+    init(dayType: DayType, onCreate: @escaping (Exercise) -> Void) {
+        self._dayType = State(initialValue: dayType)
+        self.onCreate = onCreate
+    }
 
     var canSave: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty
@@ -230,11 +239,9 @@ struct NewExerciseSheet: View {
             ZStack {
                 VoltraColor.bg.ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 16) {
+                    dayTypeField
                     field(title: "Name", text: $name, placeholder: "e.g. Belt Squats")
                     field(title: "Equipment", text: $equipment, placeholder: "e.g. Voltra")
-                    Text("Adds to: \(dayType.displayName)")
-                        .font(.system(size: 13))
-                        .foregroundColor(VoltraColor.textDim)
                     Spacer()
                     Button {
                         let ex = logging.createNewExercise(name: name, equipment: equipment, dayType: dayType)
@@ -279,6 +286,52 @@ struct NewExerciseSheet: View {
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .foregroundColor(VoltraColor.text)
+        }
+    }
+
+    /// v0.4.8 (build 30): day-type dropdown rendered as the first field in
+    /// the sheet. Lets the user override the seeded day before naming the
+    /// exercise. Visual style mirrors `field(…)` so the form feels uniform.
+    private var dayTypeField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("DAY")
+                .font(.system(size: 11, weight: .bold))
+                .kerning(1.2)
+                .foregroundColor(VoltraColor.textDim)
+            Menu {
+                ForEach(DayType.allCases) { dt in
+                    Button {
+                        dayType = dt
+                    } label: {
+                        HStack {
+                            Image(systemName: dt.symbol)
+                            Text(dt.displayName)
+                            if dayType == dt { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: dayType.symbol)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(VoltraColor.accent)
+                    Text(dayType.displayName)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(VoltraColor.text)
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(VoltraColor.textDim)
+                }
+                .padding(14)
+                .background(VoltraColor.bgElev2)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(VoltraColor.border, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .menuStyle(.borderlessButton)
         }
     }
 }
