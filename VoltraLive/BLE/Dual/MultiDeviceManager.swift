@@ -269,7 +269,7 @@ final class MultiDeviceManager: ObservableObject {
         // warn and does nothing \u2014 still safe.
         unload(target: survivor)
 
-        let msg = "\(dropped.label) device dropped \u2014 unloading \(survivor.label), attempting reconnect\u2026"
+        let msg = "\(dropped.label) device dropped \u{2014} unloading \(survivor.label), attempting reconnect\u{2026}"
         state = .errorReconnecting(dropped: dropped, message: msg)
 
         scheduleReconnect(slot: dropped)
@@ -361,14 +361,14 @@ final class MultiDeviceManager: ObservableObject {
             // Default to "both", which is what Combined mode wants.
             left.writeControlFrame(frame)
             right.writeControlFrame(frame)
-            left.addLog("\u2192 \(label) (combined)")
-            right.addLog("\u2192 \(label) (combined)")
+            left.addLog("\u{2192} \(label) (combined)")
+            right.addLog("\u{2192} \(label) (combined)")
         case .some(.left):
             left.writeControlFrame(frame)
-            left.addLog("\u2192 \(label)")
+            left.addLog("\u{2192} \(label)")
         case .some(.right):
             right.writeControlFrame(frame)
-            right.addLog("\u2192 \(label)")
+            right.addLog("\u{2192} \(label)")
         }
     }
 
