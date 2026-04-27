@@ -56,14 +56,19 @@ struct VoltraLiveApp: App {
                     sessionStore.modelContext = ctx
                     loggingStore.wire(context: ctx, sessionStore: sessionStore)
 
-                    // BLE → SessionStore (existing telemetry path is the same).
-                    bleManager.onTelemetry = { [weak sessionStore] telem in
+                    // BLE → SessionStore + LoggingStore.
+                    // v0.4.6.1: every telemetry packet also pings
+                    // LoggingStore.noteTelemetryActivity() so an active drop
+                    // cascade resets its 4s/10s timers (no auto-drop while
+                    // the user is mid-rep).
+                    bleManager.onTelemetry = { [weak sessionStore, weak loggingStore] telem in
                         guard let ss = sessionStore else { return }
                         let phase    = telem.phase    ?? .idle
                         let forceLb  = telem.forceLb  ?? 0
                         let repCount = telem.repCount ?? 0
                         Task { @MainActor in
                             ss.handleLiveSample(phase: phase, forceLb: forceLb, repCount: repCount)
+                            loggingStore?.noteTelemetryActivity()
                         }
                     }
 

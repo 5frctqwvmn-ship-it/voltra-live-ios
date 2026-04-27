@@ -446,6 +446,21 @@ struct LiveCaptureView: View {
                 dropSetTileBody(perRepTotalLb: perRepTotalLb)
             }
             .buttonStyle(.plain)
+            // v0.4.6.1: Long-press (0.8s) cancels an active drop chain.
+            // simultaneousGesture so the long-press wins over the tap when
+            // the press lasts ≥0.8s; a quick tap still bumps the tier.
+            // No-op when inactive.
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.8)
+                    .onEnded { _ in
+                        if logging.dropSetActive {
+                            logging.cancelDropSet()
+                            // Light haptic so the user knows the cancel registered.
+                            let gen = UIImpactFeedbackGenerator(style: .medium)
+                            gen.impactOccurred()
+                        }
+                    }
+            )
         }
     }
 
@@ -530,6 +545,11 @@ struct LiveCaptureView: View {
                     .kerning(1.2)
                     .foregroundColor(VoltraColor.textFaint)
             }
+            // v0.4.6.1: discoverability hint for the long-press-to-cancel.
+            Text("hold to cancel")
+                .font(.system(size: 8, weight: .semibold))
+                .kerning(0.8)
+                .foregroundColor(VoltraColor.textFaint.opacity(0.7))
             Text(formatLbCompact(current))
                 .font(.system(size: 24, weight: .bold, design: .monospaced))
                 .foregroundColor(VoltraColor.transition)
@@ -665,9 +685,18 @@ struct LiveCaptureView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
-    /// Effective base weight binding — backed by pendingPlannedWeightLb.
+    /// v0.4.6.1: Effective base weight (what the user actually feels).
+    /// Backed by pendingPlannedWeightLb (DEVICE) × pulleyMultiplier. The big
+    /// dial and the eccentric dial both render this. Nudge buttons still
+    /// adjust the underlying device value by ±5 / ±1; the dial visually
+    /// moves by ±10 / ±2 under pulley mode.
     private var weightLb: Double {
-        logging.pendingPlannedWeightLb ?? 0
+        (logging.pendingPlannedWeightLb ?? 0) * logging.pulleyMultiplier
+    }
+
+    /// Effective eccentric overload (× pulley multiplier, like base weight).
+    private var eccLbEffective: Double {
+        logging.upcomingEccLb * logging.pulleyMultiplier
     }
 
     private var effectiveTargetReps: Int? {
@@ -689,9 +718,17 @@ struct LiveCaptureView: View {
                     .foregroundColor(VoltraColor.text)
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
-                Text("lb")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(VoltraColor.textFaint)
+                // v0.4.6.1: "lb" baseline; under pulley mode show the device
+                // value too so the user can confirm what the Voltra is set to.
+                if logging.pulleyMode {
+                    Text("lb · device \(Int(logging.pendingPlannedWeightLb ?? 0))")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(VoltraColor.textFaint)
+                } else {
+                    Text("lb")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(VoltraColor.textFaint)
+                }
             }
             .frame(maxWidth: .infinity)
             nudgeButton(label: "+1") { adjustWeight(+1) }
@@ -708,7 +745,8 @@ struct LiveCaptureView: View {
                 .frame(width: 38, alignment: .leading)
             nudgeButton(label: "−5", small: true) { adjustEcc(-5) }
             nudgeButton(label: "−1", small: true) { adjustEcc(-1) }
-            Text("+\(Int(logging.upcomingEccLb))")
+            // v0.4.6.1: ECC dial also renders effective (× pulley).
+            Text("+\(Int(eccLbEffective))")
                 .font(.system(size: 22, weight: .bold, design: .monospaced))
                 .foregroundColor(VoltraColor.returnPhase)
                 .frame(maxWidth: .infinity)

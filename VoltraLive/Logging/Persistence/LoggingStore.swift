@@ -326,6 +326,35 @@ final class LoggingStore: ObservableObject {
         dropFinalizeAt = Date().addingTimeInterval(cascadeIdleFinalizeSec)
     }
 
+    /// v0.4.6.1: Called from the BLE pipeline on every telemetry packet.
+    /// While a drop cascade is active, ANY packet (motion, force, phase
+    /// change) resets BOTH timers:
+    ///   - the 4s next-drop fuse (`nextDropFiresAt`) so the cable doesn't
+    ///     auto-drop while the user is mid-rep, and
+    ///   - the 10s no-movement finalize watchdog (`dropFinalizeAt`) so the
+    ///     set isn't ended out from under them.
+    /// No-op when `dropSetActive == false` so this is safe to call on every
+    /// packet regardless of session state.
+    func noteTelemetryActivity() {
+        guard dropSetActive else { return }
+        let now = Date()
+        nextDropFiresAt = now.addingTimeInterval(cascadeIntervalSec)
+        dropFinalizeAt = now.addingTimeInterval(cascadeIdleFinalizeSec)
+        // Also restart the 4s recurring timer so its next tick is 4s from
+        // NOW, not 4s from when the last drop fired. Without this, the
+        // Combine timer keeps its original phase and may fire mid-rep.
+        if cascadeTimer != nil {
+            cascadeTimer?.cancel()
+            cascadeTimer = Timer.publish(every: cascadeIntervalSec, on: .main, in: .common)
+                .autoconnect()
+                .sink { [weak self] _ in
+                    self?.fireNextCascadeStep()
+                }
+        }
+        // Bump the watchdog's reps anchor so checkCascadeIdle sees activity.
+        lastObservedReps = sessionStore?.currentSet?.reps ?? lastObservedReps
+    }
+
     // MARK: - v0.4.6: Cascade machinery
 
     /// Compute the next cascade step from the current trailing DEVICE weight,
