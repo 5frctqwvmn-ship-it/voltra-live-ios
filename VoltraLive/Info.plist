@@ -17,11 +17,19 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.4.6.2</string>
+    <string>0.4.6.3</string>
     <key>CFBundleVersion</key>
-    <string>25</string>
+    <string>26</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
+    <!-- v0.4.6.3: Demo Mode trace upload. release.yml replaces these
+         placeholders with values from GitHub Secrets at build time so no
+         endpoint/token ships in the source tree. Empty strings are valid;
+         the iOS uploader will surface a clear error. -->
+    <key>DemoTraceEndpoint</key>
+    <string>__DEMO_TRACE_ENDPOINT__</string>
+    <key>DemoTraceSharedToken</key>
+    <string>__DEMO_TRACE_SHARED_TOKEN__</string>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>VOLTRA Live needs Bluetooth to connect to your VOLTRA device and receive live workout telemetry.</string>
     <key>NSBluetoothPeripheralUsageDescription</key>

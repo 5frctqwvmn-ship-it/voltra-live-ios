@@ -14,6 +14,7 @@ struct LoggingHomeView: View {
     @EnvironmentObject var ble: VoltraBLEManager
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var logging: LoggingStore
+    @EnvironmentObject var demo: DemoController
 
     @State private var pickedDayType: DayType? = nil
     @State private var customLabel: String = ""
@@ -70,6 +71,22 @@ struct LoggingHomeView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                         }
                         .padding(.horizontal, 18)
+
+                        // v0.4.6.3: post-pair Demo Mode entry. Real device
+                        // stays paired and telemetry flows from it; we just
+                        // don't persist the session.
+                        if !demo.isActive {
+                            HStack {
+                                Spacer()
+                                DemoModeButton(source: .postPair) {
+                                    guard let handler = DemoTelemetryBridge.shared.handler else { return }
+                                    demo.note(.buttonTap(label: "Demo Mode (post-pair)", screen: "LoggingHome"))
+                                    demo.enter(source: .postPair, onTelemetry: handler)
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 18)
+                        }
 
                         Spacer(minLength: 30)
                     }

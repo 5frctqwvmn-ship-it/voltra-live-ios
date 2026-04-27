@@ -11,6 +11,8 @@ struct VoltraLiveApp: App {
     @StateObject private var sessionStore = SessionStore()
     @StateObject private var loggingStore = LoggingStore()
     @StateObject private var healthStore = HealthKitStore()
+    // v0.4.6.3: Demo Mode controller, owns synthetic telemetry + trace logger.
+    @StateObject private var demo = DemoController()
 
     let modelContainer: ModelContainer = {
         // v0.1 dashboard models + v0.2 logging models in one container so
@@ -49,6 +51,8 @@ struct VoltraLiveApp: App {
                 .environmentObject(sessionStore)
                 .environmentObject(loggingStore)
                 .environmentObject(healthStore)
+                .environmentObject(demo)
+                .demoModeOverlay()
                 .onAppear {
                     let ctx = modelContainer.mainContext
 
@@ -61,7 +65,11 @@ struct VoltraLiveApp: App {
                     // LoggingStore.noteTelemetryActivity() so an active drop
                     // cascade resets its 4s/10s timers (no auto-drop while
                     // the user is mid-rep).
-                    bleManager.onTelemetry = { [weak sessionStore, weak loggingStore] telem in
+                    // v0.4.6.3: Telemetry router shared by BLE and synthetic
+                    // sources. The DemoController.enter(.prePair) path
+                    // hands the SAME closure to SyntheticTelemetryGenerator
+                    // so downstream code can't tell real from fake.
+                    let telemetryHandler: (Telemetry) -> Void = { [weak sessionStore, weak loggingStore, weak demo] telem in
                         guard let ss = sessionStore else { return }
                         let phase    = telem.phase    ?? .idle
                         let forceLb  = telem.forceLb  ?? 0
@@ -71,8 +79,15 @@ struct VoltraLiveApp: App {
                             // v0.4.6.2: pass forceLb so sub-3lb jitter doesn't
                             // hold the cascade timers open.
                             loggingStore?.noteTelemetryActivity(forceLb: forceLb)
+                            // v0.4.6.3: real-device telemetry also gets logged
+                            // into the active demo trace, when applicable.
+                            demo?.trace?.recordTelemetry(telem)
                         }
                     }
+                    bleManager.onTelemetry = telemetryHandler
+                    // Stash a reference so DemoController can hand the
+                    // synthetic generator the same handler.
+                    DemoTelemetryBridge.shared.handler = telemetryHandler
 
                     // First-launch: seed Exercise/WorkoutSession rows from
                     // the bundled history.md.

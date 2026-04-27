@@ -6,6 +6,7 @@ import SwiftUI
 
 struct ConnectView: View {
     @EnvironmentObject var ble: VoltraBLEManager
+    @EnvironmentObject var demo: DemoController
 
     private var statusMessage: String {
         switch ble.connectionState {
@@ -132,6 +133,15 @@ struct ConnectView: View {
                         .foregroundColor(VoltraColor.warn)
                         .multilineTextAlignment(.center)
                 }
+
+                // v0.4.6.3: secondary Demo Mode entry — lets you walk
+                // through the full app without pairing a Voltra. Uses
+                // synthetic telemetry to keep charts populated.
+                DemoModeButton(source: .prePair) {
+                    guard let handler = DemoTelemetryBridge.shared.handler else { return }
+                    demo.note(.buttonTap(label: "Demo Mode (pre-pair)", screen: "Connect"))
+                    demo.enter(source: .prePair, onTelemetry: handler)
+                }
             }
             .padding(40)
             .background(VoltraColor.bgElev)
@@ -153,4 +163,5 @@ struct ConnectView: View {
 #Preview {
     ConnectView()
         .environmentObject(VoltraBLEManager())
+        .environmentObject(DemoController())
 }

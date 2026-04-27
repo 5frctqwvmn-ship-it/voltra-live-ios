@@ -13,6 +13,7 @@ struct DebugView: View {
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var demo: DemoController
 
     @State private var counts: (sessions: Int, exercises: Int, sets: Int, legTagged: Int) = (0, 0, 0, 0)
     @State private var stubCount: Int = 0
@@ -72,6 +73,36 @@ struct DebugView: View {
                                     .stroke(VoltraColor.warn.opacity(0.5), lineWidth: 1)
                             )
                             .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+
+                        // v0.4.6.3: Demo Mode toggle. Persists across
+                        // launches in real UserDefaults; flipping it here
+                        // either enters or exits the demo session.
+                        section("DEMO MODE") {
+                            HStack {
+                                Text(demo.isActive ? "Demo Mode is active" : "Demo Mode is off")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(VoltraColor.text)
+                                Spacer()
+                                Toggle("", isOn: Binding(
+                                    get: { demo.isActive },
+                                    set: { newVal in
+                                        if newVal {
+                                            guard let handler = DemoTelemetryBridge.shared.handler else { return }
+                                            demo.note(.buttonTap(label: "Demo toggle ON", screen: "Debug"))
+                                            demo.enter(source: .settingsRestore, onTelemetry: handler)
+                                        } else {
+                                            demo.note(.buttonTap(label: "Demo toggle OFF", screen: "Debug"))
+                                            _ = demo.exit()
+                                        }
+                                    }
+                                ))
+                                .labelsHidden()
+                                .tint(VoltraColor.accent)
+                            }
+                            Text("While active, no logs, sets, or settings are written to disk. The session is captured to a JSON trace you can send to the developer.")
+                                .font(.system(size: 12))
+                                .foregroundColor(VoltraColor.textDim)
                         }
 
                         section("ACTIONS") {
