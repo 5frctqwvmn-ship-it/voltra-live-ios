@@ -107,20 +107,6 @@ jobs:
             CODE_SIGN_STYLE=Automatic \
             archive
 
-      # Diagnostic: dump the signed entitlements + embedded provisioning profile
-      # so we can verify HealthKit is actually granted to the signed binary.
-      - name: Dump signed entitlements (diagnostic)
-        run: |
-          set -e
-          APP_PATH=$(find build/VoltraLive.xcarchive/Products/Applications -maxdepth 2 -name '*.app' | head -1)
-          echo "=== App bundle: $APP_PATH ==="
-          echo "=== Embedded.mobileprovision Entitlements ==="
-          security cms -D -i "$APP_PATH/embedded.mobileprovision" | plutil -extract Entitlements xml1 -o - - || true
-          echo "=== codesign -d --entitlements (signed binary) ==="
-          codesign -d --entitlements :- "$APP_PATH" 2>&1 || true
-          echo "=== HealthKit grep ==="
-          codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | grep -i healthkit || echo "NO HEALTHKIT ENTITLEMENT IN SIGNED BINARY"
-
       # Generate ExportOptions.plist at runtime so APPLE_TEAM_ID stays a secret
       - name: Export IPA for App Store Connect
         env:
@@ -156,6 +142,26 @@ jobs:
           ls -la build/export/
           test -f build/export/VoltraLive.ipa
           echo "Signed IPA size: $(du -h build/export/VoltraLive.ipa | cut -f1)"
+
+      # Diagnostic: inspect the SIGNED, EXPORTED IPA — what actually goes to TestFlight.
+      # This must run AFTER export-archive, since signing happens at export time.
+      - name: Dump signed entitlements (diagnostic)
+        run: |
+          set +e
+          mkdir -p build/inspect
+          unzip -q -o build/export/VoltraLive.ipa -d build/inspect
+          APP_PATH=$(find build/inspect/Payload -maxdepth 2 -name '*.app' -type d | head -1)
+          echo "=== App bundle: $APP_PATH ==="
+          ls "$APP_PATH" | head
+          echo "=== Embedded.mobileprovision Entitlements ==="
+          security cms -D -i "$APP_PATH/embedded.mobileprovision" | plutil -p - 2>/dev/null | sed -n '/Entitlements/,/^  }/p' | head -60
+          echo "=== codesign -d --entitlements (signed binary) ==="
+          codesign -d --entitlements :- "$APP_PATH" 2>&1
+          echo "=== HealthKit grep ==="
+          codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | grep -i healthkit && echo "HEALTHKIT IS PRESENT" || echo "NO HEALTHKIT ENTITLEMENT IN SIGNED BINARY"
+          echo "=== App Info.plist NSHealth keys ==="
+          plutil -p "$APP_PATH/Info.plist" | grep -i health || echo "no NSHealth keys in Info.plist"
+          set -e
 
       # Upload to TestFlight using the App Store Connect API key (no Apple ID password needed)
       # Skipped on dry-run dispatch — lets us validate the signing pipeline without burning a build number.
