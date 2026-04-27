@@ -276,15 +276,15 @@ jobs:
           # associated. ubiquity-kvstore is implied by the iCloud capability.
           ICLOUD_CONTAINER_ID = "iCloud.com.voltralive.app"
           # Look up or create the iCloud container resource.
-          status, resp = api("GET", f"/v1/iCloudContainers?filter[identifier]={urllib.parse.quote(ICLOUD_CONTAINER_ID)}")
+          status, resp = api("GET", f"/v1/cloudContainers?filter[identifier]={urllib.parse.quote(ICLOUD_CONTAINER_ID)}")
           container_resource_id = None
           if status == 200 and resp.get("data"):
               container_resource_id = resp["data"][0]["id"]
               print(f"found iCloud container resource id: {container_resource_id}")
           else:
-              status, resp = api("POST", "/v1/iCloudContainers", {
+              status, resp = api("POST", "/v1/cloudContainers", {
                   "data": {
-                      "type": "iCloudContainers",
+                      "type": "cloudContainers",
                       "attributes": {
                           "identifier": ICLOUD_CONTAINER_ID,
                           "name": "VOLTRA Live iCloud",
@@ -331,7 +331,7 @@ jobs:
                   },
                   "relationships": {
                       "bundleId": {"data": {"type": "bundleIds", "id": bundle_resource_id}},
-                      "iCloudContainers": {"data": [{"type": "iCloudContainers", "id": container_resource_id}]},
+                      "cloudContainers": {"data": [{"type": "cloudContainers", "id": container_resource_id}]},
                   }
               }
           })
