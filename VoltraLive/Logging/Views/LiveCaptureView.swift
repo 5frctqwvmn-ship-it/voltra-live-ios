@@ -55,6 +55,11 @@ struct LiveCaptureView: View {
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var logging: LoggingStore
     @EnvironmentObject var health: HealthKitStore
+    /// Build 31: needed so the back-button confirmation can offer a
+    /// "Just go back" option that pops the nav stack without ending
+    /// the active session. User asked for this third path because
+    /// they sometimes want to glance at the home screen mid-workout.
+    @Environment(\.dismiss) private var dismiss
 
     @State private var showingEndConfirm = false
     @State private var showingExportSheet = false
@@ -118,16 +123,28 @@ struct LiveCaptureView: View {
                 }
             }
         }
-        .alert("End session?", isPresented: $showingEndConfirm) {
-            Button("Keep going", role: .cancel) { }
+        // Build 31: confirmationDialog (instead of alert) so we can offer a
+        // third option "Just go back" that pops the nav stack but keeps the
+        // session running. User wanted to be able to peek at the home
+        // screen without losing their workout.
+        .confirmationDialog(
+            "What do you want to do?",
+            isPresented: $showingEndConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Just go back (keep session running)") {
+                // Pop nav stack without touching session/health state.
+                dismiss()
+            }
             Button("End and export", role: .destructive) {
                 if let ended = logging.endSession() {
                     lastEndedSession = ended
                     showingExportSheet = true
                 }
             }
+            Button("Keep going (stay here)", role: .cancel) { }
         } message: {
-            Text("This will save all logged sets and stop recording.")
+            Text("End and export saves and stops recording. Just go back lets you peek at the home screen - your session keeps running in the background.")
         }
         .sheet(isPresented: $showingExportSheet, onDismiss: {
             lastEndedSession = nil
