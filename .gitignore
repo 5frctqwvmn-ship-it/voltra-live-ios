@@ -54,3 +54,6 @@ __MACOSX/
 .idea/
 *.swp
 *.swo
+
+# v0.4.7 build 29: dual-Voltra work-in-progress, deferred to build 30.
+.dual-voltra-wip/

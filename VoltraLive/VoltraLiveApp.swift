@@ -21,27 +21,74 @@ struct VoltraLiveApp: App {
         allModels.append(contentsOf: LoggingSchema.models)
         let schema = Schema(allModels)
 
-        // v0.4.6 build 28 hotfix: build 27 crashed on launch with a
-        // _assertionFailure inside SwiftData.DefaultMigrationManager when
-        // cloudKitDatabase: .automatic tried to materialize against the
-        // iCloud.com.voltralive.app container — most likely because the
-        // CloudKit schema hasn't been promoted from Development to
-        // Production yet, so the TestFlight (Production-env) build can't
-        // resolve the schema. Swift assertions are not catchable, so the
-        // do/catch local-only fallback below never ran.
+        // v0.4.7 build 29 crash fix.
         //
-        // For now: force local-only on every launch. CloudKit sync gets
-        // re-enabled in a follow-up build once the schema is deployed to
-        // Production via the CloudKit Dashboard. Local data continues to
-        // work; users just don't get cross-device sync until then.
-        let config = ModelConfiguration(
+        // Build 27 crashed at launch with a _assertionFailure inside
+        // SwiftData.DefaultMigrationManager because cloudKitDatabase:
+        // .automatic couldn't resolve the iCloud schema (Production env
+        // didn't have the CloudKit schema deployed yet).
+        //
+        // Build 28 "fixed" that by removing cloudKitDatabase: .automatic,
+        // BUT it kept the same on-disk store URL. The store created by
+        // build 27 carries CloudKit metadata in its sqlite file. When
+        // build 28 reopens that same store WITHOUT CloudKit, SwiftData's
+        // DefaultMigrationManager runs to reconcile the metadata and
+        // trips the SAME assertion. Swift assertions are not catchable
+        // — the do/catch wrapping ModelContainer init never gets a chance.
+        //
+        // Fix: open SwiftData at a NEW store URL ('voltra-live-v2.store').
+        // No prior file = no migration = no assertion. Anyone who shipped
+        // build 27/28 loses their (already-broken-and-unreachable)
+        // in-app history. HistoryImporter.runIfNeeded(…) on first launch
+        // re-seeds the bundled exercises from history.md so the app
+        // still feels populated. Single-Voltra users on this build start
+        // logging fresh.
+        //
+        // Belt + suspenders: if the v2 URL ALSO fails for any reason,
+        // fall back to an in-memory store so the app at least launches.
+        // The user gets a session that doesn't persist, but they can
+        // verify the build works and we can ship a follow-up.
+
+        let v2URL: URL = {
+            let docs = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            // Application Support is the conventional spot for SwiftData
+            // stores. Create the directory if it doesn't exist (it usually
+            // does, but on a clean install we may be the first to write).
+            if let dir = docs {
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                return dir.appendingPathComponent("voltra-live-v2.store")
+            }
+            return URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("voltra-live-v2.store")
+        }()
+
+        // Match Apple's public ModelConfiguration init exactly so we don't
+        // depend on overload-resolution edge cases:
+        //   init(_ name: String?, schema: Schema?, url: URL, allowsSave: Bool,
+        //        cloudKitDatabase: ModelConfiguration.CloudKitDatabase)
+        let v2Config = ModelConfiguration(
+            "voltra-live-v2",
             schema: schema,
-            isStoredInMemoryOnly: false
+            url: v2URL,
+            allowsSave: true,
+            cloudKitDatabase: .none
+        )
+        if let c = try? ModelContainer(for: schema, configurations: v2Config) {
+            print("[VoltraLive] SwiftData store opened at \(v2URL.path)")
+            return c
+        }
+
+        // In-memory fallback. Last-resort so the app launches even if disk
+        // I/O is somehow blocked (low storage, sandbox quirk, etc.).
+        let memoryConfig = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: true
         )
         do {
-            return try ModelContainer(for: schema, configurations: config)
+            print("[VoltraLive] WARNING: SwiftData v2 disk store failed; using in-memory fallback.")
+            return try ModelContainer(for: schema, configurations: memoryConfig)
         } catch {
-            fatalError("[VoltraLive] Failed to create local SwiftData ModelContainer: \(error)")
+            fatalError("[VoltraLive] Failed to create any SwiftData ModelContainer: \(error)")
         }
     }()
 
