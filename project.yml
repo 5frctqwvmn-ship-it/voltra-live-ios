@@ -62,7 +62,7 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         DEVELOPMENT_TEAM: "${APPLE_TEAM_ID:-}"
         MARKETING_VERSION: "0.4.6"
-        CURRENT_PROJECT_VERSION: "26"
+        CURRENT_PROJECT_VERSION: "27"
     dependencies:
       - sdk: CoreBluetooth.framework
       - sdk: CloudKit.framework
@@ -90,7 +90,7 @@ targets:
         CFBundleDisplayName: "VOLTRA Live"
         CFBundleName: "VoltraLive"
         CFBundleShortVersionString: "0.4.6"
-        CFBundleVersion: "26"
+        CFBundleVersion: "27"
 
   VoltraLiveTests:
     type: bundle.unit-test
