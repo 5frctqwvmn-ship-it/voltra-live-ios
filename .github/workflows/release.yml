@@ -305,7 +305,11 @@ jobs:
           # The cert from Apple is DER; the key is local PEM. openssl pkcs12 needs
           # a PEM cert too — convert.
           openssl x509 -inform der -in build/signing/dist.cer -out build/signing/dist.pem
-          openssl pkcs12 -export \
+          # NB: openssl 3 defaults to AES-256-CBC + PBKDF2 for PKCS12, which the
+          # macOS `security` CLI rejects with 'MAC verification failed'. Pass
+          # -legacy so it falls back to the older PBE+SHA1+RC2/3DES that the
+          # security framework still accepts.
+          openssl pkcs12 -export -legacy \
             -inkey build/signing/dist.key \
             -in    build/signing/dist.pem \
             -out   build/signing/dist.p12 \
