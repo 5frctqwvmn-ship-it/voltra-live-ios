@@ -121,6 +121,34 @@ jobs:
           except Exception as e:
               print(f"ASC FAILED: {type(e).__name__}: {e}")
               sys.exit(3)
+          # Probe the provisioning endpoints xcodebuild needs (only reached if /v1/apps OK).
+          for endpoint, label in [
+              ("/v1/users",                  "users"),
+              ("/v1/profiles?limit=200",     "profiles"),
+              ("/v1/certificates?limit=200", "certificates"),
+              ("/v1/bundleIds?limit=200",    "bundleIds"),
+          ]:
+              url = "https://api.appstoreconnect.apple.com" + endpoint
+              req2 = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+              try:
+                  with urllib.request.urlopen(req2, timeout=20) as r2:
+                      d = json.loads(r2.read().decode())
+                      rows = d.get("data", [])
+                      print(f"  probe {label:>13}: HTTP {r2.status}, {len(rows)} entries")
+                      if label == "profiles":
+                          for p in rows[:12]:
+                              pa = p.get("attributes", {})
+                              print(f"    profile name={pa.get('name','?')!r} type={pa.get('profileType','?')} state={pa.get('profileState','?')}")
+                      if label == "certificates":
+                          for c in rows[:8]:
+                              ca = c.get("attributes", {})
+                              print(f"    cert name={ca.get('name','?')!r} type={ca.get('certificateType','?')}")
+              except urllib.error.HTTPError as e2:
+                  body2 = e2.read().decode(errors="replace")
+                  print(f"  probe {label:>13}: HTTP {e2.code} {e2.reason}")
+                  print(f"    body[:300]: {body2[:300]}")
+              except Exception as e2:
+                  print(f"  probe {label:>13}: {type(e2).__name__}: {e2}")
           PY
           python3 /tmp/asc_smoke.py
           echo "smoke exit: $?"
