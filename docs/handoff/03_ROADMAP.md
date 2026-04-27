@@ -13,8 +13,10 @@ Locked-in priority order:
 3. **Pulsing data indicator.** New `PulseDot` view: green pulse animation
    while a tile received data in the last ~3s; fades to solid grey when
    stale. Apply on HR and kcal tiles.
-4. **Warmup phase.** Auto-engage on a new exercise. Default warmup weight
-   needs to be confirmed with the user (see `10_OPEN_QUESTIONS.md`).
+4. **Warmup phase.** Auto-engage on a new exercise. Starting weight =
+   **last warmup used for that exercise**. On first-ever warmup for an
+   exercise, fall back to **50% of working weight**. Persist the chosen
+   warmup weight per-exercise in `LoggingStore` so it sticks across sessions.
 5. **Dual-Voltra.** Restore from `.dual-voltra-wip/`, ship the 3-button
    Connect screen, scanner picker, `MultiDeviceManager`, Independent +
    Combined modes. See `07_DUAL_VOLTRA.md` for the spec.

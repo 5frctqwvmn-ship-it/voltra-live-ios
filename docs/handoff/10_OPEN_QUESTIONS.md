@@ -8,24 +8,6 @@ Things blocked on the user. Resolve before the dependent task can ship.
 
 ## Build 30
 
-### Warmup — default starting weight
-
-Status: **needs user answer before warmup work starts.**
-
-Spec so far: warmup phase auto-engages on a new exercise. What it does
-(reps, set count, ramp pattern) is roughly understood, but the **default
-starting weight** for the warmup hasn't been decided.
-
-Options to offer the user:
-
-- Fixed: e.g. always 45 lb (empty bar equivalent).
-- Percentage of working weight: e.g. 40% / 60% / 80%.
-- Last-used warmup weight per exercise (remembered).
-- User-configurable per exercise.
-
-Recommendation to surface: **percentage of working weight**, default 50%,
-overrideable per exercise.
-
 ### Old-store import
 
 Status: **needs user answer before any importer code is written.**

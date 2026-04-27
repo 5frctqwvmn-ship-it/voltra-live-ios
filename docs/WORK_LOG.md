@@ -50,3 +50,17 @@ points at it.
   investigation. Suspect file `VoltraLive/Session/DropBoundary.swift`;
   cross-reference `SetSuggestionEngine.swift` `anchorLb`. Add a regression
   test before fixing (declarative > imperative).
+
+## 2026-04-27 17:35 UTC — Resolve warmup default-weight open question
+
+- **Files changed:** `docs/handoff/03_ROADMAP.md`, `docs/handoff/10_OPEN_QUESTIONS.md`.
+- **What changed:** User answered the warmup default question. Rule:
+  starting weight is the **last warmup used for that exercise**; on the
+  first-ever warmup for an exercise, fall back to **50% of working weight**.
+  Persistence lives in `LoggingStore` (per-exercise). Recorded the rule in
+  `03_ROADMAP.md` build-30 step 4 and removed the question from
+  `10_OPEN_QUESTIONS.md`.
+- **Verification:** Docs only. Working tree review.
+- **Risks:** None.
+- **Next step:** Same as previous entry — begin drop-set regression
+  investigation. Warmup is no longer blocked.
