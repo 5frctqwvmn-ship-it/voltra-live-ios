@@ -91,6 +91,24 @@ final class LoggingStore: ObservableObject {
     /// No-movement watchdog — set finalizes after this many seconds with
     /// no rep increment.
     private let cascadeIdleFinalizeSec: Double = 10.0
+    /// v0.4.6.2: Force threshold for what counts as "real activity". Telemetry
+    /// packets with sample force at-or-below this floor (machine jitter, slack
+    /// cable noise, accelerometer drift) do NOT reset the 4s/10s idle timers.
+    /// Without this floor, a noisy machine kept resetting the 4s fuse, so the
+    /// 4s drop felt like 8s in the wild.
+    private let cascadeIdleForceFloorLb: Double = 3.0
+    /// v0.4.6.2: cooldown after cancelDropSet() during which a UI tap can NOT
+    /// re-arm the cascade. Prevents long-press cancel from being immediately
+    /// followed by SwiftUI's button tap firing startDropSet again.
+    private var dropChainArmCooldownUntil: Date? = nil
+    /// v0.4.6.2: original starting weight at chain-start, used as the anchor
+    /// for tier-relative cascade math. Each cascade fire computes the next
+    /// weight as `anchor − stepSize × stepIndex`, never compounding off the
+    /// most recently dropped weight.
+    private var chainAnchorLb: Double = 0
+    /// v0.4.6.2: how many cascade drops have actually been pushed to the
+    /// device since chain-start (drop #2, #3, ...). Drop #1 = the anchor itself.
+    private var cascadeStepIndex: Int = 0
     /// Tier increment per tap. Tap #1 → 5 lb / 5%, tap #2 → 10/10%, etc.
     private let cascadeTierStepLb: Double = 5.0
     private let cascadeTierStepPct: Double = 0.05
@@ -254,6 +272,9 @@ final class LoggingStore: ObservableObject {
     func startDropSet(startingLb: Double, pushWeight: @escaping (Double) -> Void) {
         guard let session = sessionStore else { return }
         guard startingLb > 0 else { return }
+        // v0.4.6.2: refuse to (re-)arm during the cancel cooldown so a long-press
+        // cancel + simultaneous button tap doesn't immediately restart the chain.
+        if let cd = dropChainArmCooldownUntil, Date() < cd { return }
 
         // Tear down any prior cascade state defensively.
         stopCascadeTimers()
@@ -264,6 +285,11 @@ final class LoggingStore: ObservableObject {
         pendingDropSnapshots = []
         pendingDropPlannedWeights = []
         dropPushWeight = pushWeight
+        // v0.4.6.2: anchor the chain to the starting weight. All subsequent
+        // cascade weights are computed as `anchor − step×index` (or the pct
+        // equivalent) NEVER compounding off the previously-dropped value.
+        chainAnchorLb = startingLb
+        cascadeStepIndex = 0
 
         // Drop #1 = the starting weight (what the user was just lifting).
         // We seed the chain with it so history rendering stays consistent.
@@ -302,11 +328,17 @@ final class LoggingStore: ObservableObject {
         dropChainPlannedLb = []
         currentDropIndex = 1
         cascadeTier = 1
+        chainAnchorLb = 0
+        cascadeStepIndex = 0
         pendingDropSnapshots = []
         pendingDropPlannedWeights = []
         nextDropFiresAt = nil
         dropFinalizeAt = nil
         dropPushWeight = nil
+        // v0.4.6.2: 1.5s arm cooldown. The SwiftUI Button + simultaneous
+        // LongPressGesture both fire on touch-up, so without a cooldown
+        // the cancel is immediately re-armed by the same gesture's tap.
+        dropChainArmCooldownUntil = Date().addingTimeInterval(1.5)
         sessionStore?.endDropChainModeOnly()
     }
 
@@ -314,9 +346,13 @@ final class LoggingStore: ObservableObject {
     /// running. Bump the tier (5→10→15…), fire an immediate drop using
     /// the new tier, and reset the 4s next-drop fuse so auto-cascade keeps
     /// pace from now using the new tier.
+    /// v0.4.6.2: tap rolls 5→10→15→5 (mod 3). Each fired drop is computed
+    /// as `anchor − stepSize×index` so subsequent taps don't compound off
+    /// the previously-dropped weight.
     func bumpCascadeTier() {
         guard dropSetActive else { return }
-        cascadeTier += 1
+        // Roll 1 → 2 → 3 → 1… (5/10/15 lb steps).
+        cascadeTier = (cascadeTier % 3) + 1
         // Cancel and reschedule so the immediate fire below isn't immediately
         // followed by another auto-tick.
         cascadeTimer?.cancel(); cascadeTimer = nil
@@ -335,8 +371,12 @@ final class LoggingStore: ObservableObject {
     ///     set isn't ended out from under them.
     /// No-op when `dropSetActive == false` so this is safe to call on every
     /// packet regardless of session state.
-    func noteTelemetryActivity() {
+    func noteTelemetryActivity(forceLb: Double = .infinity) {
         guard dropSetActive else { return }
+        // v0.4.6.2: ignore sub-threshold packets so machine jitter doesn't
+        // hold the timers open indefinitely. The default `.infinity` keeps
+        // older callers (no force info) behaving as "always reset".
+        guard forceLb > cascadeIdleForceFloorLb else { return }
         let now = Date()
         nextDropFiresAt = now.addingTimeInterval(cascadeIntervalSec)
         dropFinalizeAt = now.addingTimeInterval(cascadeIdleFinalizeSec)
@@ -357,19 +397,26 @@ final class LoggingStore: ObservableObject {
 
     // MARK: - v0.4.6: Cascade machinery
 
-    /// Compute the next cascade step from the current trailing DEVICE weight,
-    /// using the active `cascadeTier` and the active pulley multiplier.
+    /// v0.4.6.2: Compute the next cascade weight from the chain ANCHOR (not
+    /// the most recently dropped weight). Each fire takes one step
+    /// `cascadeStepIndex+1` away from the original starting weight, sized by
+    /// the current tier. This way, bumping the tier mid-chain doesn't compound
+    /// past drops — it re-applies to the original anchor at the deeper step.
     /// Drop math runs on EFFECTIVE load and back-computes the device setting,
     /// so a 100 lb effective set under 2× pulley drops as 100→95 effective
     /// (= 50→47.5 on the device), not 50→45.
     private func nextCascadeWeight() -> Double? {
-        guard let cur = dropChainPlannedLb.last, cur > 0 else { return nil }
-        let next = LoggingStore.cascadeNextDeviceWeight(
-            fromDeviceLb: cur,
+        guard chainAnchorLb > 0 else { return nil }
+        let nextIndex = cascadeStepIndex + 1
+        let next = LoggingStore.cascadeAnchoredDeviceWeight(
+            anchorDeviceLb: chainAnchorLb,
             tier: cascadeTier,
+            stepIndex: nextIndex,
             multiplier: pulleyMultiplier
         )
-        if next <= 0 || next >= cur { return nil }
+        // Stop if we've hit the floor or rounding made the step a no-op.
+        let prev = dropChainPlannedLb.last ?? chainAnchorLb
+        if next <= 0 || next >= prev { return nil }
         return next
     }
 
@@ -381,25 +428,33 @@ final class LoggingStore: ObservableObject {
     func previewNextCascade(from currentLb: Double, count: Int, tier: Int? = nil) -> [Double] {
         let useTier = tier ?? cascadeTier
         var out: [Double] = []
-        var cur = currentLb
-        for _ in 0..<count {
-            // Cascade on effective load directly (multiplier=1 so the math
-            // stays on the input's coordinate space).
-            let next = LoggingStore.cascadeNextDeviceWeight(
-                fromDeviceLb: cur,
+        // v0.4.6.2: preview now matches anchor-relative math — each step is
+        // computed off the original `currentLb` (the anchor) at increasing
+        // stepIndex, NOT compounded off the previous result. Otherwise the
+        // tile preview would lie about what the cascade will actually do.
+        for i in 1...max(1, count) {
+            let next = LoggingStore.cascadeAnchoredDeviceWeight(
+                anchorDeviceLb: currentLb,
                 tier: useTier,
+                stepIndex: i,
                 multiplier: 1.0
             )
-            if next <= 0 || next >= cur { break }
+            // Stop on floor or non-progress (each step must be smaller than
+            // the previous, which under fixed step size is guaranteed unless
+            // we hit zero).
+            if next <= 0 { break }
+            if let last = out.last, next >= last { break }
             out.append(next)
-            cur = next
+            if out.count >= count { break }
         }
         return out
     }
 
-    /// Push the next cascade step (−20%) to the device. Updates state and
-    /// the next-fire timestamp. If the cascade can't go any lower, stops
-    /// the cascade timer (the watchdog will eventually finalize).
+    /// Push the next cascade step to the device. Updates state and the
+    /// next-fire timestamp. If the cascade can't go any lower, stops the
+    /// cascade timer (the watchdog will eventually finalize).
+    /// v0.4.6.2: increments `cascadeStepIndex` so the next call walks one
+    /// more step away from the anchor.
     private func fireNextCascadeStep() {
         guard let next = nextCascadeWeight() else {
             // Bottomed out — stop dropping but leave watchdog running so
@@ -409,6 +464,7 @@ final class LoggingStore: ObservableObject {
             nextDropFiresAt = nil
             return
         }
+        cascadeStepIndex += 1
         dropChainPlannedLb.append(next)
         currentDropIndex = dropChainPlannedLb.count
         pendingPlannedWeightLb = next
@@ -507,6 +563,32 @@ final class LoggingStore: ObservableObject {
         return max(0, stepped)
     }
 
+    /// v0.4.6.2: Anchor-relative cascade. Given the original starting weight
+    /// and a step index N (1, 2, 3, …), returns the device weight after the
+    /// Nth drop. Each step is `max(tier×5 lb, anchor×0.05×tier)` measured
+    /// off the ANCHOR — NEVER compounding off prior drops. This is what makes
+    /// retiering mid-chain behave correctly: bumping tier from 1 to 2 with
+    /// stepIndex=2 means next weight is `anchor − 10×2 = anchor − 20`, not
+    /// `prev_drop − 20`. Pulley-aware: math runs on EFFECTIVE load.
+    static func cascadeAnchoredDeviceWeight(anchorDeviceLb: Double,
+                                            tier: Int,
+                                            stepIndex: Int,
+                                            multiplier: Double) -> Double {
+        guard anchorDeviceLb > 0, tier >= 1, stepIndex >= 1, multiplier > 0 else { return 0 }
+        let anchorEffective = anchorDeviceLb * multiplier
+        // Per-step magnitude (constant across the chain at the current tier).
+        let perStepLb = 5.0 * Double(tier)
+        let perStepPct = 0.05 * Double(tier)
+        let perStep = max(perStepLb, anchorEffective * perStepPct)
+        let totalDrop = perStep * Double(stepIndex)
+        let nextEffective = anchorEffective - totalDrop
+        if nextEffective <= 0 { return 0 }
+        let backToDevice = nextEffective / multiplier
+        let stepped = (backToDevice / 2.5).rounded() * 2.5
+        if stepped >= anchorDeviceLb { return max(0, anchorDeviceLb - 2.5) }
+        return max(0, stepped)
+    }
+
     /// Cascade variant that respects pulley mode. Converts device weight →
     /// effective, applies the tiered drop on EFFECTIVE load, back-computes
     /// the device weight (effective / multiplier), and re-rounds to 2.5 lb.
@@ -546,6 +628,8 @@ final class LoggingStore: ObservableObject {
             dropChainPlannedLb = []
             currentDropIndex = 1
             cascadeTier = 1
+            chainAnchorLb = 0
+            cascadeStepIndex = 0
             nextDropFiresAt = nil
             dropFinalizeAt = nil
             dropPushWeight = nil
@@ -623,6 +707,8 @@ final class LoggingStore: ObservableObject {
         dropChainPlannedLb = []
         currentDropIndex = 1
         cascadeTier = 1
+        chainAnchorLb = 0
+        cascadeStepIndex = 0
         nextDropFiresAt = nil
         dropFinalizeAt = nil
         dropPushWeight = nil

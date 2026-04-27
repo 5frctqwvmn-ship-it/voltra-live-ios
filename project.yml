@@ -16,9 +16,11 @@ settings:
     MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
-    CODE_SIGNING_REQUIRED: NO
-    CODE_SIGNING_ALLOWED: NO
-    CODE_SIGN_IDENTITY: ""
+    # v0.4.6.2: removed CODE_SIGNING_REQUIRED/ALLOWED=NO at the project level.
+    # When set in base, Release archive inherited them and emitted an unsigned
+    # binary stripped of all entitlements (HealthKit, iCloud, aps-environment).
+    # Test invocations pass these flags as per-command xcodebuild args, which
+    # is the correctly-scoped way to disable signing only for tests.
     ENABLE_BITCODE: NO
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -49,15 +51,18 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.voltralive.app
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
-        CODE_SIGNING_REQUIRED: NO
-        CODE_SIGNING_ALLOWED: NO
-        CODE_SIGN_IDENTITY: ""
+        # v0.4.6.2: do NOT set CODE_SIGNING_REQUIRED/ALLOWED=NO at the target level.
+        # That setting was getting inherited during Release archive, which made
+        # codesign skip entitlement embedding entirely — stripping HealthKit,
+        # iCloud, and aps-environment from the signed binary even though the
+        # provisioning profile granted them. Tests still pass these flags as
+        # per-invocation xcodebuild args, which is the correct scope.
         CODE_SIGN_ENTITLEMENTS: VoltraLive/VoltraLive.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         DEVELOPMENT_TEAM: "${APPLE_TEAM_ID:-}"
-        MARKETING_VERSION: "0.4.6.1"
-        CURRENT_PROJECT_VERSION: "24"
+        MARKETING_VERSION: "0.4.6.2"
+        CURRENT_PROJECT_VERSION: "25"
     dependencies:
       - sdk: CoreBluetooth.framework
       - sdk: CloudKit.framework

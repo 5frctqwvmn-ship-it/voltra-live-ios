@@ -68,7 +68,9 @@ struct VoltraLiveApp: App {
                         let repCount = telem.repCount ?? 0
                         Task { @MainActor in
                             ss.handleLiveSample(phase: phase, forceLb: forceLb, repCount: repCount)
-                            loggingStore?.noteTelemetryActivity()
+                            // v0.4.6.2: pass forceLb so sub-3lb jitter doesn't
+                            // hold the cascade timers open.
+                            loggingStore?.noteTelemetryActivity(forceLb: forceLb)
                         }
                     }
 
