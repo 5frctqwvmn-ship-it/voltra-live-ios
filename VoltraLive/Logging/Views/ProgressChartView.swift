@@ -245,14 +245,24 @@ struct ProgressChartView: View {
             }
         }
         .chartYAxis {
-            AxisMarks(position: .leading) { _ in
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { _ in
                 AxisGridLine().foregroundStyle(VoltraColor.border.opacity(0.5))
-                AxisValueLabel()
+                AxisValueLabel(horizontalSpacing: 6)
                     .font(.system(size: 10))
                     .foregroundStyle(VoltraColor.textFaint)
             }
         }
         .chartXSelection(value: $selectedDate)
+        // Reserve room on the leading edge so 3-digit Y-axis labels (e.g. "300")
+        // never clip on narrower iPhones. Trailing/top padding keeps the
+        // plot from kissing the rounded card border.
+        .chartPlotStyle { plotArea in
+            plotArea
+                .padding(.leading, 6)
+                .padding(.trailing, 8)
+                .padding(.vertical, 4)
+        }
+        .padding(.leading, 8)
         .frame(height: 180)
         .background(VoltraColor.bgElev2)
         .clipShape(RoundedRectangle(cornerRadius: 10))

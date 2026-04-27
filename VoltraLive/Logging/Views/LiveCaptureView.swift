@@ -1,5 +1,19 @@
 // LiveCaptureView.swift
-// v0.4.0 — completely rebuilt for the auto-log flow.
+// v0.4.2 — TestFlight feedback fixes on top of the v0.4.0 rebuild.
+//
+// What changed in v0.4.2:
+//   - Weight nudges (−5/−1/+1/+5) now write to the Voltra device IMMEDIATELY
+//     via VoltraWriter.apply(...). Previously this view only updated
+//     LoggingStore.pendingPlannedWeightLb, so changing weight mid-rest had
+//     no effect on the device until the next ExerciseDetailView visit.
+//   - REST tile is now tap-to-reset, mirroring DashboardView. Tapping calls
+//     SessionStore.tapRestTile() to restart the rest countdown at 0:00.
+//   - "Add weight" chip is renamed "Added plates" and the type picker is gone:
+//     the only meaning is "physical plates already on the machine" (e.g. a
+//     leg-extension stack starting at 20 lb at the lowest pin). The data
+//     field stays addedLoadLb/addedLoadType for storage compatibility, but
+//     addedLoadType is locked to "plates" going forward.
+//   - Logged-set expanded view shows Voltra / Added plates / Total clearly.
 //
 // Layout (top→bottom inside a scroll view):
 //   1. Header — exercise name + day-type strip + "SET N of M" big counter
@@ -9,8 +23,8 @@
 //      time LiveCaptureView's body re-evaluated). One source of truth, one
 //      timer, owned by SessionStore.
 //   3. Upcoming-set card — large weight number with −5/−1/+1/+5 nudges,
-//      eccentric (when relevant), mode chips, target reps, and a
-//      collapsible "+ Add weight" chip (chains/plates/vest/band/other).
+//      eccentric (when relevant), mode chips, target reps, and an
+//      "Added plates" chip for non-Voltra plate weight already on the rig.
 //   4. Logged sets list — tap a row to expand+edit inline,
 //      swipe-left to delete with an undo toast.
 //   5. Bottom actions — Next exercise / End session.
@@ -46,8 +60,14 @@ struct LiveCaptureView: View {
     /// Set currently expanded for inline edit. Identified by id.
     @State private var expandedSetID: UUID? = nil
 
-    /// Add-weight chip expansion state.
+    /// Added-plates chip expansion state.
     @State private var addWeightOpen: Bool = false
+
+    /// VoltraWriter for live mid-session weight changes. v0.4.2: every nudge
+    /// fires through this writer so the device updates immediately during
+    /// rest. Held in an ObservableObject so the BLE manager can be attached
+    /// in onAppear (env objects aren't available in init).
+    @StateObject private var writerHolder = LiveWriterHolder()
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -106,6 +126,10 @@ struct LiveCaptureView: View {
                 ExportSheet(session: s)
                     .environmentObject(logging)
             }
+        }
+        .onAppear {
+            // Attach BLE to the writer once env is available. Idempotent.
+            writerHolder.attach(ble: ble)
         }
     }
 
@@ -167,14 +191,22 @@ struct LiveCaptureView: View {
                 unit: "lb",
                 color: VoltraColor.accent
             )
-            tile(
-                label: "REST",
-                // Read from SessionStore.restActive — the SAME source-of-truth
-                // DashboardView uses, which works correctly. No second timer,
-                // no Combine sink, no view-recreation reset bug.
-                value: session.restActive ? session.restFormatted : "0:00",
-                color: session.restActive ? VoltraColor.returnPhase : VoltraColor.textFaint
-            )
+            // REST tile is tap-to-reset (parity with DashboardView). Tapping
+            // restarts the rest countdown via SessionStore.tapRestTile().
+            Button {
+                session.tapRestTile()
+            } label: {
+                tile(
+                    label: "REST",
+                    // Read from SessionStore.restActive — the SAME source-of-truth
+                    // DashboardView uses, which works correctly. No second timer,
+                    // no Combine sink, no view-recreation reset bug.
+                    value: session.restActive ? session.restFormatted : "0:00",
+                    color: session.restActive ? VoltraColor.returnPhase : VoltraColor.textFaint,
+                    subline: session.restActive ? "tap to restart" : "tap to start"
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -187,7 +219,7 @@ struct LiveCaptureView: View {
         }
     }
 
-    private func tile(label: String, value: String, unit: String? = nil, color: Color) -> some View {
+    private func tile(label: String, value: String, unit: String? = nil, color: Color, subline: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.system(size: 10, weight: .bold))
@@ -204,6 +236,11 @@ struct LiveCaptureView: View {
                         .font(.system(size: 13, design: .monospaced))
                         .foregroundColor(VoltraColor.textDim)
                 }
+            }
+            if let sub = subline {
+                Text(sub)
+                    .font(.system(size: 9))
+                    .foregroundColor(VoltraColor.textFaint)
             }
         }
         .padding(EdgeInsets(top: 14, leading: 14, bottom: 14, trailing: 14))
@@ -315,6 +352,8 @@ struct LiveCaptureView: View {
                 ForEach(modes, id: \.self) { m in
                     Button {
                         logging.upcomingMode = m
+                        // v0.4.2: mode change also retargets the device.
+                        pushUpcomingStateToDevice()
                     } label: {
                         Text(m.label)
                             .font(.system(size: 12, weight: .semibold))
@@ -385,45 +424,34 @@ struct LiveCaptureView: View {
 
     private var addWeightChipTitle: String {
         if let lb = logging.upcomingAddedLoadLb, lb > 0 {
-            let typeStr = (logging.upcomingAddedLoadType ?? "added").replacingOccurrences(of: "_", with: " ")
-            return "\(Int(lb)) lb \(typeStr)"
+            return "\(Int(lb)) lb plates"
         }
-        return "Add weight"
+        return "Added plates"
     }
 
+    /// v0.4.2: type picker removed. "Added plates" only ever means physical
+    /// plates already loaded on the machine (e.g. leg-extension stack starting
+    /// at 20 lb on the lowest pin). The lb count gets added to the Voltra
+    /// reading to compute total work. addedLoadType is locked to "plates".
     private var addWeightPicker: some View {
-        let types = ["chains", "plates", "vest", "band", "other"]
-        let activeType = logging.upcomingAddedLoadType ?? "chains"
         let currentLb = Int(logging.upcomingAddedLoadLb ?? 0)
-        return VStack(spacing: 10) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(types, id: \.self) { t in
-                        Button {
-                            logging.upcomingAddedLoadType = t
-                            if logging.upcomingAddedLoadLb == nil {
-                                logging.upcomingAddedLoadLb = 0
-                            }
-                        } label: {
-                            Text(t.capitalized)
-                                .font(.system(size: 12, weight: .semibold))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(activeType == t ? VoltraColor.transition : VoltraColor.bgElev2)
-                                .foregroundColor(activeType == t ? VoltraColor.bg : VoltraColor.text)
-                                .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Plates already on the machine (not from Voltra). Added to your set’s logged total.")
+                .font(.system(size: 11))
+                .foregroundColor(VoltraColor.textDim)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 nudgeButton(label: "−5", small: true) { adjustAddedLoad(-5) }
                 nudgeButton(label: "−1", small: true) { adjustAddedLoad(-1) }
-                Text("+\(currentLb) lb")
-                    .font(.system(size: 22, weight: .bold, design: .monospaced))
-                    .foregroundColor(VoltraColor.transition)
-                    .frame(maxWidth: .infinity)
+                VStack(spacing: 2) {
+                    Text("+\(currentLb)")
+                        .font(.system(size: 22, weight: .bold, design: .monospaced))
+                        .foregroundColor(VoltraColor.transition)
+                    Text("lb plates")
+                        .font(.system(size: 9))
+                        .foregroundColor(VoltraColor.textFaint)
+                }
+                .frame(maxWidth: .infinity)
                 nudgeButton(label: "+1", small: true) { adjustAddedLoad(+1) }
                 nudgeButton(label: "+5", small: true) { adjustAddedLoad(+5) }
             }
@@ -455,6 +483,11 @@ struct LiveCaptureView: View {
         let cur = Int(logging.pendingPlannedWeightLb ?? 0)
         let next = max(0, min(500, cur + delta))
         logging.pendingPlannedWeightLb = Double(next)
+        // v0.4.2: push the new weight to the Voltra device IMMEDIATELY so the
+        // user can adjust mid-rest and the device retargets before the next
+        // set begins. VoltraWriter.apply() debounces internally, so even rapid
+        // tap sequences only emit one BLE write per debounce window.
+        pushUpcomingStateToDevice()
     }
 
     private func adjustEcc(_ delta: Int) {
@@ -464,13 +497,51 @@ struct LiveCaptureView: View {
         if next > 0, logging.upcomingMode != .eccentric {
             // Don't auto-flip mode — just allow eccentric weight on any mode.
         }
+        pushUpcomingStateToDevice()
     }
 
     private func adjustAddedLoad(_ delta: Int) {
         let cur = Int(logging.upcomingAddedLoadLb ?? 0)
         let next = max(0, min(300, cur + delta))
         logging.upcomingAddedLoadLb = next > 0 ? Double(next) : nil
-        if logging.upcomingAddedLoadType == nil { logging.upcomingAddedLoadType = "chains" }
+        // v0.4.2: type is locked to "plates" (machine plates already on the rig).
+        // We always set it so legacy nil rows don't surface as "chains".
+        logging.upcomingAddedLoadType = "plates"
+        // "Added plates" is NOT sent to the Voltra — it's a logging-only field
+        // representing weight already on the machine. No push to writer.
+    }
+
+    /// Build a coherent VoltraDeviceState from the upcoming-set fields and
+    /// hand it to the writer. The writer debounces and diffs internally.
+    private func pushUpcomingStateToDevice() {
+        // Map LoggingStore's SetMode to the VoltraMode the writer expects.
+        // Only weight + band + damper are device-relevant; everything else
+        // (warmup/working/eccentric/pause/dropset/isohold) is a *logging*
+        // mode and runs the device in plain weight mode.
+        let voltraMode: VoltraMode = {
+            switch logging.upcomingMode {
+            case .band:    return .band
+            default:       return .weight
+            }
+        }()
+        let baseLb = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
+        let eccLb  = Int(logging.upcomingEccLb.rounded())
+        let state = VoltraDeviceState(
+            mode: voltraMode,
+            modifiers: VoltraModifiers(
+                eccentric: eccLb > 0,
+                chains: false,
+                inverse: false
+            ),
+            weights: VoltraWeights(
+                baseLb: baseLb,
+                eccentricLb: eccLb,
+                chainsLb: 0,
+                bandMaxForceLb: 0,
+                damperLevel: 0
+            )
+        )
+        writerHolder.writer?.apply(state)
     }
 
     // MARK: - Logged sets section
@@ -628,6 +699,24 @@ struct LiveCaptureView: View {
     }
 }
 
+// MARK: - Live writer holder
+
+/// Tiny ObservableObject that owns the LiveCapture VoltraWriter. Same pattern
+/// as ExerciseDetailView.WriterHolder — SwiftUI views can't reference
+/// @EnvironmentObject in init, so we lazily attach the BLE manager onAppear.
+@MainActor
+private final class LiveWriterHolder: ObservableObject {
+    var writer: VoltraWriter?
+
+    func attach(ble: VoltraBLEManager) {
+        guard writer == nil else { return }
+        writer = VoltraWriter(
+            writeFrame: { [weak ble] frame in ble?.writeControlFrame(frame) },
+            log:        { [weak ble] msg   in ble?.addLog(msg) }
+        )
+    }
+}
+
 // MARK: - SwipeableSetRow
 
 /// A logged-set row that supports tap-to-expand-edit and swipe-left-to-delete.
@@ -733,30 +822,36 @@ private struct SwipeableSetRow: View {
     }
 
     private var rowSummary: some View {
-        HStack(spacing: 12) {
+        // v0.4.2: split Voltra weight from "Added plates" so the user can
+        // tell at a glance which lbs came from the device vs. machine plates
+        // already on the rig.
+        let plates = (set.addedLoadLb ?? 0)
+        // Display the legacy chains field as plates if a row predates v0.4.2
+        // and only has chainsLb set. This keeps imported history readable.
+        let legacyPlates = plates == 0 ? (set.chainsLb ?? 0) : 0
+        let totalPlates = plates + legacyPlates
+        let totalLb = set.weightLb + totalPlates
+        return HStack(spacing: 12) {
             Text("\(set.orderIndex)")
                 .font(.system(size: 18, weight: .bold, design: .monospaced))
                 .foregroundColor(VoltraColor.accent)
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
-                    Text("\(formatLb(set.weightLb)) lb")
+                    // Primary: total lifted weight
+                    Text("\(formatLb(totalLb)) lb")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(VoltraColor.text)
+                    if totalPlates > 0 {
+                        // Show breakdown so total isn't ambiguous
+                        Text("= \(formatLb(set.weightLb)) Voltra + \(formatLb(totalPlates)) plates")
+                            .font(.system(size: 11))
+                            .foregroundColor(VoltraColor.textFaint)
+                    }
                     if let e = set.eccentricLb, e > 0 {
                         Text("+\(formatLb(e)) ecc")
                             .font(.system(size: 12))
                             .foregroundColor(VoltraColor.returnPhase)
-                    }
-                    if let lb = set.addedLoadLb, lb > 0 {
-                        let t = (set.addedLoadType ?? "added").replacingOccurrences(of: "_", with: " ")
-                        Text("+\(formatLb(lb)) \(t)")
-                            .font(.system(size: 12))
-                            .foregroundColor(VoltraColor.transition)
-                    } else if let c = set.chainsLb, c > 0 {
-                        Text("+\(formatLb(c)) chains")
-                            .font(.system(size: 12))
-                            .foregroundColor(VoltraColor.transition)
                     }
                 }
                 HStack(spacing: 8) {
@@ -817,10 +912,11 @@ private struct SwipeableSetRow: View {
                     editing.eccentricLb = Double(min(300, cur + 5))
                 }
             )
+            // v0.4.2: "Added plates" — plates already on the machine, not Voltra weight.
             editorRow(
-                label: "Added",
+                label: "Added plates",
                 value: Int(editing.addedLoadLb ?? 0),
-                unit: editing.addedLoadType ?? "lb",
+                unit: "lb",
                 onMinus: {
                     let cur = Int(editing.addedLoadLb ?? 0)
                     let next = max(0, cur - 5)
@@ -829,9 +925,24 @@ private struct SwipeableSetRow: View {
                 onPlus: {
                     let cur = Int(editing.addedLoadLb ?? 0)
                     editing.addedLoadLb = Double(min(300, cur + 5))
-                    if editing.addedLoadType == nil { editing.addedLoadType = "chains" }
+                    editing.addedLoadType = "plates"
                 }
             )
+            // v0.4.2: explicit Voltra / Added plates / Total summary inside
+            // the editor so the breakdown is unambiguous when reviewing.
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("TOTAL")
+                    .font(.system(size: 11, weight: .bold))
+                    .kerning(0.8)
+                    .foregroundColor(VoltraColor.textDim)
+                Spacer()
+                Text("\(Int(editing.weightLb)) Voltra + \(Int(editing.addedLoadLb ?? 0)) plates")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(VoltraColor.textFaint)
+                Text("= \(Int(editing.weightLb + (editing.addedLoadLb ?? 0))) lb")
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundColor(VoltraColor.accent)
+            }
             HStack {
                 Button("Cancel") {
                     onToggleExpand()
