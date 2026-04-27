@@ -22,6 +22,11 @@ struct LoggingHomeView: View {
     /// tapping the Custom tile expands a textfield + recent-labels chip row
     /// directly below the grid, no extra navigation.
     @State private var showingCustomInline = false
+    /// Build 31: GROUP picker on the inline custom card. Defaults to .custom
+    /// so the existing zero-friction flow (just type and Start) is unchanged.
+    /// User can tap the dropdown to roll the workout under one of the four
+    /// preset groups for home-screen tile grouping.
+    @State private var pickedGroup: DayType = .custom
     @State private var showingDashboard = false
     @State private var showingDebug = false
     @FocusState private var customFieldFocused: Bool
@@ -276,10 +281,53 @@ struct LoggingHomeView: View {
         let canStart = !trimmed.isEmpty
 
         return VStack(alignment: .leading, spacing: 14) {
+            // Build 31: GROUP picker. The user asked for a dropdown that
+            // lets them tag the custom workout under one of the four
+            // preset groups (Leg / Back / Chest / Arm) or keep it as a
+            // freestanding Custom day. The chosen group becomes the
+            // session's dayType so history can roll the workout up under
+            // that preset's tile on the home screen.
+            Text("GROUP")
+                .font(VoltraFont.label())
+                .kerning(2)
+                .foregroundColor(VoltraColor.textDim)
+
+            Menu {
+                ForEach(DayType.allCases) { dt in
+                    Button {
+                        pickedGroup = dt
+                    } label: {
+                        if pickedGroup == dt {
+                            Label(dt.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(dt.displayName)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(pickedGroup.displayName)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(VoltraColor.text)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(VoltraColor.textDim)
+                }
+                .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
+                .background(VoltraColor.bgElev2)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(VoltraColor.border, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+
             Text("NAME YOUR DAY")
                 .font(VoltraFont.label())
                 .kerning(2)
                 .foregroundColor(VoltraColor.textDim)
+                .padding(.top, 4)
 
             HStack(spacing: 10) {
                 TextField("e.g. Push, Pull, Mobility", text: $customLabel)
@@ -366,10 +414,14 @@ struct LoggingHomeView: View {
     private func startCustom(_ rawLabel: String) {
         let label = rawLabel.trimmingCharacters(in: .whitespaces)
         guard !label.isEmpty else { return }
-        logging.startSession(dayType: .custom, customLabel: label)
+        // Build 31: use the picked group as the session's dayType. The
+        // free-form name is stored as customLabel so the home tile can
+        // display "Push" under the Chest group, etc. If the user kept the
+        // group as Custom, behavior matches build 30 exactly.
+        logging.startSession(dayType: pickedGroup, customLabel: label)
         showingCustomInline = false
         customFieldFocused = false
-        pickedDayType = .custom
+        pickedDayType = pickedGroup
     }
 }
 
