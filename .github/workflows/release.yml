@@ -232,6 +232,16 @@ jobs:
               csr_pem = f.read()
           # Strip PEM headers, base64 the inner content (strict CSR base64)
           csr_inner = csr_pem.replace("-----BEGIN CERTIFICATE REQUEST-----", "").replace("-----END CERTIFICATE REQUEST-----", "").replace("\n", "").strip()
+          # Apple allows only one active Distribution cert per account. Each CI run
+          # generates a fresh keypair, so the previous cert's private key is gone -
+          # we must revoke any existing DISTRIBUTION certs before creating a new one.
+          status, resp = api("GET", "/v1/certificates?limit=200")
+          if status == 200:
+              for c in resp.get("data", []):
+                  ctype = c["attributes"].get("certificateType", "")
+                  if ctype == "DISTRIBUTION":
+                      did, _ = api("DELETE", f"/v1/certificates/{c['id']}")
+                      print(f"revoked stale DISTRIBUTION cert {c['id']} -> HTTP {did}")
           status, resp = api("POST", "/v1/certificates", {
               "data": {
                   "type": "certificates",
