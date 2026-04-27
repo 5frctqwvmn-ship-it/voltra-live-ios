@@ -334,3 +334,55 @@ points at it.
 - **Verification:** Grep for `"[^"]*\\u[0-9A-Fa-f]{4}[^{]` across the new
   Dual/ + Protocol/ files returns only the doc-comment line. Triggered
   dry-run `25013122194` immediately after push.
+
+## 2026-04-27 — feat(dual-voltra UI): DualConnectView + DualCaptureView
+
+- **What ships:** Dual-Voltra is now reachable from the existing
+  `ConnectView` via a small "Pair 2 Voltras (beta)" link below the
+  Demo Mode button. Single-device flow is unchanged: same Connect
+  button, same auto-route into `LoggingHomeView` when one Voltra
+  pairs through `bleManager`. The dual flow lives entirely in its
+  own navigation stack and uses `MultiDeviceManager` (newly injected
+  as an environment object in `VoltraLiveApp`).
+- **Files added:**
+  - `VoltraLive/Views/Dual/DualConnectView.swift` — discovery list
+    powered by `VoltraDiscoveryScanner`, tap-to-select rows, and a
+    3-button action bar:
+      • "Connect Both (auto-pair top 2)" — picks the two strongest
+        RSSI hits and assigns Left = strongest, Right = second.
+      • "Connect Left" / "Connect Right" — connect the currently
+        selected discovery to that slot.
+    Shows per-slot status with a colored dot, a Disconnect link
+    when paired, and a yellow error banner mirroring
+    `MultiState.errorReconnecting`.
+  - `VoltraLive/Views/Dual/DualCaptureView.swift` — post-pair view
+    with a Mode toggle (Independent | Combined), two device cards
+    (Force / Reps / Phase), an additional Combined virtual-twin
+    card when in Combined mode, and a LOAD / UNLOAD action row.
+    Telemetry is held on a small `DualCaptureViewModel`
+    `ObservableObject` so the view is safe across re-renders.
+- **MultiDeviceManager change:** added objectWillChange rebroadcast
+  from each child `VoltraBLEManager`. Without it, SwiftUI views that
+  read `mdm.left.connectionState` would not redraw when the child's
+  `@Published` state changed — only `mdm.state` and `mdm.mode` would
+  trigger refreshes. Two `.sink { self?.objectWillChange.send() }`
+  subscriptions in `observeConnections()` close that gap.
+- **VoltraLiveApp.swift:** added `@StateObject private var multi =
+  MultiDeviceManager()` and `.environmentObject(multi)`. The single
+  `bleManager` and its telemetry router are unchanged — dual flow
+  does NOT yet write to `LoggingStore` (build 31 task).
+- **Sacred files:** untouched. ConnectView is a new branch in body
+  using a `NavigationStack`, but the existing single-device button
+  + status logic is byte-for-byte unchanged inside the new `content`
+  computed property.
+- **Risks:** (a) The dual flow's telemetry is display-only this build.
+  Independent users who walk into DualCaptureView won't see their
+  reps logged into the workout history — the entry point is labeled
+  "(beta)" so the expectation matches. Single-device users following
+  the normal Connect button get the full LoggingStore experience as
+  before. (b) The `mdm.onCombinedTelemetry` hook fires on EVERY
+  per-device packet (even in Independent mode) — view filters via
+  `if mdm.mode == .combined` so it just gets ignored. Cheap.
+- **Next:** Dry-run on main; if green, the build-30 dual-Voltra UI
+  surface is in. Then merge the parallel agent's Group-dropdown PR,
+  tag `v0.4.8-build30`, push tag.

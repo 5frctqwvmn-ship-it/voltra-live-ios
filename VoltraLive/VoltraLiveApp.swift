@@ -13,6 +13,12 @@ struct VoltraLiveApp: App {
     @StateObject private var healthStore = HealthKitStore()
     // v0.4.6.3: Demo Mode controller, owns synthetic telemetry + trace logger.
     @StateObject private var demo = DemoController()
+    // v0.4.8 build 30: dual-Voltra coordinator. Owns its own pair of
+    // VoltraBLEManagers; the single-device `bleManager` above is
+    // unchanged so the existing single-Voltra flow has zero regression
+    // risk. The dual flow is reachable from a small "Pair 2 Voltras"
+    // entry point inside ConnectView and is ignored otherwise.
+    @StateObject private var multi = MultiDeviceManager()
 
     let modelContainer: ModelContainer = {
         // v0.1 dashboard models + v0.2 logging models in one container so
@@ -99,6 +105,7 @@ struct VoltraLiveApp: App {
                 .environmentObject(sessionStore)
                 .environmentObject(loggingStore)
                 .environmentObject(healthStore)
+                .environmentObject(multi)
                 // v0.4.6.3: .demoModeOverlay() is a ViewModifier that itself
                 // reads @EnvironmentObject DemoController. Modifiers cannot
                 // see env objects injected ABOVE them in the chain — only

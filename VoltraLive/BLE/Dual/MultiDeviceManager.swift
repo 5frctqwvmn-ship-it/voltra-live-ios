@@ -212,6 +212,20 @@ final class MultiDeviceManager: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] s in self?.connectionChanged(slot: .right, s: s) }
             .store(in: &bag)
+
+        // Rebroadcast each child's objectWillChange so SwiftUI views that
+        // read e.g. `mdm.left.connectionState` redraw when the child
+        // updates. Without this, only `mdm.state` and `mdm.mode` would
+        // trigger view refreshes — sub-properties of the children would
+        // be invisible to SwiftUI.
+        left.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &bag)
+        right.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &bag)
     }
 
     private func connectionChanged(slot: DeviceSlot, s: BLEConnectionState) {

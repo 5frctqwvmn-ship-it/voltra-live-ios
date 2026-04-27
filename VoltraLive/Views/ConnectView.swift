@@ -8,6 +8,9 @@ struct ConnectView: View {
     @EnvironmentObject var ble: VoltraBLEManager
     @EnvironmentObject var demo: DemoController
 
+    // v0.4.8 build 30: optional dual-Voltra entry. Off by default.
+    @State private var showDualConnect: Bool = false
+
     private var statusMessage: String {
         switch ble.connectionState {
         case .scanning:    return "Scanning for VOLTRA…"
@@ -26,6 +29,15 @@ struct ConnectView: View {
     }
 
     var body: some View {
+        NavigationStack {
+            content
+                .navigationDestination(isPresented: $showDualConnect) {
+                    DualConnectView()
+                }
+        }
+    }
+
+    private var content: some View {
         VStack(spacing: 0) {
             // Top bar
             HStack {
@@ -142,6 +154,19 @@ struct ConnectView: View {
                     demo.note(.buttonTap(label: "Demo Mode (pre-pair)", screen: "Connect"))
                     demo.enter(source: .prePair, onTelemetry: handler)
                 }
+
+                // v0.4.8 build 30: dual-Voltra opt-in. Tiny tertiary link
+                // — single-device flow above is unchanged.
+                Button {
+                    showDualConnect = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.split.2x1")
+                        Text("Pair 2 Voltras (beta)")
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(VoltraColor.textDim)
+                }
             }
             .padding(40)
             .background(VoltraColor.bgElev)
@@ -164,4 +189,5 @@ struct ConnectView: View {
     ConnectView()
         .environmentObject(VoltraBLEManager())
         .environmentObject(DemoController())
+        .environmentObject(MultiDeviceManager())
 }
