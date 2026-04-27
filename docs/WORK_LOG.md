@@ -456,3 +456,27 @@ Fix: match `VoltraLiveApp.modelContainer.v2Config` exactly — explicitly pass
 
 Files changed:
 - VoltraLiveTests/RecentCustomLabelsTests.swift (makeStoreWithContext)
+
+## 2026-04-27 — fix(test): pure-helper-only RecentCustomLabelsTests (no ModelContainer)
+
+Dry-run `25020027973` (with cloudKitDatabase: .none) STILL hung the same way —
+each test that called `makeStoreWithContext()` waited ~30s and tripped the
+xctest watchdog. The hosted xctest target's in-memory ModelContainer init is
+fundamentally unhappy in this CI environment.
+
+Switched approach: extracted dedupe/trim/limit logic into a pure static helper
+`LoggingStore.distinctRecentCustomLabels(from:limit:)` that takes
+[String?] (newest-first) and returns the ordered distinct list. The DB-backed
+`recentCustomLabels()` is now a thin wrapper that fetches sessions ordered
+by startedAt desc and forwards `customLabel` values to the helper.
+
+Tests:
+- Kept the no-context safety test (verifies `recentCustomLabels()` returns []
+  when modelContext is nil — this is what LoggingHomeView relies on during
+  startup / previews).
+- Replaced 4 SwiftData-backed tests with 6 pure-helper tests covering empty
+  input, nil-skip, distinct+order, trim+empty-skip, limit, trim/dedupe combo.
+
+Files changed:
+- VoltraLive/Logging/Persistence/LoggingStore.swift (extracted helper)
+- VoltraLiveTests/RecentCustomLabelsTests.swift (rewrote)

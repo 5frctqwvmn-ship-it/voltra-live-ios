@@ -992,10 +992,26 @@ final class LoggingStore: ObservableObject {
         // and we only need enough to find `limit` distinct labels.
         desc.fetchLimit = 300
         let sessions = (try? ctx.fetch(desc)) ?? []
+        return Self.distinctRecentCustomLabels(
+            from: sessions.map { $0.customLabel },
+            limit: limit
+        )
+    }
+
+    /// Pure helper extracted so the dedupe/trim/limit logic can be unit-tested
+    /// without spinning up a SwiftData ModelContainer (which hangs in the
+    /// hosted xctest environment — see RecentCustomLabelsTests).
+    ///
+    /// Input must be ordered MOST-RECENT FIRST. Each element is the
+    /// `customLabel` of a WorkoutSession (nil for preset days).
+    static func distinctRecentCustomLabels(
+        from labelsNewestFirst: [String?],
+        limit: Int = 6
+    ) -> [String] {
         var seen = Set<String>()
         var out: [String] = []
-        for s in sessions {
-            guard let raw = s.customLabel else { continue }
+        for raw in labelsNewestFirst {
+            guard let raw else { continue }
             let label = raw.trimmingCharacters(in: .whitespaces)
             guard !label.isEmpty, !seen.contains(label) else { continue }
             seen.insert(label)
