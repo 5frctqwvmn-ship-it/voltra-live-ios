@@ -107,6 +107,20 @@ jobs:
             CODE_SIGN_STYLE=Automatic \
             archive
 
+      # Diagnostic: dump the signed entitlements + embedded provisioning profile
+      # so we can verify HealthKit is actually granted to the signed binary.
+      - name: Dump signed entitlements (diagnostic)
+        run: |
+          set -e
+          APP_PATH=$(find build/VoltraLive.xcarchive/Products/Applications -maxdepth 2 -name '*.app' | head -1)
+          echo "=== App bundle: $APP_PATH ==="
+          echo "=== Embedded.mobileprovision Entitlements ==="
+          security cms -D -i "$APP_PATH/embedded.mobileprovision" | plutil -extract Entitlements xml1 -o - - || true
+          echo "=== codesign -d --entitlements (signed binary) ==="
+          codesign -d --entitlements :- "$APP_PATH" 2>&1 || true
+          echo "=== HealthKit grep ==="
+          codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | grep -i healthkit || echo "NO HEALTHKIT ENTITLEMENT IN SIGNED BINARY"
+
       # Generate ExportOptions.plist at runtime so APPLE_TEAM_ID stays a secret
       - name: Export IPA for App Store Connect
         env:
