@@ -1,0 +1,138 @@
+name: ASC Enable HealthKit Capability
+
+# v0.4.6.1 one-shot: enable the HealthKit capability on the App ID
+# `com.voltralive.app` via the App Store Connect API.
+#
+# Why we need this: the entitlements file declares
+# `com.apple.developer.healthkit`, but if the App ID in the developer
+# portal doesn't have HealthKit enabled, codesign silently strips the
+# entitlement during signing. At runtime
+# `HKHealthStore.requestAuthorization` returns `false` with no system
+# prompt, and the iOS Settings page for the app shows no Health row.
+#
+# After this workflow runs successfully (or once HealthKit is confirmed
+# enabled on the App ID), this file should be deleted from the repo.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  enable-healthkit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BUNDLE_ID_STRING: com.voltralive.app
+      API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+      API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+    steps:
+      - name: Sanity (jq + python3 + openssl)
+        run: |
+          jq --version
+          python3 --version
+          openssl version
+
+      - name: Enable HEALTHKIT on bundle ID
+        run: |
+          set -euo pipefail
+
+          # 1) Stage the .p8 private key.
+          KEY_FILE=$(mktemp /tmp/asc_key.XXXXXX.p8)
+          printf '%s' "${API_PRIVATE_KEY}" > "${KEY_FILE}"
+          chmod 600 "${KEY_FILE}"
+
+          # 2) Mint a 20-min ASC JWT (ES256) using openssl + python.
+          export KEY_FILE
+          JWT=$(python3 - <<'PY'
+          import base64, json, time, subprocess, os
+          kid = os.environ['API_KEY_ID']
+          iss = os.environ['API_ISSUER_ID']
+          key_file = os.environ['KEY_FILE']
+          now = int(time.time())
+          header = {"alg":"ES256","kid":kid,"typ":"JWT"}
+          payload = {"iss":iss,"iat":now,"exp":now+1200,"aud":"appstoreconnect-v1"}
+          def b64u(b): return base64.urlsafe_b64encode(b).rstrip(b'=')
+          h = b64u(json.dumps(header, separators=(',',':')).encode())
+          p = b64u(json.dumps(payload, separators=(',',':')).encode())
+          unsigned = h + b'.' + p
+          der = subprocess.check_output(
+              ['openssl','dgst','-sha256','-sign', key_file],
+              input=unsigned
+          )
+          # DER ECDSA -> raw R||S (64 bytes)
+          def parse(b):
+              assert b[0] == 0x30
+              # length field
+              if b[1] & 0x80:
+                  ll = b[1] & 0x7F
+                  i = 2 + ll
+              else:
+                  i = 2
+              assert b[i] == 0x02
+              rl = b[i+1]; r = b[i+2:i+2+rl]; i += 2 + rl
+              assert b[i] == 0x02
+              sl = b[i+1]; s = b[i+2:i+2+sl]
+              return r.lstrip(b'\x00').rjust(32, b'\x00') + s.lstrip(b'\x00').rjust(32, b'\x00')
+          sig = b64u(parse(der))
+          print((unsigned + b'.' + sig).decode())
+          PY
+          )
+          echo "::add-mask::${JWT}"
+
+          # 3) Look up the bundle ID resource (we need its API id, not the string).
+          RESP=$(curl -sS -H "Authorization: Bearer ${JWT}" \
+            "https://api.appstoreconnect.apple.com/v1/bundleIds?filter%5Bidentifier%5D=${BUNDLE_ID_STRING}&limit=20")
+          echo "Bundle ID lookup:"
+          echo "${RESP}" | jq '.data | map({id, type, attributes: {identifier: .attributes.identifier, name: .attributes.name, platform: .attributes.platform}})'
+
+          BID=$(echo "${RESP}" | jq -r --arg ID "${BUNDLE_ID_STRING}" '
+            .data
+            | map(select(.attributes.identifier == $ID))
+            | (map(select(.attributes.platform == "IOS"))
+               + map(select(.attributes.platform == "UNIVERSAL"))
+               + .)
+            | .[0].id // empty
+          ')
+          if [ -z "${BID}" ]; then
+            echo "::error::Bundle ID ${BUNDLE_ID_STRING} not found in App Store Connect"
+            exit 1
+          fi
+          echo "Resolved bundleId resource id: ${BID}"
+
+          # 4) List existing capabilities to detect "already enabled".
+          EXISTING=$(curl -sS -H "Authorization: Bearer ${JWT}" \
+            "https://api.appstoreconnect.apple.com/v1/bundleIds/${BID}/bundleIdCapabilities?limit=200")
+          echo "Existing capabilities:"
+          echo "${EXISTING}" | jq '.data | map(.attributes.capabilityType)'
+
+          if echo "${EXISTING}" | jq -e '.data[] | select(.attributes.capabilityType == "HEALTHKIT")' >/dev/null; then
+            echo "HEALTHKIT already enabled on ${BUNDLE_ID_STRING}. Nothing to do."
+            exit 0
+          fi
+
+          # 5) Enable HEALTHKIT.
+          BODY=$(jq -nc --arg bid "${BID}" '{
+            data: {
+              type: "bundleIdCapabilities",
+              attributes: { capabilityType: "HEALTHKIT" },
+              relationships: { bundleId: { data: { type: "bundleIds", id: $bid } } }
+            }
+          }')
+          echo "POST body: ${BODY}"
+
+          OUT=$(mktemp)
+          STATUS=$(curl -sS -o "${OUT}" -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${JWT}" \
+            -H "Content-Type: application/json" \
+            -d "${BODY}" \
+            "https://api.appstoreconnect.apple.com/v1/bundleIdCapabilities")
+          echo "HTTP ${STATUS}"
+          jq . "${OUT}" || cat "${OUT}"
+
+          if [ "${STATUS}" != "201" ] && [ "${STATUS}" != "200" ]; then
+            echo "::error::Failed to enable HEALTHKIT (HTTP ${STATUS})"
+            exit 1
+          fi
+
+          echo "HEALTHKIT capability enabled on ${BUNDLE_ID_STRING}."
