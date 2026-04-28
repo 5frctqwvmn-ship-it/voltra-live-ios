@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VOLTRA Live — Spacing &amp; Radius</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html, body { margin: 0; background: var(--vl-bg); color: var(--vl-text); font-family: var(--vl-font-ui); }
+  body { padding: 48px; min-height: 100vh; box-sizing: border-box; }
+  h1 { font: 700 22px/1 var(--vl-font-ui); letter-spacing: 1px; text-transform: uppercase; margin: 0 0 8px; }
+  .sub { font: 400 14px/1.5 var(--vl-font-ui); color: var(--vl-text-dim); margin-bottom: 40px; max-width: 620px; }
+  h2 { font: 700 11px/1 var(--vl-font-ui); letter-spacing: 2px; text-transform: uppercase; color: var(--vl-text-dim); margin: 36px 0 14px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .card { background: var(--vl-bg-elev); border: var(--vl-stroke); border-radius: var(--vl-r-tile); padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .card-name { font: 700 13px/1 var(--vl-font-ui); }
+  .card-spec { font: 500 11px/1 var(--vl-font-mono); color: var(--vl-text-dim); }
+  .card-use { font: 400 12px/1.4 var(--vl-font-ui); color: var(--vl-text-faint); }
+  .demo { height: 80px; background: var(--vl-bg-elev-2); border: 1px solid var(--vl-border); display: flex; align-items: center; justify-content: center; color: var(--vl-text-dim); font: 500 12px/1 var(--vl-font-mono); }
+
+  .tap-row { display: flex; gap: 12px; align-items: flex-end; }
+  .tap-cell { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .tap-cell .box { background: var(--vl-bg-elev-2); border: 1px solid var(--vl-accent); display: flex; align-items: center; justify-content: center; color: var(--vl-accent); font: 700 11px/1 var(--vl-font-mono); }
+  .tap-cell .label { font: 500 11px/1 var(--vl-font-mono); color: var(--vl-text-dim); }
+
+  .ruler { background: var(--vl-bg-elev); border: var(--vl-stroke); border-radius: var(--vl-r-tile); padding: 24px; }
+  .ruler-row { display: grid; grid-template-columns: 96px 1fr; gap: 16px; align-items: center; padding: 10px 0; border-bottom: var(--vl-stroke); }
+  .ruler-row:last-child { border: 0; }
+  .ruler-name { font: 500 12px/1 var(--vl-font-mono); color: var(--vl-text-dim); }
+  .ruler-bar { height: 14px; background: var(--vl-accent); border-radius: 2px; }
+
+  .grid-demo {
+    background: var(--vl-bg-elev); border: var(--vl-stroke); border-radius: var(--vl-r-tile); padding: 14px;
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--vl-gap-tile-grid); width: 360px;
+  }
+  .grid-demo .tile { aspect-ratio: 1.4; background: var(--vl-bg-elev-2); border: 1px solid var(--vl-border); border-radius: 14px;
+    display: flex; align-items: center; justify-content: center; color: var(--vl-text-dim); font: 700 11px/1 var(--vl-font-mono); letter-spacing: 1.5px; }
+</style>
+</head>
+<body>
+  <h1>Spacing &amp; Radius</h1>
+  <p class="sub">Three radii (tile / button / cell) + one pill. Tap targets are large by default — the user is sweaty and one-handed.</p>
+
+  <h2>Radius</h2>
+  <div class="grid">
+    <div class="card"><div class="card-name">Tile</div><div class="card-spec">--vl-r-tile · 18px</div>
+      <div class="demo" style="border-radius: 18px">18</div>
+      <div class="card-use">Tiles, sheets, primary cards. The project's signature radius.</div></div>
+    <div class="card"><div class="card-name">Button</div><div class="card-spec">--vl-r-button · 12px</div>
+      <div class="demo" style="border-radius: 12px">12</div>
+      <div class="card-use">Primary buttons. Smaller than tiles so they don't compete.</div></div>
+    <div class="card"><div class="card-name">Cell</div><div class="card-spec">--vl-r-cell · 10px</div>
+      <div class="demo" style="border-radius: 10px">10</div>
+      <div class="card-use">Compact cells (CompareStrip, chips inside tiles).</div></div>
+    <div class="card"><div class="card-name">Pill</div><div class="card-spec">--vl-r-pill · 999px</div>
+      <div class="demo" style="border-radius: 999px">999</div>
+      <div class="card-use">Status dots, RSSI pills, fresh-data badges.</div></div>
+  </div>
+
+  <h2>Tap targets — the floor is 44, the standard is 50</h2>
+  <div class="card" style="flex-direction: row; gap: 24px; align-items: flex-end;">
+    <div class="tap-cell"><div class="box" style="width:44px;height:44px;border-radius:12px">44</div><div class="label">--vl-tap-min</div></div>
+    <div class="tap-cell"><div class="box" style="width:50px;height:50px;border-radius:12px">50</div><div class="label">--vl-tap-cta</div></div>
+    <div class="tap-cell"><div class="box" style="width:56px;height:56px;border-radius:14px">56</div><div class="label">--vl-tap-tile</div></div>
+    <div style="flex:1; font: 400 13px/1.5 var(--vl-font-ui); color: var(--vl-text-dim); max-width:360px;">
+      iOS HIG floor is 44. Primary footer CTAs sit at 50. The whole tile is tappable at 56+ so a sweaty thumb mid-set always lands.
+    </div>
+  </div>
+
+  <h2>Spacing scale</h2>
+  <div class="ruler">
+    <div class="ruler-row"><div class="ruler-name">4</div><div><div class="ruler-bar" style="width:4px"></div></div></div>
+    <div class="ruler-row"><div class="ruler-name">8</div><div><div class="ruler-bar" style="width:8px"></div></div></div>
+    <div class="ruler-row"><div class="ruler-name">12 · grid gap</div><div><div class="ruler-bar" style="width:12px"></div></div></div>
+    <div class="ruler-row"><div class="ruler-name">14 · row pad</div><div><div class="ruler-bar" style="width:14px"></div></div></div>
+    <div class="ruler-row"><div class="ruler-name">18 · tile interior</div><div><div class="ruler-bar" style="width:18px"></div></div></div>
+    <div class="ruler-row"><div class="ruler-name">24</div><div><div class="ruler-bar" style="width:24px"></div></div></div>
+    <div class="ruler-row"><div class="ruler-name">40 · card pad</div><div><div class="ruler-bar" style="width:40px"></div></div></div>
+    <div class="ruler-row"><div class="ruler-name">64</div><div><div class="ruler-bar" style="width:64px"></div></div></div>
+  </div>
+
+  <h2>Live grid — 2×2 tiles, 12px gap, 14px outer pad</h2>
+  <div class="grid-demo">
+    <div class="tile">REPS</div>
+    <div class="tile">PHASE</div>
+    <div class="tile">FORCE</div>
+    <div class="tile">REST</div>
+  </div>
+  <p style="font:400 13px/1.5 var(--vl-font-ui);color:var(--vl-text-dim);max-width:520px;margin-top:14px;">
+    The 2×2 cluster is the canonical live screen. A 5th tile means removing one first.
+  </p>
+</body>
+</html>

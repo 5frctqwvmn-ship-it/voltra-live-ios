@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VOLTRA Live — Type Ramp</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html, body { margin: 0; background: var(--vl-bg); color: var(--vl-text); font-family: var(--vl-font-ui); }
+  body { padding: 48px; min-height: 100vh; box-sizing: border-box; }
+  h1 { font: 700 22px/1 var(--vl-font-ui); letter-spacing: 1px; text-transform: uppercase; margin: 0 0 8px; }
+  .sub { font: 400 14px/1.5 var(--vl-font-ui); color: var(--vl-text-dim); margin-bottom: 40px; max-width: 620px; }
+  h2 { font: 700 11px/1 var(--vl-font-ui); letter-spacing: 2px; text-transform: uppercase; color: var(--vl-text-dim); margin: 36px 0 14px; }
+  .group { background: var(--vl-bg-elev); border: var(--vl-stroke); border-radius: var(--vl-r-tile); padding: 0 24px; }
+  .row { display: grid; grid-template-columns: 220px 1fr; gap: 24px; align-items: baseline; padding: 24px 0; border-bottom: var(--vl-stroke); }
+  .row:last-child { border-bottom: 0; }
+  .meta { display: flex; flex-direction: column; gap: 4px; }
+  .meta-name { font: 700 13px/1.2 var(--vl-font-ui); color: var(--vl-text); }
+  .meta-spec { font: 500 11px/1.4 var(--vl-font-mono); color: var(--vl-text-dim); }
+  .meta-use { font: 400 12px/1.4 var(--vl-font-ui); color: var(--vl-text-faint); }
+  .sample { min-height: 1em; }
+</style>
+</head>
+<body>
+  <h1>Type Ramp</h1>
+  <p class="sub">Two stacks: <strong>UI</strong> (system / SF Pro) for labels and copy, <strong>Mono</strong> (SF Mono) for every live numeral. All readouts are tabular-nums so digits never re-flow under the eye.</p>
+
+  <h2>Live numerals — mono, tabular</h2>
+  <div class="group">
+    <div class="row"><div class="meta"><span class="meta-name">Big tile readout</span><span class="meta-spec">mono · 72 / 700 · tabular-nums · LH 0.95</span><span class="meta-use">REPS, FORCE, RESISTANCE</span></div>
+      <div class="sample vl-bignum">12</div></div>
+    <div class="row"><div class="meta"><span class="meta-name">Big readout, iPhone</span><span class="meta-spec">mono · 44 / 700 · tabular-nums</span><span class="meta-use">Same tiles on phone</span></div>
+      <div class="sample" style="font:700 44px/.95 var(--vl-font-mono);font-variant-numeric:tabular-nums">128</div></div>
+    <div class="row"><div class="meta"><span class="meta-name">Phase value</span><span class="meta-spec">UI · 52 / 700</span><span class="meta-use">PULL · RETURN · IDLE</span></div>
+      <div class="sample vl-phase-num" style="color: var(--vl-pull)">PULL</div></div>
+    <div class="row"><div class="meta"><span class="meta-name">Mid tile</span><span class="meta-spec">mono · 28 / 700 · tabular-nums</span><span class="meta-use">HR, KCAL paired tile</span></div>
+      <div class="sample" style="font:700 28px/1 var(--vl-font-mono);font-variant-numeric:tabular-nums">142</div></div>
+    <div class="row"><div class="meta"><span class="meta-name">Unit suffix</span><span class="meta-spec">mono · 18 / 500 · dim</span><span class="meta-use">lb, %, kcal, bpm</span></div>
+      <div class="sample"><span style="font:700 44px/.95 var(--vl-font-mono);font-variant-numeric:tabular-nums">120</span> <span class="vl-unit">lb</span></div></div>
+    <div class="row"><div class="meta"><span class="meta-name">Rest timer</span><span class="meta-spec">mono · 44 / 700 · tabular-nums</span><span class="meta-use">MM:SS — leading zeros always</span></div>
+      <div class="sample" style="font:700 44px/.95 var(--vl-font-mono);font-variant-numeric:tabular-nums">00:42</div></div>
+  </div>
+
+  <h2>Labels &amp; chrome — UI stack</h2>
+  <div class="group">
+    <div class="row"><div class="meta"><span class="meta-name">Wordmark</span><span class="meta-spec">UI · 28 / 700</span><span class="meta-use">Connect screen only</span></div>
+      <div class="sample vl-headline">VOLTRA Live</div></div>
+    <div class="row"><div class="meta"><span class="meta-name">Tile label</span><span class="meta-spec">UI · 11 / 700 · UPPER · +2.0px tracking</span><span class="meta-use">REPS, FORCE, REST, PHASE</span></div>
+      <div class="sample vl-tile-label">REPS</div></div>
+    <div class="row"><div class="meta"><span class="meta-name">Cell label</span><span class="meta-spec">UI · 11 / 700 · UPPER · +1.5px tracking</span><span class="meta-use">CompareStrip, settings sections</span></div>
+      <div class="sample vl-cell-label">LAST · BEST · TARGET</div></div>
+    <div class="row"><div class="meta"><span class="meta-name">Body</span><span class="meta-spec">UI · 15 / 400 · dim</span><span class="meta-use">Connect-card description, instructions</span></div>
+      <div class="sample vl-body" style="max-width:520px">Pair your VOLTRA cable to start mirroring live force, reps, and phase telemetry.</div></div>
+    <div class="row"><div class="meta"><span class="meta-name">Row text</span><span class="meta-spec">UI · 14 / 500</span><span class="meta-use">History list, settings rows</span></div>
+      <div class="sample vl-row">Tuesday — 6:42 PM · 4 sets · 12 min</div></div>
+    <div class="row"><div class="meta"><span class="meta-name">Meta</span><span class="meta-spec">UI · 13 / 400 · dim</span><span class="meta-use">RSSI dBm, time-ago, subtitles</span></div>
+      <div class="sample vl-meta">−54 dBm · last seen 2 s ago</div></div>
+    <div class="row"><div class="meta"><span class="meta-name">Caption</span><span class="meta-spec">UI · 12 / 400 · dim</span><span class="meta-use">"bpm", "kcal" tile captions</span></div>
+      <div class="sample vl-cap">bpm</div></div>
+  </div>
+</body>
+</html>

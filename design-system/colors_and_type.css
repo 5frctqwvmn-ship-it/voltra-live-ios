@@ -1,0 +1,144 @@
+/* =============================================================
+   VOLTRA Live — Design Tokens
+   Ported 1:1 from VoltraLive/Views/VoltraTheme.swift
+   Dark-only. iPhone-first, but readable from 8 ft on a rack-mounted iPad.
+   ============================================================= */
+
+:root {
+  /* ---------- Color: backgrounds ---------- */
+  --vl-bg:        #0a0e0c;   /* page / canvas — almost-black with a hint of green */
+  --vl-bg-elev:   #11181a;   /* cards, tiles, sheets */
+  --vl-bg-elev-2: #1a2426;   /* nested elements (chips inside tiles, hover states) */
+  --vl-border:    #1f2c2e;   /* hairlines around tiles/sheets */
+
+  /* ---------- Color: text ---------- */
+  --vl-text:       #e8f4f1;  /* primary readouts, headlines */
+  --vl-text-dim:   #8aa39e;  /* labels, secondary copy, units */
+  --vl-text-faint: #4a5f5b;  /* placeholders, disabled, never-data */
+
+  /* ---------- Color: accent + phase ---------- */
+  --vl-accent:        #00d4aa;  /* primary brand teal — pull phase, CTAs */
+  --vl-accent-dim:    #007a62;  /* pressed / muted accent */
+  --vl-pull:          #00d4aa;  /* concentric phase */
+  --vl-return:        #ffb84d;  /* eccentric/return phase */
+  --vl-transition:    #6c8de0;  /* between-rep transition */
+  --vl-idle:          #4a5f5b;  /* phase = idle */
+  --vl-warn:          #ff7a4d;  /* warnings, BT-off, stale data */
+  --vl-danger:        #ff4d6d;  /* hard errors, BOTTOM marker */
+
+  /* Phase fill (used as a translucent wash on the phase tile background) */
+  --vl-pull-wash:       rgba(0, 212, 170, 0.12);
+  --vl-return-wash:     rgba(255, 184, 77, 0.12);
+  --vl-transition-wash: rgba(108, 141, 224, 0.08);
+
+  /* Pulse-dot fresh-data green (PulseDot.swift) — distinct from --vl-accent
+     because it signals "HealthKit alive", not "VOLTRA brand". */
+  --vl-fresh: rgb(51, 217, 102);   /* 0.20, 0.85, 0.40 in srgb */
+  --vl-fresh-stale: rgb(89, 89, 89);
+
+  /* ---------- Type: font stack ---------- */
+  /* The app uses .system on iOS — SF Pro UI for body, SF Mono for numbers.
+     On the web we mirror with Apple's system stack and JetBrains Mono. */
+  --vl-font-ui:   -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+                  "Inter", system-ui, sans-serif;
+  --vl-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono",
+                  Menlo, Consolas, monospace;
+
+  /* ---------- Type: scale ---------- */
+  /* Big readouts are MONO + BOLD so digits line up at 8 ft. */
+  --vl-text-bignum:    72px;   /* tile value (REPS, FORCE, RESISTANCE) */
+  --vl-text-bignum-iphone: 44px;
+  --vl-text-headline:  28px;   /* "VOLTRA Live" wordmark on Connect */
+  --vl-text-phase:     52px;   /* PHASE tile value (PULL / RETURN / IDLE) */
+  --vl-text-tile-mid:  28px;   /* HR / KCAL paired tile (b46) */
+  --vl-text-body:      15px;   /* connect-card description, instructions */
+  --vl-text-row:       14px;   /* list rows, instructions */
+  --vl-text-meta:      13px;   /* subtitles, RSSI dBm */
+  --vl-text-cap:       12px;   /* captions, "bpm", "kcal" */
+  --vl-text-unit:      18px;   /* lb, %, after a big number */
+  --vl-text-label:     11px;   /* ALL-CAPS tile labels (REPS, FORCE...) */
+
+  --vl-weight-bignum:  700;
+  --vl-weight-label:   700;
+  --vl-weight-cta:     600;
+  --vl-weight-row:     500;
+
+  --vl-kerning-label-wide:   2.0px;   /* TileView label */
+  --vl-kerning-label-narrow: 1.5px;   /* CompareStripView label */
+
+  /* ---------- Spacing & radius ---------- */
+  --vl-r-tile:     18px;       /* tile / sheet card */
+  --vl-r-button:   12px;       /* primary buttons */
+  --vl-r-cell:     10px;       /* compact cells (CompareStrip) */
+  --vl-r-pill:     999px;
+
+  --vl-pad-tile:   18px 20px;  /* tile interior */
+  --vl-pad-card:   40px;       /* connect card interior */
+  --vl-pad-row:    14px;       /* discovery row */
+
+  --vl-gap-tile-grid: 12px;    /* between tiles in the live grid */
+
+  /* ---------- Effects ---------- */
+  --vl-stroke:       1px solid var(--vl-border);
+  --vl-stroke-active: 1px solid var(--vl-accent);
+  --vl-shadow-card:  0 8px 32px rgba(0, 0, 0, 0.4);
+
+  /* Tap targets */
+  --vl-tap-min:      44px;     /* iOS HIG floor; must hold even on tiles */
+  --vl-tap-cta:      50px;     /* primary footer button */
+  --vl-tap-tile:     56px;     /* big tile readout area */
+}
+
+/* =============================================================
+   Type utility classes (for the design-system preview pages).
+   The iOS app does not consume these; they exist so the HTML
+   spec mirrors what SwiftUI produces.
+   ============================================================= */
+
+.vl-bignum {
+  font-family: var(--vl-font-mono);
+  font-weight: var(--vl-weight-bignum);
+  font-size: var(--vl-text-bignum);
+  line-height: 0.95;
+  font-variant-numeric: tabular-nums;
+  color: var(--vl-text);
+  letter-spacing: -0.01em;
+}
+
+.vl-phase-num {
+  font-family: var(--vl-font-ui);
+  font-weight: var(--vl-weight-bignum);
+  font-size: var(--vl-text-phase);
+  line-height: 1;
+}
+
+.vl-tile-label {
+  font: var(--vl-weight-label) var(--vl-text-label)/1 var(--vl-font-ui);
+  letter-spacing: var(--vl-kerning-label-wide);
+  text-transform: uppercase;
+  color: var(--vl-text-dim);
+}
+
+.vl-cell-label {
+  font: var(--vl-weight-label) var(--vl-text-label)/1 var(--vl-font-ui);
+  letter-spacing: var(--vl-kerning-label-narrow);
+  text-transform: uppercase;
+  color: var(--vl-text-dim);
+}
+
+.vl-unit {
+  font-family: var(--vl-font-mono);
+  font-weight: var(--vl-weight-row);
+  font-size: var(--vl-text-unit);
+  color: var(--vl-text-dim);
+}
+
+.vl-headline {
+  font: 700 var(--vl-text-headline)/1.1 var(--vl-font-ui);
+  color: var(--vl-text);
+}
+
+.vl-body { font: 400 var(--vl-text-body)/1.5 var(--vl-font-ui); color: var(--vl-text-dim); }
+.vl-row  { font: 500 var(--vl-text-row)/1.3 var(--vl-font-ui); color: var(--vl-text); }
+.vl-meta { font: 400 var(--vl-text-meta)/1.3 var(--vl-font-ui); color: var(--vl-text-dim); }
+.vl-cap  { font: 400 var(--vl-text-cap)/1.2 var(--vl-font-ui); color: var(--vl-text-dim); }

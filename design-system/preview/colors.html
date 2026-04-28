@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VOLTRA Live — Color Palette</title>
+<link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  html, body { margin: 0; background: var(--vl-bg); color: var(--vl-text); font-family: var(--vl-font-ui); }
+  body { padding: 48px; min-height: 100vh; box-sizing: border-box; }
+  h1 { font: 700 22px/1 var(--vl-font-ui); letter-spacing: 1px; text-transform: uppercase; margin: 0 0 8px; color: var(--vl-text); }
+  .sub { font: 400 14px/1.5 var(--vl-font-ui); color: var(--vl-text-dim); margin-bottom: 40px; max-width: 560px; }
+  h2 { font: 700 11px/1 var(--vl-font-ui); letter-spacing: 2px; text-transform: uppercase; color: var(--vl-text-dim); margin: 36px 0 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .swatch {
+    background: var(--vl-bg-elev); border: var(--vl-stroke); border-radius: var(--vl-r-tile);
+    padding: 14px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .chip { height: 96px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.04); }
+  .chip-meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .chip-name { font: 700 13px/1 var(--vl-font-ui); color: var(--vl-text); }
+  .chip-token { font: 500 11px/1 var(--vl-font-mono); color: var(--vl-text-dim); }
+  .chip-hex { font: 500 11px/1 var(--vl-font-mono); color: var(--vl-text-faint); }
+  .chip-use { font: 400 12px/1.4 var(--vl-font-ui); color: var(--vl-text-dim); margin-top: 4px; }
+  .row { display: grid; grid-template-columns: 60px 1fr; gap: 14px; align-items: center; padding: 12px 0; border-bottom: var(--vl-stroke); }
+  .row:last-child { border-bottom: 0; }
+  .row .pill { width: 60px; height: 28px; border-radius: var(--vl-r-pill); }
+  .row-label { font: 600 13px/1.2 var(--vl-font-ui); color: var(--vl-text); display: flex; gap: 12px; align-items: baseline; }
+  .row-label code { font: 500 11px/1 var(--vl-font-mono); color: var(--vl-text-dim); }
+  .row-use { font: 400 12px/1.4 var(--vl-font-ui); color: var(--vl-text-dim); margin-top: 2px; }
+  .group { background: var(--vl-bg-elev); border: var(--vl-stroke); border-radius: var(--vl-r-tile); padding: 14px 18px; }
+</style>
+</head>
+<body>
+  <h1>Color Palette</h1>
+  <p class="sub">A 4-surface dark canvas, one accent (teal), and four semantic phase colors. Reverse-mapped from <code style="font-family:var(--vl-font-mono);font-size:12px;color:var(--vl-text-dim)">VoltraTheme.swift</code>.</p>
+
+  <h2>Surface ramp</h2>
+  <div class="grid">
+    <div class="swatch"><div class="chip" style="background: var(--vl-bg)"></div>
+      <div class="chip-meta"><span class="chip-name">Canvas</span><span class="chip-token">--vl-bg</span><span class="chip-hex">#0a0e0c</span></div>
+      <span class="chip-use">Page background. Almost-black with a green hint.</span></div>
+    <div class="swatch"><div class="chip" style="background: var(--vl-bg-elev)"></div>
+      <div class="chip-meta"><span class="chip-name">Surface</span><span class="chip-token">--vl-bg-elev</span><span class="chip-hex">#11181a</span></div>
+      <span class="chip-use">Tiles, sheets, primary cards.</span></div>
+    <div class="swatch"><div class="chip" style="background: var(--vl-bg-elev-2)"></div>
+      <div class="chip-meta"><span class="chip-name">Nested</span><span class="chip-token">--vl-bg-elev-2</span><span class="chip-hex">#1a2426</span></div>
+      <span class="chip-use">Chips inside tiles, hover, pressed.</span></div>
+    <div class="swatch"><div class="chip" style="background: var(--vl-border); border:1px solid var(--vl-bg-elev)"></div>
+      <div class="chip-meta"><span class="chip-name">Hairline</span><span class="chip-token">--vl-border</span><span class="chip-hex">#1f2c2e</span></div>
+      <span class="chip-use">1px borders around every elevated surface.</span></div>
+  </div>
+
+  <h2>Text on canvas</h2>
+  <div class="group">
+    <div class="row"><span class="pill" style="background: var(--vl-text)"></span>
+      <div><div class="row-label">Primary text <code>--vl-text · #e8f4f1</code></div><div class="row-use">Big readouts, headlines, row text.</div></div></div>
+    <div class="row"><span class="pill" style="background: var(--vl-text-dim)"></span>
+      <div><div class="row-label">Dim text <code>--vl-text-dim · #8aa39e</code></div><div class="row-use">Tile labels, secondary copy, units, meta.</div></div></div>
+    <div class="row"><span class="pill" style="background: var(--vl-text-faint)"></span>
+      <div><div class="row-label">Faint text <code>--vl-text-faint · #4a5f5b</code></div><div class="row-use">Placeholders, disabled, never-data.</div></div></div>
+  </div>
+
+  <h2>Accent + phase</h2>
+  <div class="group">
+    <div class="row"><span class="pill" style="background: var(--vl-accent)"></span>
+      <div><div class="row-label">Accent <code>--vl-accent · #00d4aa</code></div><div class="row-use">Brand teal. PULL phase, primary CTAs, connection state, the icon. Used sparingly.</div></div></div>
+    <div class="row"><span class="pill" style="background: var(--vl-accent-dim)"></span>
+      <div><div class="row-label">Accent dim <code>--vl-accent-dim · #007a62</code></div><div class="row-use">Pressed / muted accent state.</div></div></div>
+    <div class="row"><span class="pill" style="background: var(--vl-pull)"></span>
+      <div><div class="row-label">Pull (concentric) <code>--vl-pull · #00d4aa</code></div><div class="row-use">PHASE tile + force chart segment when going up.</div></div></div>
+    <div class="row"><span class="pill" style="background: var(--vl-return)"></span>
+      <div><div class="row-label">Return (eccentric) <code>--vl-return · #ffb84d</code></div><div class="row-use">PHASE tile + force chart segment when going down.</div></div></div>
+    <div class="row"><span class="pill" style="background: var(--vl-transition)"></span>
+      <div><div class="row-label">Transition <code>--vl-transition · #6c8de0</code></div><div class="row-use">Between-rep transition. Force chart only.</div></div></div>
+    <div class="row"><span class="pill" style="background: var(--vl-idle)"></span>
+      <div><div class="row-label">Idle <code>--vl-idle · #4a5f5b</code></div><div class="row-use">Phase = idle. No active set.</div></div></div>
+  </div>
+
+  <h2>Status</h2>
+  <div class="group">
+    <div class="row"><span class="pill" style="background: var(--vl-warn)"></span>
+      <div><div class="row-label">Warn <code>--vl-warn · #ff7a4d</code></div><div class="row-use">Recoverable: BT off, no telemetry for 2 s, low battery.</div></div></div>
+    <div class="row"><span class="pill" style="background: var(--vl-danger)"></span>
+      <div><div class="row-label">Danger <code>--vl-danger · #ff4d6d</code></div><div class="row-use">Hard errors. The BOTTOM marker on the force chart. Reserved.</div></div></div>
+    <div class="row"><span class="pill" style="background: var(--vl-fresh)"></span>
+      <div><div class="row-label">Fresh data <code>--vl-fresh · rgb(51,217,102)</code></div><div class="row-use">Pulse dot when HealthKit data is &lt; 5 s old. Distinct from accent on purpose.</div></div></div>
+    <div class="row"><span class="pill" style="background: var(--vl-fresh-stale)"></span>
+      <div><div class="row-label">Stale data <code>--vl-fresh-stale · rgb(89,89,89)</code></div><div class="row-use">Pulse dot when data has gone stale.</div></div></div>
+  </div>
+
+  <h2>Phase washes (12% tints — used on phase tile only)</h2>
+  <div class="grid">
+    <div class="swatch" style="background: var(--vl-pull-wash); border-color: var(--vl-pull)">
+      <div class="chip-meta"><span class="chip-name" style="color: var(--vl-pull)">Pull wash</span><span class="chip-token">--vl-pull-wash</span><span class="chip-hex">rgba(0,212,170,.12)</span></div></div>
+    <div class="swatch" style="background: var(--vl-return-wash); border-color: var(--vl-return)">
+      <div class="chip-meta"><span class="chip-name" style="color: var(--vl-return)">Return wash</span><span class="chip-token">--vl-return-wash</span><span class="chip-hex">rgba(255,184,77,.12)</span></div></div>
+    <div class="swatch" style="background: var(--vl-transition-wash); border-color: var(--vl-transition)">
+      <div class="chip-meta"><span class="chip-name" style="color: var(--vl-transition)">Transition wash</span><span class="chip-token">--vl-transition-wash</span><span class="chip-hex">rgba(108,141,224,.08)</span></div></div>
+  </div>
+</body>
+</html>

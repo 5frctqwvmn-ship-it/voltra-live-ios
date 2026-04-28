@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>VOLTRA Live — Components</title>
+<link rel="stylesheet" href="colors_and_type.css">
+<style>
+  html, body { margin: 0; background: var(--vl-bg); color: var(--vl-text); font-family: var(--vl-font-ui); }
+  body { padding: 48px; min-height: 100vh; box-sizing: border-box; }
+  h1 { font: 700 22px/1 var(--vl-font-ui); letter-spacing: 1px; text-transform: uppercase; margin: 0 0 8px; }
+  .sub { font: 400 14px/1.5 var(--vl-font-ui); color: var(--vl-text-dim); margin-bottom: 40px; max-width: 620px; }
+  h2 { font: 700 11px/1 var(--vl-font-ui); letter-spacing: 2px; text-transform: uppercase; color: var(--vl-text-dim); margin: 36px 0 14px; }
+  .stack { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .row4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+
+  /* Tile */
+  .tile {
+    background: var(--vl-bg-elev); border: var(--vl-stroke); border-radius: var(--vl-r-tile);
+    padding: 18px 20px; min-height: 132px;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .tile-label { font: 700 11px/1 var(--vl-font-ui); letter-spacing: 2px; text-transform: uppercase; color: var(--vl-text-dim); }
+  .tile-value { font: 700 72px/.95 var(--vl-font-mono); font-variant-numeric: tabular-nums; color: var(--vl-text); }
+  .tile-value .unit { font: 500 22px/1 var(--vl-font-mono); color: var(--vl-text-dim); margin-left: 6px; }
+
+  /* Phase tile (active = pull) */
+  .tile.phase-pull { background: var(--vl-pull-wash); border-color: rgba(0,212,170,.35); }
+  .tile.phase-return { background: var(--vl-return-wash); border-color: rgba(255,184,77,.35); }
+  .tile.phase-idle { background: var(--vl-bg-elev); }
+  .phase-value { font: 700 52px/1 var(--vl-font-ui); }
+
+  /* Mid tile (HR/KCAL) */
+  .tile-mid { padding: 16px 18px; min-height: 0; gap: 10px; }
+  .tile-mid .top { display: flex; align-items: center; gap: 8px; }
+  .tile-mid .ico { width: 14px; height: 14px; }
+  .tile-mid .v { font: 700 28px/1 var(--vl-font-mono); font-variant-numeric: tabular-nums; }
+  .tile-mid .cap { font: 400 12px/1 var(--vl-font-ui); color: var(--vl-text-dim); }
+  .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--vl-fresh); box-shadow: 0 0 6px var(--vl-fresh); animation: pulse 1s ease-in-out infinite; }
+  .pulse-dot.stale { background: var(--vl-fresh-stale); animation: none; box-shadow: none; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.45 } }
+
+  /* Buttons */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    height: var(--vl-tap-cta); padding: 0 22px; border: 0; border-radius: var(--vl-r-button);
+    font: 600 15px/1 var(--vl-font-ui); cursor: pointer; }
+  .btn-primary { background: var(--vl-accent); color: #002b22; }
+  .btn-secondary { background: var(--vl-bg-elev-2); color: var(--vl-text); border: 1px solid var(--vl-border); }
+  .btn-ghost { background: transparent; color: var(--vl-text-dim); border: 1px solid var(--vl-border); }
+  .btn-danger { background: transparent; color: var(--vl-danger); border: 1px solid rgba(255,77,109,.35); }
+  .btn:disabled, .btn-disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Discovery row */
+  .disc {
+    display: flex; align-items: center; gap: 14px;
+    background: var(--vl-bg-elev); border: var(--vl-stroke); border-radius: var(--vl-r-tile);
+    padding: 14px 18px; min-height: 64px;
+  }
+  .disc .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--vl-accent); }
+  .disc .name { font: 600 16px/1.2 var(--vl-font-ui); color: var(--vl-text); flex: 1; }
+  .disc .meta { font: 400 13px/1.2 var(--vl-font-ui); color: var(--vl-text-dim); font-family: var(--vl-font-mono); }
+
+  /* Compare strip */
+  .compare {
+    background: var(--vl-bg-elev); border: var(--vl-stroke); border-radius: var(--vl-r-tile);
+    display: grid; grid-template-columns: repeat(3, 1fr); padding: 14px 0;
+  }
+  .compare .cell { padding: 4px 18px; text-align: left; border-right: var(--vl-stroke); display: flex; flex-direction: column; gap: 8px; }
+  .compare .cell:last-child { border-right: 0; }
+  .compare .lbl { font: 700 11px/1 var(--vl-font-ui); letter-spacing: 1.5px; text-transform: uppercase; color: var(--vl-text-dim); }
+  .compare .val { font: 700 24px/1 var(--vl-font-mono); font-variant-numeric: tabular-nums; }
+  .compare .delta { font: 500 12px/1 var(--vl-font-mono); }
+  .compare .delta.up { color: var(--vl-pull); }
+  .compare .delta.down { color: var(--vl-return); }
+
+  /* Connect card */
+  .connect {
+    background: var(--vl-bg-elev); border: var(--vl-stroke); border-radius: var(--vl-r-tile);
+    padding: 40px; text-align: center; max-width: 460px;
+  }
+  .connect .mark { width: 72px; height: 72px; margin: 0 auto 20px; }
+  .connect h3 { font: 700 28px/1.1 var(--vl-font-ui); margin: 0 0 8px; }
+  .connect p { font: 400 15px/1.5 var(--vl-font-ui); color: var(--vl-text-dim); margin: 0 0 28px; }
+
+  /* Status banner */
+  .banner { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: var(--vl-r-button); border: 1px solid; font: 500 14px/1.3 var(--vl-font-ui); }
+  .banner.warn { background: rgba(255,122,77,.08); border-color: rgba(255,122,77,.35); color: var(--vl-warn); }
+  .banner.danger { background: rgba(255,77,109,.08); border-color: rgba(255,77,109,.35); color: var(--vl-danger); }
+  .banner.ok { background: rgba(0,212,170,.06); border-color: rgba(0,212,170,.35); color: var(--vl-accent); }
+
+  /* History row */
+  .hist {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 24px; align-items: center;
+    background: var(--vl-bg-elev); border: var(--vl-stroke); border-radius: var(--vl-r-tile);
+    padding: 16px 20px;
+  }
+  .hist .when { font: 500 14px/1.2 var(--vl-font-ui); }
+  .hist .sets { font: 700 16px/1 var(--vl-font-mono); font-variant-numeric: tabular-nums; color: var(--vl-text); }
+  .hist .dur { font: 400 13px/1 var(--vl-font-mono); color: var(--vl-text-dim); }
+
+  /* Force chart */
+  .chart { background: var(--vl-bg-elev); border: var(--vl-stroke); border-radius: var(--vl-r-tile); padding: 16px; }
+  .chart svg { display: block; width: 100%; height: 140px; }
+
+  .caption { font: 400 12px/1.5 var(--vl-font-ui); color: var(--vl-text-faint); margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>UI Kit</h1>
+  <p class="sub">Every reusable surface in VOLTRA Live, rendered on one page. Copy from here when designing new screens. Open <a href="preview/index.html" style="color:var(--vl-accent)">preview/index.html</a> for the full design system.</p>
+
+  <h2>TileView — primary live readout</h2>
+  <div class="row2">
+    <div class="tile">
+      <div class="tile-label">REPS</div>
+      <div class="tile-value">12</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">FORCE</div>
+      <div class="tile-value">128<span class="unit">lb</span></div>
+    </div>
+  </div>
+  <p class="caption">Big mono numerals, tabular. Label is uppercase, +2.0 px tracked. 18 px tile padding, 18 px radius, 1 px hairline.</p>
+
+  <h2>PhaseTileView — phase-tinted background, animates 12 → 20 % wash on phase change</h2>
+  <div class="row4">
+    <div class="tile phase-pull">
+      <div class="tile-label" style="color: var(--vl-pull)">PHASE</div>
+      <div class="phase-value" style="color: var(--vl-pull)">PULL</div>
+    </div>
+    <div class="tile phase-return">
+      <div class="tile-label" style="color: var(--vl-return)">PHASE</div>
+      <div class="phase-value" style="color: var(--vl-return)">RETURN</div>
+    </div>
+    <div class="tile phase-idle">
+      <div class="tile-label">PHASE</div>
+      <div class="phase-value" style="color: var(--vl-idle)">IDLE</div>
+    </div>
+    <div class="tile">
+      <div class="tile-label">REST</div>
+      <div class="tile-value" style="font-size:52px">00:42</div>
+    </div>
+  </div>
+
+  <h2>HR / KCAL pair — secondary tiles with pulse dot</h2>
+  <div class="row2">
+    <div class="tile tile-mid">
+      <div class="top">
+        <svg class="ico" viewBox="0 0 16 16" fill="var(--vl-danger)"><path d="M8 14s-5-3.5-5-7a3 3 0 0 1 5-2 3 3 0 0 1 5 2c0 3.5-5 7-5 7Z"/></svg>
+        <span class="tile-label" style="color: var(--vl-text-dim)">HR</span>
+        <span class="pulse-dot" style="margin-left:auto"></span>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:6px">
+        <span class="v">142</span><span class="cap">bpm</span>
+      </div>
+    </div>
+    <div class="tile tile-mid">
+      <div class="top">
+        <svg class="ico" viewBox="0 0 16 16" fill="var(--vl-warn)"><path d="M8 1s2 3 2 5a2 2 0 1 1-4 0c0-1 .5-2 1-2.5C5 5 4 6.5 4 9a4 4 0 0 0 8 0c0-3-2-5.5-4-8Z"/></svg>
+        <span class="tile-label" style="color: var(--vl-text-dim)">KCAL</span>
+        <span class="pulse-dot stale" style="margin-left:auto"></span>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:6px">
+        <span class="v">87</span><span class="cap">kcal</span>
+      </div>
+    </div>
+  </div>
+  <p class="caption">Pulse dot is fresh-green (1 Hz blink) when HealthKit data is &lt; 5 s old, grey when stale.</p>
+
+  <h2>CompareStripView — set vs last session</h2>
+  <div class="compare">
+    <div class="cell"><span class="lbl">LAST · REPS</span><span class="val">10</span><span class="delta up">+2 vs last</span></div>
+    <div class="cell"><span class="lbl">BEST · FORCE</span><span class="val">142 <span style="font-size:13px;color:var(--vl-text-dim)">lb</span></span><span class="delta down">−14 vs best</span></div>
+    <div class="cell"><span class="lbl">TARGET</span><span class="val">120 <span style="font-size:13px;color:var(--vl-text-dim)">lb</span></span><span class="delta">on track</span></div>
+  </div>
+
+  <h2>Discovery row — Connect screen</h2>
+  <div class="stack">
+    <div class="disc">
+      <span class="dot"></span>
+      <span class="name">VOLTRA-3F2A</span>
+      <span class="meta">−54 dBm</span>
+      <button class="btn btn-primary" style="height:36px;padding:0 16px;font-size:13px">Connect</button>
+    </div>
+    <div class="disc">
+      <span class="dot" style="background:var(--vl-text-faint)"></span>
+      <span class="name" style="color:var(--vl-text-dim)">VOLTRA-9C7B</span>
+      <span class="meta">−81 dBm</span>
+      <button class="btn btn-ghost" style="height:36px;padding:0 16px;font-size:13px">Connect</button>
+    </div>
+  </div>
+
+  <h2>Buttons</h2>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+    <button class="btn btn-primary">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9 1 3 9h4l-1 6 6-8H8l1-6Z"/></svg>
+      Pair VOLTRA
+    </button>
+    <button class="btn btn-secondary">Re-scan</button>
+    <button class="btn btn-ghost">Cancel</button>
+    <button class="btn btn-danger">Disconnect</button>
+    <button class="btn btn-primary btn-disabled">Pair VOLTRA</button>
+  </div>
+  <p class="caption">Primary: filled accent. Secondary: elevated grey. Ghost: hairline only. Danger: red on transparent. All 50 px tall.</p>
+
+  <h2>Status banners</h2>
+  <div class="stack">
+    <div class="banner ok">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><circle cx="8" cy="8" r="6"/></svg>
+      Connected to VOLTRA-3F2A · streaming telemetry
+    </div>
+    <div class="banner warn">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1 1 14h14L8 1Zm0 5v4M8 12v.5"/></svg>
+      Bluetooth is off. Turn on Bluetooth in Settings to scan for VOLTRA.
+    </div>
+    <div class="banner danger">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><circle cx="8" cy="8" r="6"/></svg>
+      Lost connection — last telemetry 12 s ago.
+    </div>
+  </div>
+
+  <h2>Connect card — full-screen centered</h2>
+  <div class="connect">
+    <img class="mark" src="../assets/app-icon-1024.png" alt="VOLTRA mark">
+    <h3>VOLTRA Live</h3>
+    <p>Pair your VOLTRA cable to start mirroring live force, reps, and phase telemetry.</p>
+    <button class="btn btn-primary" style="width:100%">Scan for VOLTRA</button>
+  </div>
+
+  <h2>History rows</h2>
+  <div class="stack">
+    <div class="hist"><div><div class="when">Tuesday — 6:42 PM</div><div class="dur" style="margin-top:4px">12 min · top force 142 lb</div></div><span class="sets">4</span><span class="dur">sets</span></div>
+    <div class="hist"><div><div class="when">Monday — 7:08 PM</div><div class="dur" style="margin-top:4px">18 min · top force 158 lb</div></div><span class="sets">5</span><span class="dur">sets</span></div>
+    <div class="hist"><div><div class="when">Sunday — 9:15 AM</div><div class="dur" style="margin-top:4px">22 min · top force 165 lb</div></div><span class="sets">6</span><span class="dur">sets</span></div>
+  </div>
+
+  <h2>ForceChartView — 30-second rolling, phase-segmented line</h2>
+  <div class="chart">
+    <svg viewBox="0 0 600 140" preserveAspectRatio="none">
+      <!-- BOTTOM marker -->
+      <line x1="0" y1="120" x2="600" y2="120" stroke="var(--vl-danger)" stroke-width="1" stroke-dasharray="4 4" opacity="0.5"/>
+      <text x="8" y="116" font-family="var(--vl-font-mono)" font-size="9" fill="var(--vl-danger)" opacity="0.7">BOTTOM</text>
+      <!-- gridlines -->
+      <line x1="0" y1="40" x2="600" y2="40" stroke="var(--vl-border)" stroke-width="1"/>
+      <line x1="0" y1="80" x2="600" y2="80" stroke="var(--vl-border)" stroke-width="1"/>
+      <!-- phase-segmented line: pull, return, transition, pull, return... -->
+      <polyline points="0,110 30,80 60,30 90,25" fill="none" stroke="var(--vl-pull)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="90,25 120,40 150,90 180,115" fill="none" stroke="var(--vl-return)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="180,115 210,118 240,116" fill="none" stroke="var(--vl-transition)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="240,116 270,80 300,28 330,22" fill="none" stroke="var(--vl-pull)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="330,22 360,38 390,92 420,114" fill="none" stroke="var(--vl-return)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="420,114 450,118 480,116" fill="none" stroke="var(--vl-transition)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="480,116 510,90 540,50 570,32 600,28" fill="none" stroke="var(--vl-pull)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </div>
+  <p class="caption">30 s rolling window. Each rep paints PULL → RETURN → TRANSITION segments. Red dashed line = BOTTOM (rep boundary).</p>
+</body>
+</html>

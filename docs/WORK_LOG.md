@@ -1409,3 +1409,55 @@ including UI redesigns and one root-cause fix.
    IDLE.
 9. **Home connected pill.** 1 Voltra paired → just `Left •` or
    `Right •`. Both paired → `Left • Right •`. Neither → `Not paired`.
+
+## 2026-04-28 21:00 UTC — design-studio branch: spec-only import
+
+Branch: `design-studio` (forked from `main` at `0bab8d0`, which is b51).
+Scope: **design-system spec import only — no SwiftUI / project / Info.plist
+changes**. Main with the b51 ship is untouched.
+
+Added under repo root:
+
+- `design-system/README.md` — content + visual fundamentals (dark-only,
+  one teal accent, mono tabular numerals, 18 px tile / 12 px button
+  radius, no gradients/shadows, operator voice, reserved terms PULL /
+  RETURN / TRANSITION / REST).
+- `design-system/SKILL.md` — agent rulebook for new screens. Hard rules
+  enumerated (one accent, 4-tile cap, every icon labelled, etc.).
+- `design-system/colors_and_type.css` — every color/type/spacing/radius
+  token with names. Mirror of `VoltraLive/Views/VoltraTheme.swift`.
+  **Not** imported by the iOS app — Swift theme remains source of truth.
+- `design-system/ui-kit.html` — single-page UI kit, every component
+  variant rendered against the dark canvas.
+- `design-system/preview/` — browseable gallery (palette, type ramp,
+  components, screens, iconography).
+- `assets/app-icon-1024.png` — mirror of the in-bundle app icon.
+
+**Conflicts the spec implies vs b51 (logged for review, NOT acted on):**
+
+1. `SKILL.md` rule: every icon has a label. b51's tap-to-toggle motor
+   icons (`arrow.down.to.line` for ecc, `link` for chains) are bare
+   SF Symbols — would need adjacent text labels to comply.
+2. Reserved-term rule: eccentric is called **RETURN** in the spec, not
+   "ecc". b51 resistance tile, banner copy, and toggle hints all use
+   "ecc"/"eccentric" — copy change required to comply.
+3. Information-density rule: at most 4 primary tiles per live screen.
+   b51 LiveCapture has accumulated more than 4 plus a 4-element
+   resistance tile (headline + ecc row + chains row + subline).
+4. The `colors_and_type.css` token names match `VoltraTheme.swift`
+   exactly, so **no token-level conflicts** detected on a name match
+   pass. Visual conformance not formally verified.
+
+These are recorded so a follow-up branch / build (or the studio in a
+next pass) can choose how to resolve each one. None resolved here.
+
+**Files that were already in repo and did not change:** `AGENTS.md`,
+`README.md`, `docs/handoff/05_BLE_AND_PROTOCOL.md`, `06_HEALTHKIT.md`,
+`09_RELEASE_AND_SIGNING.md`, `VoltraLive/Assets.xcassets/AppIcon.appiconset/*`,
+`VoltraLive/Assets.xcassets/AccentColor.colorset/Contents.json` — the
+zip shipped these as context, byte-identical to main.
+
+**No version bump.** No Info.plist or project.yml change. CI build/release
+behavior on this branch is whatever `main` had at `0bab8d0`.
+
+**Cost:** lite (file copies + this WORK_LOG entry).
