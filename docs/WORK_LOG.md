@@ -692,3 +692,17 @@ Net effect with two Voltras paired: the live tile, rep counter, and drop-cascade
 Sacred files (Telemetry struct in TelemetryExtractor.swift) are not modified — the merged struct is populated via memberwise property assignment after `Telemetry()`.
 
 Files changed: VoltraLive/VoltraLiveApp.swift, VoltraLive/Info.plist, project.yml, docs/WORK_LOG.md
+
+## 2026-04-27 — b42 "Voltra picker"
+Pre-workout Voltra mode picker. User direction: "having them dual mode by default is not by intent. I want to be able to pair them and then engage with them separately. The Voltra should be selected pre-workout (not inside LiveCaptureView)."
+
+Changes:
+- `DualMode.swift`: new `WorkoutMode` enum with four cases: `.singleLeft`, `.singleRight`, `.independent`, `.combined`. Each case has `label`, `subtitle`, and `icon` for the picker UI.
+- `MultiDeviceManager`: new `@Published var workoutMode: WorkoutMode = .singleLeft`. Default is single-left so pairing both does NOT auto-engage dual mode.
+- `VoltraLiveApp` telemetry routing: `multi.onLeftTelemetry` / `onRightTelemetry` / `onCombinedTelemetry` now consult `multi.workoutMode` when both sides are connected. .singleLeft -> only left forwarded; .singleRight -> only right; .independent -> both raw; .combined -> merged virtual-twin reading. Single-side connection still passes through unchanged.
+- New `VoltraLive/Views/WorkoutVoltraPickerSheet.swift`: full-sheet picker with one row per mode (icon + label + subtitle). Selection sets `mdm.workoutMode` then calls `onConfirm()`.
+- `LoggingHomeView`: new `beginStart(dayType:customLabel:)` indirection. When both Voltras are paired, taps on day tiles or the custom-day Start route through the picker sheet first; otherwise startSession runs immediately. New `PendingStart` struct carries the (dayType, customLabel?) tuple across the sheet boundary.
+
+Sacred files (Telemetry struct, VoltraProtocol, etc.) unchanged.
+
+Files changed: VoltraLive/BLE/Dual/DualMode.swift, VoltraLive/BLE/Dual/MultiDeviceManager.swift, VoltraLive/VoltraLiveApp.swift, VoltraLive/Views/WorkoutVoltraPickerSheet.swift (new), VoltraLive/Logging/Views/LoggingHomeView.swift, VoltraLive/Info.plist, project.yml, docs/WORK_LOG.md

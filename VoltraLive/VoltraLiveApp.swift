@@ -179,31 +179,55 @@ struct VoltraLiveApp: App {
                     // This makes both single-paired-via-MDM and dual-paired
                     // flows feed the same SessionStore + LoggingStore that
                     // the legacy single-device manager does.
+                    // Build 42: routing now honors `multi.workoutMode`.
+                    //   .singleLeft  -> only left forwarded
+                    //   .singleRight -> only right forwarded
+                    //   .independent -> both forwarded raw (no summing,
+                    //                   user sees combined activity in tile)
+                    //   .combined    -> merged virtual-twin reading
                     multi.onLeftTelemetry = { [weak multi] t in
-                        // Forward only when the right side is NOT connected,
-                        // so we don't double-count alongside the combined
-                        // fanout below.
                         guard let m = multi else { return }
-                        if !m.right.connectionState.isConnected {
+                        let bothConnected = m.left.connectionState.isConnected
+                                          && m.right.connectionState.isConnected
+                        if !bothConnected {
+                            // Only one side connected: pass through.
+                            if !m.right.connectionState.isConnected {
+                                telemetryHandler(t)
+                            }
+                            return
+                        }
+                        // Both connected: respect workoutMode.
+                        switch m.workoutMode {
+                        case .singleLeft, .independent:
                             telemetryHandler(t)
+                        case .singleRight, .combined:
+                            break  // singleRight ignores left; combined waits for onCombinedTelemetry
                         }
                     }
                     multi.onRightTelemetry = { [weak multi] t in
                         guard let m = multi else { return }
-                        if !m.left.connectionState.isConnected {
+                        let bothConnected = m.left.connectionState.isConnected
+                                          && m.right.connectionState.isConnected
+                        if !bothConnected {
+                            if !m.left.connectionState.isConnected {
+                                telemetryHandler(t)
+                            }
+                            return
+                        }
+                        switch m.workoutMode {
+                        case .singleRight, .independent:
                             telemetryHandler(t)
+                        case .singleLeft, .combined:
+                            break
                         }
                     }
                     multi.onCombinedTelemetry = { [weak multi] c in
-                        // Only fire when both sides are actually connected;
-                        // CombinedTelemetry is computed on every per-device
-                        // packet but its left/right inputs are nil-safe, so
-                        // gating here prevents single-side packets from
-                        // re-entering the pipeline as half-populated
-                        // 'combined' readings.
+                        // Combined virtual-twin reading: only forwarded when
+                        // BOTH sides are connected AND user picked .combined.
                         guard let m = multi,
                               m.left.connectionState.isConnected,
-                              m.right.connectionState.isConnected else { return }
+                              m.right.connectionState.isConnected,
+                              m.workoutMode == .combined else { return }
                         // Synthesize a Telemetry struct from the merged
                         // combined reading. Phase comes from whichever side
                         // is currently in a non-idle phase (caller-side

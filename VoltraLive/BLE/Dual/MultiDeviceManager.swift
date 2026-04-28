@@ -72,6 +72,18 @@ final class MultiDeviceManager: ObservableObject {
     @Published var mode: DualMode = .independent
     @Published private(set) var state: MultiState = .idle
 
+    /// Build 42: workout-scoped mode the user picks pre-workout when both
+    /// Voltras are paired. Drives telemetry routing in VoltraLiveApp:
+    ///   .singleLeft  -> only left telemetry forwarded.
+    ///   .singleRight -> only right telemetry forwarded.
+    ///   .independent -> both sides forwarded raw (no summing).
+    ///   .combined    -> virtual-twin merged reading (force/reps summed).
+    /// Default `.singleLeft` honors the user direction "having them dual
+    /// mode by default is not by intent" \u2014 even when both are paired,
+    /// only one is engaged unless they explicitly opt into a dual mode.
+    /// Persisted in memory only; resets to .singleLeft on app relaunch.
+    @Published var workoutMode: WorkoutMode = .singleLeft
+
     // MARK: Telemetry routing hooks (set by the app)
     /// Fired on every Telemetry packet from the LEFT device.
     var onLeftTelemetry:  ((Telemetry) -> Void)?

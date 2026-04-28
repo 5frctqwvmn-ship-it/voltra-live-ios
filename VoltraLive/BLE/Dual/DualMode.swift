@@ -42,6 +42,54 @@ enum DualMode: String, CaseIterable, Equatable {
     }
 }
 
+// MARK: - WorkoutMode (b42)
+
+/// Build 42: pre-workout choice when both Voltras are paired. The user told
+/// us they want both Voltras pairable but each engaged separately by
+/// default \u2014 "having them dual mode by default is not by intent". This
+/// mode is selected on a sheet that appears between tapping a day-tile and
+/// startSession, and stays in effect for the duration of the workout.
+///
+///   .singleLeft  / .singleRight \u2014 only one Voltra produces telemetry; the
+///                                  other stays paired but idle.
+///   .independent                 \u2014 both Voltras are tracked side-by-side,
+///                                  reps/force not summed.
+///   .combined                    \u2014 virtual-twin: weights split, telemetry
+///                                  summed (the legacy DualMode .combined).
+enum WorkoutMode: String, CaseIterable, Equatable {
+    case singleLeft
+    case singleRight
+    case independent
+    case combined
+
+    var label: String {
+        switch self {
+        case .singleLeft:  return "Left only"
+        case .singleRight: return "Right only"
+        case .independent: return "Independent"
+        case .combined:    return "Combined"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .singleLeft:  return "Use just the Left Voltra. Right stays paired but idle."
+        case .singleRight: return "Use just the Right Voltra. Left stays paired but idle."
+        case .independent: return "Track both Voltras side-by-side. Reps and force are not summed."
+        case .combined:    return "Treat both Voltras as one. Set total weight; force and reps are summed."
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .singleLeft:  return "l.circle.fill"
+        case .singleRight: return "r.circle.fill"
+        case .independent: return "square.split.2x1"
+        case .combined:    return "link"
+        }
+    }
+}
+
 // MARK: - DeviceSlot
 
 /// Stable identity for a Voltra in the dual-Voltra session. Maps to a fixed

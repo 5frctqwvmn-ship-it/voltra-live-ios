@@ -27,6 +27,13 @@ struct LoggingHomeView: View {
 
     @State private var pickedDayType: DayType? = nil
     @State private var customLabel: String = ""
+    /// Build 42: pre-workout Voltra picker. When both Voltras are paired,
+    /// tapping a day tile (or starting a custom workout) defers calling
+    /// `logging.startSession` until the user picks a WorkoutMode in the
+    /// sheet. `pendingStart` carries the (dayType, customLabel?) tuple
+    /// across the sheet boundary.
+    @State private var pendingStart: PendingStart? = nil
+    @State private var showingWorkoutModeSheet: Bool = false
     /// Build 30: inline custom-day expander. Replaces the prior modal sheet —
     /// tapping the Custom tile expands a textfield + recent-labels chip row
     /// directly below the grid, no extra navigation.
@@ -41,6 +48,19 @@ struct LoggingHomeView: View {
     @FocusState private var customFieldFocused: Bool
 
     private let primaryDayTypes: [DayType] = [.leg, .back, .chest, .arm]
+
+    /// Build 42: payload describing the workout the user wants to start,
+    /// held while the WorkoutVoltraPickerSheet is up.
+    private struct PendingStart: Equatable {
+        let dayType: DayType
+        let customLabel: String?
+    }
+
+    /// True when both Voltras are paired via MultiDeviceManager. Drives
+    /// whether tapping a day tile shows the picker first.
+    private var bothVoltrasPaired: Bool {
+        mdm.left.connectionState.isConnected && mdm.right.connectionState.isConnected
+    }
 
     var body: some View {
         NavigationStack {
@@ -136,6 +156,17 @@ struct LoggingHomeView: View {
             }
             .sheet(isPresented: $showingDebug) {
                 DebugView()
+            }
+            // Build 42: dual-Voltra workout-mode picker. Only shown when
+            // both Voltras are paired (gated upstream in `beginStart`).
+            .sheet(isPresented: $showingWorkoutModeSheet) {
+                WorkoutVoltraPickerSheet {
+                    if let p = pendingStart {
+                        commitStart(p)
+                    }
+                    pendingStart = nil
+                }
+                .environmentObject(mdm)
             }
             .preferredColorScheme(.dark)
         }
@@ -269,8 +300,7 @@ struct LoggingHomeView: View {
 
     private func dayTile(_ dt: DayType) -> some View {
         Button {
-            logging.startSession(dayType: dt)
-            pickedDayType = dt
+            beginStart(dayType: dt, customLabel: nil)
         } label: {
             VStack(alignment: .leading, spacing: 12) {
                 Image(systemName: dt.symbol)
@@ -491,10 +521,32 @@ struct LoggingHomeView: View {
         // free-form name is stored as customLabel so the home tile can
         // display "Push" under the Chest group, etc. If the user kept the
         // group as Custom, behavior matches build 30 exactly.
-        logging.startSession(dayType: pickedGroup, customLabel: label)
+        // Build 42: route through beginStart so the dual-Voltra picker
+        // also gates custom workouts when both Voltras are paired.
+        beginStart(dayType: pickedGroup, customLabel: label)
         showingCustomInline = false
         customFieldFocused = false
-        pickedDayType = pickedGroup
+    }
+
+    /// Build 42: shared entry point for starting a workout from any tile or
+    /// the custom-day card. If both Voltras are paired, defers to the
+    /// WorkoutVoltraPickerSheet; otherwise starts the session immediately.
+    private func beginStart(dayType: DayType, customLabel: String?) {
+        if bothVoltrasPaired {
+            pendingStart = PendingStart(dayType: dayType, customLabel: customLabel)
+            showingWorkoutModeSheet = true
+        } else {
+            commitStart(PendingStart(dayType: dayType, customLabel: customLabel))
+        }
+    }
+
+    private func commitStart(_ p: PendingStart) {
+        if let lbl = p.customLabel {
+            logging.startSession(dayType: p.dayType, customLabel: lbl)
+        } else {
+            logging.startSession(dayType: p.dayType)
+        }
+        pickedDayType = p.dayType
     }
 }
 
