@@ -49,6 +49,22 @@ New protocol-adjacent code goes in **new files only**.
 Before doing anything, **repeat the user's request back** so they can correct
 your understanding. Don't just start executing.
 
+## Cost-awareness convention
+
+The user wants visibility into how token-heavy each action is, AND prefers
+to run heavy research / model-council prompts on their own Perplexity
+account instead of burning Computer credits.
+
+See **AGENTS.md → "Cost-awareness convention"** for the full rules:
+- Flag medium-or-heavier actions inline (lite / medium / heavy / very heavy)
+- For heavy research and model councils, DRAFT a self-contained prompt at
+  `docs/handoff/COUNCIL_*_PROMPT.md` for the user to run; only execute the
+  heavy work on Computer when the user explicitly says "do it yourself."
+
+Existing council prompts in this repo:
+- `COUNCIL_HEALTHKIT_PROMPT.md` — HK permission prompt-on-fresh-install bug
+  (drafted post-b48; awaiting user-run council results before b49 fix).
+
 ## Index of handoff docs
 
 | File | Owns |

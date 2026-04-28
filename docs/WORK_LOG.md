@@ -987,3 +987,59 @@ Files changed: VoltraLive/BLE/Dual/DualMode.swift, VoltraLive/BLE/Dual/MultiDevi
 12. Optional: chain a third exercise and verify SWAP cycles 1 → 2 → 3 → 1 → 2 → ...
 13. Switch to Combined → confirm chain is cleared and combined routing still hits both sides on LOAD/UNLOAD (b47 regression check).
 
+
+---
+
+## 2026-04-28 — Post-b48: cost-awareness convention + HK council prompt
+
+Not a build. Documentation/process change while waiting for user to run
+the HealthKit council prompt.
+
+**User established a persistent preference, applies to all future sessions
+and any agent picking up this repo:**
+
+1. **Cost-awareness bucketing.** Flag every medium-or-heavier action
+   inline as lite / medium / heavy / very heavy before running, with a
+   one-line cost callout after heavier ones. Buckets are mental-model
+   order-of-magnitude only — no specific credit counts ever (the agent
+   does not have a per-action meter; user's Computer settings/billing
+   page is the source of truth).
+2. **Council/heavy-research delegation by default.** The user has a
+   Perplexity model council on their own account. When a task would
+   benefit from a model council OR from heavy multi-source research, the
+   agent DRAFTS a self-contained prompt at
+   `docs/handoff/COUNCIL_*_PROMPT.md` for the user to run. The user runs
+   it and reports back; the agent acts on the result. Only run heavy
+   work directly on Computer when the user explicitly says "do it
+   yourself" or "do the work yourself."
+
+**Files changed:**
+- `AGENTS.md`: new top-level section "Cost-awareness convention (user
+  preference, persistent)" with the full bucketing rubric and council
+  delegation rule.
+- `docs/handoff/00_START_HERE.md`: pointer to the AGENTS.md section so
+  agents reading docs in order also catch it; index of existing council
+  prompts.
+- `docs/handoff/COUNCIL_HEALTHKIT_PROMPT.md` (new): self-contained
+  council prompt for the b47/b48-deferred HealthKit
+  prompt-on-fresh-install bug. Includes confirmed facts (entitlements
+  file contents, Info.plist HK strings, CI verify-step proof that
+  `com.apple.developer.healthkit` IS embedded in the signed IPA, app-side
+  code calling `requestAuthorization` from `WindowGroup.onAppear`),
+  hypotheses already ruled out, 7 candidate root causes, and an explicit
+  "How to respond" section asking for: most likely root cause, a
+  pre-build verification step, fix recommendation for b49, confidence
+  level, backup hypothesis, citations. Capped at ~800 words for council
+  efficiency.
+
+**Also stored in user memory** (carries across sessions even if this repo
+is cloned fresh by another agent) under
+`preferences.research.heavy_tasks`.
+
+**Status:** Awaiting user to run `COUNCIL_HEALTHKIT_PROMPT.md` in their
+Perplexity model council and report back. b49 plan will be derived from
+the council's recommendation. No other b49 features in flight.
+
+**Cost callout for this change:** lite. File reads, two edits, one
+markdown write, one memory write, one commit/push. No subagents, no
+polling loops, no model calls beyond this conversation.

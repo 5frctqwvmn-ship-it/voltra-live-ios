@@ -134,6 +134,37 @@ API key role: **App Manager**.
 7. **Honor the unsigned build path.** `CODE_SIGNING_REQUIRED: NO` is intentional — it lets `build.yml` produce dev IPAs without a Team ID. Don't remove these settings.
 8. **`WatchTelemetryMessage` is duplicated** between `VoltraLive/Bridge/PhoneWatchBridge.swift` and `VoltraWatch/WatchTelemetryStore.swift` (no shared framework). They MUST stay in sync. The enum cases use identical raw `String` values for JSON round-tripping.
 
+## Cost-awareness convention (user preference, persistent)
+
+The user wants visibility into how token-heavy each action is. Apply both rules below on every task:
+
+### Lite / medium / heavy bucketing
+
+Before running any action that's **medium** or **heavier**, flag it inline with a bucket label so the user can intercept. Lite actions don't need flagging — they're the noise floor.
+
+- **Lite** (~1× baseline): a chat reply, a file read/edit/write, one web search, one URL fetch, a memory read/write, a single shell command or git op.
+- **Medium** (~3–10×): a `browser_task`, one default-model `run_subagent` on a small task, a CI polling loop (each poll is lite but a 14-iter × 2-loop ship is medium overall), basic image generation, loading a skill with helpers. **A normal ship cycle (commit → push → dry-run → tag → ship → poll both) is medium.**
+- **Heavy** (~20–100×): `wide_research` / `wide_browse` with 10+ entities, a long Opus/GPT-5 subagent run, deep multi-source research, building a full website, video generation, extended-context subagents.
+- **Very heavy** (~100×+): premium video at full quality / multi-minute clips, multi-model councils run by the agent itself, massive wide_research jobs (50+ entities deep).
+
+After heavier actions, give a one-line cost callout (e.g. "this ship was medium: 2 polling loops + several file reads").
+
+These buckets are mental-model order-of-magnitude only. The agent does not have a per-action credit meter; the user's Computer settings/billing page is the source of truth for actual numbers. Never invent specific credit counts.
+
+### Council/heavy-research delegation (default)
+
+The user has a Perplexity model council on their own account. **By default, when a task would benefit from a model council OR from heavy research (multi-frontier-model comparison, deep multi-source synthesis, comparing many entities), DRAFT the prompt for the user to run themselves and save it as a markdown file in `docs/handoff/COUNCIL_*_PROMPT.md`** instead of running the heavy work on Computer credits.
+
+The council prompt must be self-contained:
+- All facts/context grounded in real code and file contents (read the files first — don't paraphrase from memory)
+- Hypotheses already ruled out, with evidence for each
+- An explicit **"How to respond"** section specifying response structure, length cap, and any required sections (root cause, verification step, fix recommendation, confidence level, backup hypothesis, citations)
+- Copy/paste-ready below a `---` line so the user can grab it without editing
+
+The user runs the prompt and reports back the answer; the agent acts on it. **Only run the heavy work directly on Computer when the user explicitly says "do it yourself" or "do the work yourself."**
+
+This convention also lives in the user's persistent memory and applies across all sessions and any future agent that picks up this repo.
+
 ## Known caveats / future migrations
 
 - **`altool` is being deprecated** by Apple. Still works in Xcode 16; migrate to `xcrun notarytool` before Apple removes support.
