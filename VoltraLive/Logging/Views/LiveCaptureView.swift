@@ -698,7 +698,7 @@ struct LiveCaptureView: View {
                 // Confirm the floor in the subline so the user knows the
                 // chain will finalize on the next idle window (no further
                 // drops possible).
-                Text("5 lb floor \u2014 finalizing")
+                Text("5 lb floor \u{2014} finalizing")
                     .font(.system(size: 9))
                     .foregroundColor(VoltraColor.danger.opacity(0.85))
             } else {
