@@ -453,7 +453,10 @@ final class LoggingStore: ObservableObject {
             stepIndex: nextIndex,
             multiplier: pulleyMultiplier
         )
-        // Stop if we've hit the floor or rounding made the step a no-op.
+        // b43: stop firing when we hit the device floor (next equals prev
+        // because the floor clamp is sticky) or when rounding made the step
+        // a no-op. Floor is 5 lb device (= 5 lb single, 10 lb effective
+        // under pulley) — the Voltra hardware minimum.
         let prev = dropChainPlannedLb.last ?? chainAnchorLb
         if next <= 0 || next >= prev { return nil }
         return next
@@ -478,9 +481,10 @@ final class LoggingStore: ObservableObject {
                 stepIndex: i,
                 multiplier: 1.0
             )
-            // Stop on floor or non-progress (each step must be smaller than
-            // the previous, which under fixed step size is guaranteed unless
-            // we hit zero).
+            // b43: stop on floor or non-progress. Once the cascade has
+            // bottomed out at the 5 lb device floor, subsequent steps clamp
+            // to the same value — `next >= last` catches that and prevents
+            // the preview tile from rendering a flat run of 5/5/5/5.
             if next <= 0 { break }
             if let last = out.last, next >= last { break }
             out.append(next)
@@ -609,10 +613,19 @@ final class LoggingStore: ObservableObject {
     /// retiering mid-chain behave correctly: bumping tier from 1 to 2 with
     /// stepIndex=2 means next weight is `anchor − 10×2 = anchor − 20`, not
     /// `prev_drop − 20`. Pulley-aware: math runs on EFFECTIVE load.
+    ///
+    /// b43 (v0.4.21): clamp the result at `deviceFloorLb` (default 5 lb —
+    /// the Voltra hardware minimum). Reported regression: at low anchors and
+    /// high tiers / high step counts the cascade was returning 2.5 / 0 — the
+    /// device can't go below 5 lb (single) or 10 lb effective (pulley), so
+    /// honor that here. The clamp is applied AFTER mapping back to device
+    /// coordinates; pulley mode (multiplier=2) thus gets a 5 lb device floor
+    /// = 10 lb effective floor, matching the user-stated hardware range.
     static func cascadeAnchoredDeviceWeight(anchorDeviceLb: Double,
                                             tier: Int,
                                             stepIndex: Int,
-                                            multiplier: Double) -> Double {
+                                            multiplier: Double,
+                                            deviceFloorLb: Double = 5.0) -> Double {
         guard anchorDeviceLb > 0, tier >= 1, stepIndex >= 1, multiplier > 0 else { return 0 }
         let anchorEffective = anchorDeviceLb * multiplier
         // Per-step magnitude (constant across the chain at the current tier).
@@ -621,11 +634,16 @@ final class LoggingStore: ObservableObject {
         let perStep = max(perStepLb, anchorEffective * perStepPct)
         let totalDrop = perStep * Double(stepIndex)
         let nextEffective = anchorEffective - totalDrop
-        if nextEffective <= 0 { return 0 }
         let backToDevice = nextEffective / multiplier
         let stepped = (backToDevice / 2.5).rounded() * 2.5
-        if stepped >= anchorDeviceLb { return max(0, anchorDeviceLb - 2.5) }
-        return max(0, stepped)
+        // b43: clamp at the hardware floor so cascade never returns 2.5/0.
+        // Anchor < floor is degenerate — return the anchor unchanged so the
+        // chain immediately stalls (caller treats next==prev as "no progress"
+        // and stops firing).
+        let floored = max(deviceFloorLb, stepped)
+        if anchorDeviceLb <= deviceFloorLb { return anchorDeviceLb }
+        if floored >= anchorDeviceLb { return max(deviceFloorLb, anchorDeviceLb - 2.5) }
+        return floored
     }
 
     /// Cascade variant that respects pulley mode. Converts device weight →

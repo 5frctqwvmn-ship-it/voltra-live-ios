@@ -706,3 +706,28 @@ Changes:
 Sacred files (Telemetry struct, VoltraProtocol, etc.) unchanged.
 
 Files changed: VoltraLive/BLE/Dual/DualMode.swift, VoltraLive/BLE/Dual/MultiDeviceManager.swift, VoltraLive/VoltraLiveApp.swift, VoltraLive/Views/WorkoutVoltraPickerSheet.swift (new), VoltraLive/Logging/Views/LoggingHomeView.swift, VoltraLive/Info.plist, project.yml, docs/WORK_LOG.md
+
+## 2026-04-27 — b43 "Drop floor"
+**Problem:** Drop-set cascade returned weights below the Voltra hardware minimum (5 lb single, 10 lb effective on pulley). User reported the cascade pushing the device to 2.5 lb / 0 lb during deep drops. Also asked us to verify the percentage-vs-flat math was actually picking the larger drop — they suspected only flat numbers were firing.
+
+**Root cause:**
+- `cascadeAnchoredDeviceWeight` only blocked `nextEffective <= 0`, so anchor=20 / tier=2 / step=2 returned 0 lb. No hardware floor.
+- The percent-vs-flat math was already correct (`max(perStepLb, anchorEffective × perStepPct)` at line 621) — but at anchor ≤ 100 lb, both produce the same step, so users couldn't see the percent path firing visually. Pinned with a unit test.
+
+**Fix:**
+- Added `deviceFloorLb: Double = 5.0` parameter to `cascadeAnchoredDeviceWeight`. Result is clamped at the floor AFTER mapping back to device coordinates — so pulley mode (multiplier=2) gets a 5 lb device floor = 10 lb effective floor, matching the user-stated 10–400 lb pulley range.
+- Degenerate case: if anchor itself is already below the floor, return anchor unchanged so caller stops firing.
+- Caller stop-condition (`next >= prev`) already handles the sticky-floor case — once we hit 5 lb, the next step also clamps to 5, `next >= prev` triggers, cascade stops.
+- Updated comments on `nextCascadeWeight` and `previewNextCascade` to document the new behavior.
+- Added 4 unit tests:
+  1. Single-mode floor clamp from low anchor (a=20, tier=2)
+  2. Pulley-mode floor clamp from low anchor (a=30 device / 60 effective, tier=3)
+  3. Percent-beats-flat at high anchor (a=200, tier=1 → 10 lb steps not 5)
+  4. Sub-floor anchor stalls cleanly
+
+**Files changed:**
+- VoltraLive/Logging/Persistence/LoggingStore.swift (cascadeAnchoredDeviceWeight + 2 callers)
+- VoltraLiveTests/DropSetCascadeTests.swift (+4 tests)
+- VoltraLive/Info.plist + project.yml (bumped to 0.4.21/43, label "Drop floor")
+
+**Note for b44:** restore-anchor-on-finalize/cancel is queued next. When the rest timer kicks in or hold-to-cancel fires, the device should be pushed back to `chainAnchorLb` so it doesn't stay at 5 lb floor.

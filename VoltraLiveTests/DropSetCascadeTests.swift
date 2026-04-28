@@ -184,4 +184,49 @@ final class DropSetCascadeTests: XCTestCase {
         XCTAssertEqual(LoggingStore.cascadeAnchoredDeviceWeight(anchorDeviceLb: a, tier: 4, stepIndex: 3, multiplier: 1.0), 40.0)
         XCTAssertEqual(LoggingStore.cascadeAnchoredDeviceWeight(anchorDeviceLb: a, tier: 4, stepIndex: 4, multiplier: 1.0), 20.0)
     }
+
+    // MARK: - b43: Hardware floor (5 lb device)
+
+    /// User-stated hardware range: single Voltra is 5 lb – 200 lb. Cascade
+    /// must NEVER return below 5 lb on the device. Earlier behavior at
+    /// anchor=20, tier=2 produced 0 / -10 / etc.
+    func testCascadeAnchored_FloorClampsAtFiveLb_Single() {
+        let a = 20.0
+        // tier 2 = 10 lb / step. step 1 = 10, step 2 would be 0, step 3 -10.
+        XCTAssertEqual(LoggingStore.cascadeAnchoredDeviceWeight(anchorDeviceLb: a, tier: 2, stepIndex: 1, multiplier: 1.0), 10.0)
+        XCTAssertEqual(LoggingStore.cascadeAnchoredDeviceWeight(anchorDeviceLb: a, tier: 2, stepIndex: 2, multiplier: 1.0), 5.0,
+                       "step 2 must clamp at 5 lb floor, not 0")
+        XCTAssertEqual(LoggingStore.cascadeAnchoredDeviceWeight(anchorDeviceLb: a, tier: 2, stepIndex: 3, multiplier: 1.0), 5.0,
+                       "step 3 must stay at 5 lb floor, not go negative")
+    }
+
+    /// Pulley mode (multiplier=2): 5 lb DEVICE floor = 10 lb EFFECTIVE floor,
+    /// matching the user-stated 10 lb – 400 lb range for pulley/dual.
+    func testCascadeAnchored_FloorClampsAtFiveLb_Pulley() {
+        let a = 30.0 // 60 lb effective
+        // tier 3 = 15 lb effective per step. step 1 effective = 60-15 = 45 → device 22.5.
+        // step 2 effective = 60-30 = 30 → device 15. step 3 effective = 60-45 = 15 → device 7.5.
+        // step 4 effective = 60-60 = 0 → clamp to 5 device.
+        XCTAssertGreaterThanOrEqual(LoggingStore.cascadeAnchoredDeviceWeight(anchorDeviceLb: a, tier: 3, stepIndex: 4, multiplier: 2.0), 5.0,
+                       "pulley step 4 must clamp at 5 lb device, not 0")
+        XCTAssertGreaterThanOrEqual(LoggingStore.cascadeAnchoredDeviceWeight(anchorDeviceLb: a, tier: 3, stepIndex: 10, multiplier: 2.0), 5.0,
+                       "pulley deep step must stay at floor, not go negative")
+    }
+
+    /// Percent-vs-flat: at anchor=200, tier=1 the percent step (200×0.05=10) is
+    /// LARGER than the flat step (5), so the cascade must take 10 lb steps.
+    /// User suspected percentages weren't firing — this pins that they do.
+    func testCascadeAnchored_PercentBeatsFlat_AtHighAnchor() {
+        let a = 200.0
+        XCTAssertEqual(LoggingStore.cascadeAnchoredDeviceWeight(anchorDeviceLb: a, tier: 1, stepIndex: 1, multiplier: 1.0), 190.0,
+                       "at anchor=200, tier=1: percent (10 lb) beats flat (5 lb)")
+        XCTAssertEqual(LoggingStore.cascadeAnchoredDeviceWeight(anchorDeviceLb: a, tier: 1, stepIndex: 2, multiplier: 1.0), 180.0)
+    }
+
+    /// Floor must NOT cap an anchor that's already below it — cascade just
+    /// stalls. Anchor 4 (degenerate) returns 4 unchanged so caller stops.
+    func testCascadeAnchored_AnchorBelowFloor_Stalls() {
+        XCTAssertEqual(LoggingStore.cascadeAnchoredDeviceWeight(anchorDeviceLb: 4.0, tier: 1, stepIndex: 1, multiplier: 1.0), 4.0,
+                       "degenerate sub-floor anchor returns itself so caller stops firing")
+    }
 }
