@@ -76,11 +76,14 @@ struct ExerciseDetailView: View {
         _writerRouter = StateObject(wrappedValue: WriterRouter())
     }
 
-    /// b48: True when this view is presented as part of a Superset
-    /// chain build-up. Drives the Voltra picker + Add-Another button.
-    private var inSupersetMode: Bool {
-        mdm.workoutMode == .superset
-            && mdm.left.connectionState.isConnected
+    /// b49 (was b48 inSupersetMode): True when both Voltras are paired
+    /// so the L/R assignment panel + Add-Another + Superset-tag dot
+    /// should render. Workout mode is no longer a gate \u2014 the unified
+    /// flow puts assignment inside the exercise screen unconditionally
+    /// when there's a meaningful choice. With one Voltra paired, there's
+    /// no choice and the panel is hidden.
+    private var showsDualVoltraPanel: Bool {
+        mdm.left.connectionState.isConnected
             && mdm.right.connectionState.isConnected
     }
 
@@ -89,8 +92,8 @@ struct ExerciseDetailView: View {
             VoltraColor.bg.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    if inSupersetMode {
-                        supersetSlotPicker
+                    if showsDualVoltraPanel {
+                        dualVoltraTopPanel
                     }
                     historyStrip
                     progressChart
@@ -99,8 +102,8 @@ struct ExerciseDetailView: View {
                     targetSection
                     voltraConfirmStrip
                     startButton
-                    if inSupersetMode {
-                        addAnotherSupersetButton
+                    if showsDualVoltraPanel {
+                        addAnotherExerciseButton
                     }
                     Spacer(minLength: 24)
                 }
@@ -121,7 +124,7 @@ struct ExerciseDetailView: View {
             // b48: pre-select the slot for this entry. Even chain length
             // -> left, odd -> right so the user can chain entries by
             // tapping through. They can override before Start/Add.
-            if inSupersetMode {
+            if showsDualVoltraPanel {
                 supersetSlot = (mdm.supersetChain.count % 2 == 0) ? .left : .right
             }
             pushToVoltra()
@@ -387,14 +390,30 @@ struct ExerciseDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    // MARK: - b48 Superset chain UI
+    // MARK: - b49 Dual-Voltra top panel (unified flow)
 
-    /// b48: Voltra picker shown above the history strip in Superset mode.
-    /// User picks LEFT or RIGHT to bind THIS exercise to a specific
-    /// Voltra. This is the assignment that drives the live banner +
-    /// LOAD/UNLOAD routing during the actual set.
-    private var supersetSlotPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    /// b49: Single top panel rendered above the history strip whenever
+    /// both Voltras are paired. Replaces the b48 "superset slot picker"
+    /// (which was workoutMode-gated) with a permanent dual-Voltra UI.
+    /// Three controls, all on the exercise screen where they belong:
+    ///
+    ///   \u2022 L/R slot picker \u2014 binds THIS exercise to a Voltra.
+    ///   \u2022 Merge button    \u2014 flips workoutMode to .combined
+    ///                            for b47 single-bar two-Voltra math.
+    ///   \u2022 Superset tag dot \u2014 toggle that marks the upcoming
+    ///                              chain as a superset for end-of-session
+    ///                              tagging. Locks at set 1 start so the
+    ///                              user can't change the historical
+    ///                              record mid-session.
+    ///
+    /// Rationale: b48 forced the user to commit Combined / Superset / etc.
+    /// at the home screen before they had even picked an exercise. The
+    /// same two Voltras are a Combined heavy lift on Back Squat and a
+    /// Superset pair on Seated Row + Belt Squat \u2014 mode is exercise-
+    /// scoped, not session-scoped.
+    private var dualVoltraTopPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Top label row: counter + superset tag dot on the right.
             HStack {
                 Text("ASSIGN TO VOLTRA")
                     .font(.system(size: 11, weight: .bold))
@@ -407,11 +426,18 @@ struct ExerciseDetailView: View {
                         .kerning(1.0)
                         .foregroundColor(VoltraColor.accent)
                 }
+                supersetTagDot
             }
-            HStack(spacing: 10) {
+            // Slot picker + Merge button row.
+            HStack(spacing: 8) {
                 ForEach(DeviceSlot.allCases) { slot in
-                    let selected = (slot == supersetSlot)
+                    let selected = (slot == supersetSlot) && mdm.workoutMode != .combined
                     Button {
+                        // Picking a slot exits Combined back to Independent
+                        // so the assignment has meaning again.
+                        if mdm.workoutMode == .combined {
+                            mdm.workoutMode = .independent
+                        }
                         supersetSlot = slot
                     } label: {
                         VStack(spacing: 2) {
@@ -419,21 +445,22 @@ struct ExerciseDetailView: View {
                                 .font(.system(size: 18, weight: .bold))
                                 .foregroundColor(selected ? VoltraColor.bg : VoltraColor.accent)
                             Text(slot.label.uppercased())
-                                .font(.system(size: 12, weight: .bold))
+                                .font(.system(size: 11, weight: .bold))
                                 .kerning(1.0)
                                 .foregroundColor(selected ? VoltraColor.bg : VoltraColor.text)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
+                        .padding(.vertical, 10)
                         .background(selected ? VoltraColor.accent : VoltraColor.bgElev2)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 12)
+                            RoundedRectangle(cornerRadius: 10)
                                 .stroke(selected ? VoltraColor.accent : VoltraColor.border, lineWidth: 1)
                         )
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                     .buttonStyle(.plain)
                 }
+                mergeButton
             }
         }
         .padding(14)
@@ -445,18 +472,89 @@ struct ExerciseDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    /// b48: "Add Another Superset" CTA. Stamps THIS exercise into the
-    /// chain and pops the navigation stack back to the day-tile screen
-    /// so the user can pick the next exercise without leaving Superset
-    /// mode. Does NOT start the live session.
-    private var addAnotherSupersetButton: some View {
+    /// b49: Merge button. Switches workoutMode to .combined so b47's
+    /// virtual-twin math kicks in (weights split, telemetry summed).
+    /// Tapping again flips back to .independent. Disabled once a chain
+    /// has 2+ entries since Merge math doesn't compose with a chain.
+    private var mergeButton: some View {
+        let active = mdm.workoutMode == .combined
+        let disabled = mdm.supersetChain.count >= 2
+        return Button {
+            if active {
+                mdm.workoutMode = .independent
+            } else {
+                mdm.workoutMode = .combined
+            }
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: "arrow.triangle.merge")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(active ? VoltraColor.bg : (disabled ? VoltraColor.textFaint : VoltraColor.accent))
+                Text("MERGE")
+                    .font(.system(size: 11, weight: .bold))
+                    .kerning(1.0)
+                    .foregroundColor(active ? VoltraColor.bg : (disabled ? VoltraColor.textFaint : VoltraColor.text))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(active ? VoltraColor.accent : VoltraColor.bgElev2)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(active ? VoltraColor.accent : VoltraColor.border, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .opacity(disabled ? 0.55 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
+
+    /// b49: Superset tag dot \u2014 a small toggle in the top-right of
+    /// the dual-Voltra panel. When ON, the upcoming chain is marked as
+    /// a superset for post-session display. Locks at set 1 start so
+    /// the user can't change the historical record mid-session.
+    private var supersetTagDot: some View {
+        Button {
+            guard !mdm.supersetTagLocked else { return }
+            mdm.supersetTag.toggle()
+        } label: {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(mdm.supersetTag ? VoltraColor.accent : VoltraColor.border)
+                    .frame(width: 8, height: 8)
+                Text(mdm.supersetTagLocked ? "SUPERSET" : "SUPERSET TAG")
+                    .font(.system(size: 10, weight: .bold))
+                    .kerning(1.0)
+                    .foregroundColor(mdm.supersetTag ? VoltraColor.accent : VoltraColor.textDim)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(mdm.supersetTag ? VoltraColor.accent.opacity(0.15) : Color.clear)
+            .overlay(
+                Capsule()
+                    .stroke(mdm.supersetTag ? VoltraColor.accent.opacity(0.5) : VoltraColor.border, lineWidth: 1)
+            )
+            .clipShape(Capsule())
+            .opacity(mdm.supersetTagLocked ? 0.7 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .disabled(mdm.supersetTagLocked)
+    }
+
+    /// b49 (was b48 addAnotherSupersetButton): "Add Another Exercise"
+    /// CTA. Stamps THIS exercise into the chain and pops back to the
+    /// day tiles so the user can pick the next exercise. The chain
+    /// becomes a superset only if `mdm.supersetTag` is on at set 1
+    /// start \u2014 the chain itself is just "two exercises in flight,
+    /// one per Voltra,\" with no implied superset semantics.
+    private var addAnotherExerciseButton: some View {
         Button {
             commitChainEntryFromCurrentState()
             mdm.requestSupersetReturnToHome()
         } label: {
             HStack {
                 Image(systemName: "plus.circle")
-                Text("Add Another Superset")
+                Text("Add Another Exercise")
             }
             .font(.system(size: 15, weight: .semibold))
             .frame(maxWidth: .infinity)
@@ -486,10 +584,12 @@ struct ExerciseDetailView: View {
 
     private var startButton: some View {
         Button {
-            // b48: in superset mode, also stamp this exercise into the
-            // chain before opening live so the banner has the right
-            // labels and slot bindings from the first frame.
-            if inSupersetMode {
+            // b49 (was b48): when both Voltras are paired, stamp this
+            // exercise into the chain before opening live so the banner
+            // has the right labels and slot bindings from the first
+            // frame. The chain may be only one entry long \u2014 that's
+            // fine, it just means "this exercise on this slot."
+            if showsDualVoltraPanel {
                 commitChainEntryFromCurrentState()
             }
             // v0.4.0 — plumb the FULL upcoming-set context into LoggingStore so

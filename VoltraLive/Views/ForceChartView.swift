@@ -36,6 +36,15 @@ struct ForceChartView: View {
     /// load. Default 1.0 = no transform.
     var forceMultiplier: Double = 1.0
 
+    /// b49: Optional second trace rendered behind the primary phase-colored
+    /// trace, for visualizing the OTHER exercise in a 2-exercise superset
+    /// chain. Drawn as a single dimmed line in a contrasting accent color
+    /// (no phase coloring, no smoothing surprises). When non-nil, both labels
+    /// are shown in the chart header so the user can tell the traces apart.
+    var secondarySamples: [ForceSample]? = nil
+    var primaryLabel: String? = nil
+    var secondaryLabel: String? = nil
+
     private var now: Date { Date() }
 
     /// v0.4.5: All samples are visible — no 30s cutoff. The chart auto-spans
@@ -45,7 +54,9 @@ struct ForceChartView: View {
     }
 
     private var maxForce: Double {
-        let maxVisible = smoothedSamples.map(\.forceLb).max() ?? 0
+        let primaryMax = smoothedSamples.map(\.forceLb).max() ?? 0
+        let secondaryMax = (secondarySamples ?? []).map(\.forceLb).max() ?? 0
+        let maxVisible = max(primaryMax, secondaryMax * forceMultiplier)
         if let planned = plannedCeilingLb, planned > 0 {
             // Planned-weight + 15% headroom OR observed peak + 15% headroom,
             // whichever is greater — so a strong overshoot doesn't clip the
@@ -147,10 +158,17 @@ struct ForceChartView: View {
 
                 Spacer()
 
-                // Legend
+                // Legend — when a secondary trace is active (superset),
+                // show the two exercise labels with their trace colors.
+                // Otherwise show the standard Pull/Return phase legend.
                 HStack(spacing: 14) {
-                    legendDot(color: VoltraColor.pull, label: "Pull")
-                    legendDot(color: VoltraColor.returnPhase, label: "Return")
+                    if secondarySamples != nil, let pl = primaryLabel, let sl = secondaryLabel {
+                        legendDot(color: VoltraColor.pull, label: pl)
+                        legendDot(color: VoltraColor.textDim, label: sl)
+                    } else {
+                        legendDot(color: VoltraColor.pull, label: "Pull")
+                        legendDot(color: VoltraColor.returnPhase, label: "Return")
+                    }
                     if peakLb > 0 {
                         Text("peak \(String(format: "%.1f", peakLb * forceMultiplier)) lb")
                             .font(.system(size: 12, design: .monospaced))
@@ -175,12 +193,18 @@ struct ForceChartView: View {
                 // not a fixed 30s rolling window.
                 let firstTS = smoothedSamples.first?.timestamp ?? now
                 let lastTS = smoothedSamples.last?.timestamp ?? now
-                let windowStart = firstTS
+                // b49: When a secondary trace is present, expand the X domain
+                // to cover both traces so the older one isn't clipped.
+                let secFirstTS = secondarySamples?.first?.timestamp
+                let secLastTS = secondarySamples?.last?.timestamp
+                let domainStart = [firstTS, secFirstTS].compactMap { $0 }.min() ?? firstTS
+                let domainEnd = [lastTS, secLastTS].compactMap { $0 }.max() ?? lastTS
+                let windowStart = domainStart
                 // Guard against degenerate single-point ranges (Swift Charts
                 // crashes if domain is empty). Also pad a small trailing
                 // gutter so the most-recent sample isn't flush to the edge.
-                let span = max(lastTS.timeIntervalSince(firstTS), 1.0)
-                let windowEnd = firstTS.addingTimeInterval(span + span * 0.04)
+                let span = max(domainEnd.timeIntervalSince(domainStart), 1.0)
+                let windowEnd = domainStart.addingTimeInterval(span + span * 0.04)
 
                 Chart {
                     // Horizontal grid lines
@@ -190,14 +214,32 @@ struct ForceChartView: View {
                             .lineStyle(StrokeStyle(lineWidth: 1))
                     }
 
-                    // Phase-colored line segments
+                    // b49: Secondary (other-exercise) trace, drawn FIRST so
+                    // the primary phase-colored trace renders on top. Single
+                    // muted color, no phase coloring, time-aligned by raw
+                    // timestamps so the two traces share the X domain.
+                    if let secondary = secondarySamples, !secondary.isEmpty {
+                        let m = forceMultiplier
+                        ForEach(Array(secondary.enumerated()), id: \.offset) { _, s in
+                            LineMark(
+                                x: .value("Time", s.timestamp),
+                                y: .value("Force (lb)", s.forceLb * m),
+                                series: .value("Series", "secondary")
+                            )
+                            .foregroundStyle(VoltraColor.textDim)
+                            .interpolationMethod(.catmullRom)
+                            .lineStyle(StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round, dash: [4, 3]))
+                        }
+                    }
+
+                    // Phase-colored line segments (primary trace)
                     // Each segment group is rendered as its own LineMark series
                     ForEach(segmentGroups(), id: \.segIdx) { seg in
                         ForEach(seg.pts) { pt in
                             LineMark(
                                 x: .value("Time", pt.timestamp),
                                 y: .value("Force (lb)", pt.forceLb),
-                                series: .value("Segment", seg.segIdx)
+                                series: .value("Segment", "primary-\(seg.segIdx)")
                             )
                             .foregroundStyle(VoltraColor.phase(seg.phase))
                             .interpolationMethod(.catmullRom)

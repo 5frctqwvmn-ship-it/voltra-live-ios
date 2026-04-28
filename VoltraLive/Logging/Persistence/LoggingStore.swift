@@ -89,9 +89,16 @@ final class LoggingStore: ObservableObject {
     /// — 4s felt sluggish and cost mid-cascade tempo; 2s matches the rate
     /// at which the user is physically able to swap mental weight targets.
     private let cascadeIntervalSec: Double = 2.0
+    /// b49: read-only mirror so LiveCaptureView's drop-set progress bars
+    /// can size themselves from the same constant the timer uses, instead
+    /// of a hardcoded 4.0 that drifted out of sync with the actual fuse.
+    var cascadeIntervalSecondsForUI: Double { cascadeIntervalSec }
     /// No-movement watchdog — set finalizes after this many seconds with
     /// no rep increment.
     private let cascadeIdleFinalizeSec: Double = 10.0
+    /// b49: read-only mirror for the finalize-watchdog window, used by the
+    /// 10s cascadeBar so a future tweak (e.g. 12s) only has to land here.
+    var cascadeIdleFinalizeSecondsForUI: Double { cascadeIdleFinalizeSec }
     /// v0.4.6.2: Force threshold for what counts as "real activity". Telemetry
     /// packets with sample force at-or-below this floor (machine jitter, slack
     /// cable noise, accelerometer drift) do NOT reset the 4s/10s idle timers.
@@ -280,6 +287,13 @@ final class LoggingStore: ObservableObject {
         // Clear the one-shot pending-set indicator so any old code paths
         // that still react to it stop showing the SetLogView sheet.
         pendingTelemetrySet = nil
+        // b49: Stash the finalized force samples keyed by exercise name so the
+        // ForceChartView can render two distinct labeled traces during a
+        // superset chain (one per exercise). Refreshed each time a set on
+        // this exercise finalizes, so the trace is always the most recent.
+        if let exName = instance.exercise?.name, !telemetry.samples.isEmpty {
+            sessionStore?.lastFinalizedByExercise[exName] = telemetry.samples
+        }
         try? ctx.save()
     }
 
@@ -998,6 +1012,39 @@ final class LoggingStore: ObservableObject {
     }
 
     // MARK: - Exercise picking
+
+    /// b49: Switch the active instance to whichever existing instance in
+    /// the current session matches `exerciseName`. Used by SWAP to flip
+    /// the full exercise context (instance, set counter, planned weight)
+    /// to the OTHER chain entry's exercise without creating a new
+    /// instance. Returns true on success.
+    ///
+    /// Why this exists: b48 SWAP only flipped supersetActiveSlot, which
+    /// re-routed BLE writes / telemetry but left activeInstance pointed
+    /// at exercise A even though the user was now lifting exercise B.
+    /// Telemetry-detected sets therefore logged under the wrong exercise.
+    @discardableResult
+    func switchActiveInstanceByExerciseName(_ name: String) -> Bool {
+        guard let session = activeSession else { return false }
+        guard let match = (session.instances ?? []).first(where: {
+            $0.exercise?.name == name && $0.endedAt == nil
+        }) else { return false }
+        // Don't double-finalize the current instance \u2014 chain swap is
+        // a back-and-forth flip, not a permanent transition. We want
+        // both instances to stay open across the chain.
+        activeInstance = match
+        setNumberForCurrentInstance = (match.sets?.count ?? 0) + 1
+        // v0.4.0: sync the consumed-set marker so the next telemetry
+        // boundary detected on the new instance still fires.
+        consumedSetCount = sessionStore?.completedSets.count ?? 0
+        // Reset rest anchor + pending state so the new instance's set
+        // 1 reads from history fresh.
+        restAnchor = nil
+        upcomingAddedLoadLb = nil
+        upcomingAddedLoadType = nil
+        pulleyMode = false
+        return true
+    }
 
     func pickExercise(_ exercise: Exercise) {
         guard let ctx = modelContext, let session = activeSession else { return }

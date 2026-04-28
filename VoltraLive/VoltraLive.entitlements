@@ -19,19 +19,58 @@
     <string>$(TeamIdentifierPrefix)com.voltralive.app</string>
     <key>com.apple.developer.healthkit</key>
     <true/>
+    <key>com.apple.developer.healthkit.access</key>
+    <array/>
+    <key>com.apple.developer.healthkit.background-delivery</key>
+    <true/>
     <!--
-        b46: removed empty <key>com.apple.developer.healthkit.access</key>
-        with <array/> value. That key is for clinical health-records access
-        (e.g. HKClinicalTypeIdentifier.* like allergies, lab results) and
-        when present-but-empty iOS treats the app as declaring the
-        capability without exercising any of its features, which prevents
-        the Health row from appearing in the app's iOS Settings page and
-        appears to contribute to intermittent HKAnchoredObjectQuery
-        delivery for HR / active-energy samples. Standard read access to
-        HKQuantityType samples (heart rate, active energy) only requires
-        com.apple.developer.healthkit = true and the
-        NSHealthShareUsageDescription / NSHealthUpdateUsageDescription
-        Info.plist strings, both of which we already have.
+        b49: RESTORED com.apple.developer.healthkit.access = <array/> (empty)
+        and ADDED com.apple.developer.healthkit.background-delivery = true.
+
+        Background and council-confirmed root cause of the b47/b48 fresh-install
+        bug (no HK permission sheet, no app row under Settings → Health):
+
+        Apple's App ID "HealthKit" capability bundles three entitlements as
+        a single grant (verified 2026-04-28 from the developer portal (i)
+        tooltip on the HealthKit row):
+          • com.apple.developer.healthkit
+          • com.apple.developer.healthkit.access
+          • com.apple.developer.healthkit.background-delivery
+        There is no portal sub-toggle to opt out of any one of them. Every
+        provisioning profile minted against this App ID carries all three
+        in its Entitlements allowlist (with .access = ['health-records']).
+
+        Before b49 our app declared only com.apple.developer.healthkit = true.
+        On iOS 17+ this profile/app mismatch causes the OS to silently reject
+        the HealthKit registration on a fresh install — no permission sheet,
+        no Settings → Health row — while still honoring sticky authorization
+        from prior installs (which is why HR/kcal kept working on already-
+        authorized devices and the bug looked intermittent).
+
+        The fix:
+          • .access = <array/> (empty array) explicitly declares "I have
+            access to HealthKit clinical records but I'm using zero clinical
+            types." Apple docs at
+            developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.healthkit.access
+            describe this empty-array form as the documented opt-in when
+            HealthKit is enabled and Clinical Health Records are not used.
+            No NSHealthClinicalHealthRecordsShareUsageDescription Info.plist
+            string is required when the array is empty.
+          • .background-delivery = true matches the actual behavior we wire
+            up in HealthKitStore.enableBackgroundDeliveryForTypes(); profile
+            allowlists this anyway, so we may as well declare it.
+
+        The b46 entitlements comment that previously lived here described
+        removing .access as a fix for the Health row missing in Settings.
+        That diagnosis was wrong. Removing .access did not fix anything on
+        fresh installs — it only appeared to work because all test devices
+        had sticky HK authorization from earlier builds. b49 reverses the
+        b46 change and adds the missing .background-delivery key so the
+        app's declared entitlements match the profile's allowlist.
+
+        Verification: after b49 ships, on a fresh install the system HK
+        sheet must appear at first launch and VOLTRA Live must appear under
+        Settings → Health → Data Access & Devices.
     -->
 </dict>
 </plist>

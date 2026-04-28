@@ -154,6 +154,13 @@ struct LiveCaptureView: View {
                 dismiss()
             }
             Button("End and export", role: .destructive) {
+                // b49: Stamp the SwiftData session with the superset tag
+                // BEFORE finalizing, so post-workout summary + analytics can
+                // read it. mdm.supersetTag persists for the whole session
+                // and is locked at set 1 start.
+                if let active = logging.activeSession {
+                    active.supersetTag = mdm.supersetTag
+                }
                 if let ended = logging.endSession() {
                     lastEndedSession = ended
                     showingExportSheet = true
@@ -192,6 +199,17 @@ struct LiveCaptureView: View {
             // a Combined entry.
             logging.applyWorkoutMode(newMode)
             enforceCombinedParityOnEntry()
+        }
+        // b49: Lock the superset tag the instant set 1 begins. session.
+        // currentSet flips nil \u2192 non-nil on the first Pull or rep
+        // bump, which is the canonical "set 1 has started" event. After
+        // this, the user can no longer toggle mdm.supersetTag \u2014 the
+        // historical record is sealed. Subsequent set starts are no-ops
+        // because lockSupersetTag() is idempotent.
+        .onChange(of: session.currentSet != nil) { _, started in
+            if started && mdm.supersetTag {
+                mdm.lockSupersetTag()
+            }
         }
         .onDisappear {
             health.stop()
@@ -687,14 +705,30 @@ struct LiveCaptureView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    /// b48: Flip the active superset side. Saves the current pending weight
-    /// to whichever side WAS active, then loads the other side's stored
-    /// weight into `pendingPlannedWeightLb` so the live grid retargets, and
-    /// pushes the new state to the (now-active) Voltra. Net effect: tap
-    /// SWAP and the user's resistance, drop-set state, and writes all flip
-    /// to the other Voltra atomically.
+    /// b49: Full exercise-context swap. Replaces the b48 partial swap
+    /// (which only flipped supersetActiveSlot, leaving activeInstance
+    /// pointed at exercise A while the user was physically lifting B).
+    ///
+    /// New flow on tap:
+    ///   1. Auto-end the in-flight set on the outgoing side, if any.
+    ///      Telemetry-detected sets are committed under the OUTGOING
+    ///      exercise's instance \u2014 this is the correct attribution.
+    ///   2. Send UNLOAD to the outgoing Voltra so the cable goes slack.
+    ///   3. Flip supersetActiveSlot + supersetChainIndex (MDM does both).
+    ///   4. Switch LoggingStore.activeInstance to the OTHER chain entry's
+    ///      exercise so future telemetry sets log under the right exercise.
+    ///   5. Restore the incoming exercise's planned weight + push to the
+    ///      now-active Voltra, then send LOAD so the user can start the
+    ///      next set without manually tapping LOAD.
     private func swapSupersetSide() {
         let outgoing = mdm.supersetActiveSlot
+        // 1. Auto-end any in-flight set on the outgoing side. The set
+        //    will be auto-logged via SessionStore's normal finalize path
+        //    once it lands in completedSets, attributed to the OUTGOING
+        //    exercise's activeInstance (which is still set at this point).
+        if session.currentSet != nil {
+            session.forceFinalizeCurrentSet()
+        }
         // Save the current pending weight as the outgoing side's stored
         // weight so the next swap restores it. This stays in sync with
         // mdm.supersetLeft/RightWeightLb regardless of chain mode.
@@ -703,19 +737,36 @@ struct LiveCaptureView: View {
         case .left:  mdm.supersetLeftWeightLb  = curWeight
         case .right: mdm.supersetRightWeightLb = curWeight
         }
-        // Flip the active slot (or advance the chain index if a chain is
-        // populated). WriterRouter will now route through the new side.
+        // 2. UNLOAD the outgoing Voltra so its cable goes slack while the
+        //    user is on the other side.
+        mdm.unload(target: outgoing)
+        // 3. Flip the active slot (or advance the chain index if a chain
+        //    is populated). WriterRouter + telemetry routing both follow
+        //    supersetActiveSlot, so this single line atomically moves
+        //    the in-app side.
         mdm.flipSupersetActiveSlot()
-        // Restore the incoming side's stored weight. b48: prefer the
-        // chain entry's plannedWeightLb when available so each exercise
-        // remembers its own starting weight; fall back to the per-side
-        // mirror for the two-exercise legacy path.
+        // 4. Switch the active instance so future auto-logged sets are
+        //    attributed to the INCOMING exercise. Falls back to a no-op
+        //    when we don't have a chain entry (single-exercise mode
+        //    \u2014 SWAP is still useful as an LR toggle there).
+        if let incomingEntry = mdm.activeSupersetEntry {
+            logging.switchActiveInstanceByExerciseName(incomingEntry.exerciseName)
+        }
+        // 5. Restore the incoming side's stored weight. b48: prefer the
+        //    chain entry's plannedWeightLb when available so each exercise
+        //    remembers its own starting weight; fall back to the per-side
+        //    mirror for the two-exercise legacy path.
         let incoming = mdm.supersetActiveSlot
         let mirrored = (incoming == .left ? mdm.supersetLeftWeightLb : mdm.supersetRightWeightLb)
         let restored: Double = mdm.activeSupersetEntry?.plannedWeightLb ?? mirrored
         logging.pendingPlannedWeightLb = restored
         logging.reanchorCascadeIfActive(toLb: restored)
         pushUpcomingStateToDevice()
+        // 6. Auto-LOAD the incoming Voltra at the restored weight so the
+        //    user can grab the cable and start the next set without an
+        //    extra tap. (b48 required a manual LOAD after every SWAP,
+        //    which the user reported as a friction point.)
+        mdm.load(target: incoming)
     }
 
     /// LOAD command. Prefers MDM when any slot is paired; otherwise legacy ble.
@@ -766,11 +817,34 @@ struct LiveCaptureView: View {
         // matching the smoothed sample values the chart will plot.
         let planned = ((logging.pendingPlannedWeightLb ?? 0) + logging.upcomingEccLb) * m
             + (logging.upcomingAddedLoadLb ?? 0)
+
+        // b49: When a 2+ exercise superset chain is active, pull the OTHER
+        // exercise's most-recent finalized force trace out of
+        // SessionStore.lastFinalizedByExercise and pass it as a secondary
+        // (dashed, dimmed) trace so the user can compare both exercises in
+        // one chart. Labels come from the chain entries.
+        var secondarySamples: [ForceSample]? = nil
+        var primaryLabel: String? = nil
+        var secondaryLabel: String? = nil
+        if mdm.hasActiveSupersetChain,
+           let active = mdm.activeSupersetEntry,
+           let other = mdm.nextSupersetEntry,
+           active.exerciseName != other.exerciseName {
+            primaryLabel = active.exerciseName
+            secondaryLabel = other.exerciseName
+            if let trace = session.lastFinalizedByExercise[other.exerciseName], !trace.isEmpty {
+                secondarySamples = trace
+            }
+        }
+
         return ForceChartView(
             samples: samples,
             peakLb: peak,
             plannedCeilingLb: planned > 0 ? planned : nil,
-            forceMultiplier: m
+            forceMultiplier: m,
+            secondarySamples: secondarySamples,
+            primaryLabel: primaryLabel,
+            secondaryLabel: secondaryLabel
         )
         .frame(minHeight: 280)
     }
@@ -944,18 +1018,22 @@ struct LiveCaptureView: View {
         let current = (logging.pendingPlannedWeightLb ?? 0) * m
         let preview = logging.previewNextCascade(from: current, count: 2)
         let now = Date()
+        // b49: pull the timer windows from LoggingStore so the bars stay
+        // in sync with the actual cascade fuse + finalize watchdog. b48
+        // had hardcoded 4.0/10.0 which drifted out of sync after b45's
+        // 2s tighten \u2014 user reported "timer was 2s but bar was 4s."
+        let nextDropTotal = logging.cascadeIntervalSecondsForUI
+        let finalizeTotal = logging.cascadeIdleFinalizeSecondsForUI
         let nextDropProgress: Double = {
             guard let target = logging.nextDropFiresAt else { return 0 }
-            // Fill as we APPROACH the next drop — 0 at start, 1 at fire.
-            let total: Double = 4.0
+            // Fill as we APPROACH the next drop \u2014 0 at start, 1 at fire.
             let remaining = target.timeIntervalSince(now)
-            return min(1, max(0, 1 - remaining / total))
+            return min(1, max(0, 1 - remaining / nextDropTotal))
         }()
         let finalizeProgress: Double = {
             guard let target = logging.dropFinalizeAt else { return 0 }
-            let total: Double = 10.0
             let remaining = target.timeIntervalSince(now)
-            return min(1, max(0, 1 - remaining / total))
+            return min(1, max(0, 1 - remaining / finalizeTotal))
         }()
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -1014,8 +1092,10 @@ struct LiveCaptureView: View {
             // Two stacked progress bars: top = 4s next-drop fuse,
             // bottom = 10s finalize fuse. Faint label tag.
             VStack(spacing: 3) {
-                cascadeBar(progress: nextDropProgress, color: VoltraColor.transition, label: "4s")
-                cascadeBar(progress: finalizeProgress, color: VoltraColor.returnPhase, label: "10s")
+                // b49: labels are derived from the live timer values so
+                // they stay accurate if the constants change.
+                cascadeBar(progress: nextDropProgress, color: VoltraColor.transition, label: "\(Int(nextDropTotal))s")
+                cascadeBar(progress: finalizeProgress, color: VoltraColor.returnPhase, label: "\(Int(finalizeTotal))s")
             }
         }
         .padding(EdgeInsets(top: 14, leading: 14, bottom: 10, trailing: 14))

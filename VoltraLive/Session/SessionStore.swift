@@ -45,6 +45,17 @@ final class SessionStore: ObservableObject {
     @Published var lastFinalizedStartedAt: Date? = nil
     @Published var lastFinalizedEndedAt: Date? = nil
 
+    /// b49: per-exercise-name samples cache for the superset force chart.
+    /// When a set finalizes, we stash its samples under the exercise name
+    /// the set was attributed to (LoggingStore.activeInstance.exercise.
+    /// name). The chart then draws BOTH sides' last set as two distinct
+    /// labeled traces during a superset, so the user can compare the two
+    /// exercises' force profiles side-by-side without scrolling history.
+    /// Keyed by exercise name; value is the most-recent finalized trace
+    /// for that exercise within this session. LiveCaptureView writes the
+    /// active side's name on each finalize via stashFinalizedFor(name:).
+    @Published var lastFinalizedByExercise: [String: [ForceSample]] = [:]
+
     // Rest timer
     @Published var restActive: Bool = false
     @Published var restElapsedSeconds: Double = 0
@@ -215,7 +226,13 @@ final class SessionStore: ObservableObject {
         lastFinalizedEndedAt = ended
         currentSet = nil
         idleSince = nil
-        restStartedAt = Date()
+        // b49: backdate the rest start by 2s so the visible rest clock
+        // already reads 0:02 the moment the set finalizes. The 4s idle
+        // grace effectively eats the first 4 seconds of rest from the
+        // user's perspective; surfacing 2 of those in the rest counter
+        // makes the wall-clock feel honest. (User feedback: rest timer
+        // felt "-2s out of sync" with their phone clock.)
+        restStartedAt = Date().addingTimeInterval(-2.0)
         setRestActive(true)
         persistDraft()
         // v0.4.5: clear drop-set mode after finalize so the next set isn't

@@ -62,8 +62,9 @@ See **AGENTS.md → "Cost-awareness convention"** for the full rules:
   heavy work on Computer when the user explicitly says "do it yourself."
 
 Existing council prompts in this repo:
-- `COUNCIL_HEALTHKIT_PROMPT.md` — HK permission prompt-on-fresh-install bug
-  (drafted post-b48; awaiting user-run council results before b49 fix).
+- (none open right now — the HK council was answered and the prompt
+  deleted in the same commit as the b49 fix, per the "answered →
+  delete" rule.)
 
 ## Index of handoff docs
 

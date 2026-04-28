@@ -197,6 +197,11 @@ final class WorkoutSession {
     /// Optional source-of-truth for imports — line offset in history.md or
     /// session # so we can avoid duplicate imports across launches.
     var importSourceID: String? = nil
+    /// b49: True when the user toggled the Superset tag on during this
+    /// session. Locked at first set start. Additive metadata for analytics
+    /// and post-workout summary — the actual exercise attribution lives on
+    /// each LoggedSet via its ExerciseInstance.
+    var supersetTag: Bool = false
 
     @Relationship(deleteRule: .cascade, inverse: \ExerciseInstance.session)
     var instances: [ExerciseInstance]? = nil
@@ -208,7 +213,8 @@ final class WorkoutSession {
         dayType: DayType = .custom,
         customLabel: String? = nil,
         importedFromHistory: Bool = false,
-        importSourceID: String? = nil
+        importSourceID: String? = nil,
+        supersetTag: Bool = false
     ) {
         self.id = id
         self.startedAt = startedAt
@@ -217,6 +223,7 @@ final class WorkoutSession {
         self.customLabel = customLabel
         self.importedFromHistory = importedFromHistory
         self.importSourceID = importSourceID
+        self.supersetTag = supersetTag
     }
 
     var dayType: DayType {

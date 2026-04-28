@@ -571,7 +571,16 @@ jobs:
       # the signed IPA, dump the embedded entitlements, and HARD-FAIL the
       # build if HealthKit isn't there. Same check for iCloud/CloudKit so
       # we catch silent regressions on those too.
-      - name: Verify embedded entitlements (HealthKit, iCloud)
+      # b49: HARDENED. The previous version did `grep -q
+      # "com.apple.developer.healthkit"` which matched .healthkit AND
+      # .healthkit.access AND .healthkit.background-delivery as substrings,
+      # so it could not detect the b47/b48 bug where the signed app was
+      # missing the .access and .background-delivery keys despite the
+      # provisioning profile granting all three. b49 parses both the
+      # codesign-extracted app entitlements AND the embedded provisioning
+      # profile's Entitlements dict with plistlib and asserts EXACT key
+      # presence on each side. Hard-fails on any mismatch.
+      - name: Verify embedded entitlements (HealthKit, iCloud) [b49 hardened]
         run: |
           set -euo pipefail
           mkdir -p build/verify
@@ -579,19 +588,85 @@ jobs:
           unzip -q ../export/VoltraLive.ipa
           APP_PATH="Payload/VOLTRA Live.app"
           test -d "$APP_PATH" || { echo "FAIL: .app not found inside IPA"; ls -la Payload/; exit 1; }
-          echo "— Embedded entitlements:"
-          codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | tee /tmp/embedded.entitlements
-          MISSING=()
-          grep -q "com.apple.developer.healthkit" /tmp/embedded.entitlements || MISSING+=("healthkit")
-          grep -q "com.apple.developer.icloud-services" /tmp/embedded.entitlements || MISSING+=("icloud-services")
-          if [ ${#MISSING[@]} -ne 0 ]; then
-            echo "FAIL: Signed IPA is MISSING required entitlements: ${MISSING[*]}"
-            echo "   The mobileprovision profile likely doesn't grant these. Re-generate"
-            echo "   the App Store profile in the Apple Developer portal with HealthKit"
-            echo "   capability enabled and update APPLE_PROFILE_MOBILEPROV secret."
-            exit 1
-          fi
-          echo "OK: entitlements verified - HealthKit + iCloud present"
+
+          echo "— Extracting signed app entitlements (xml1)"
+          codesign -d --entitlements :- "$APP_PATH" > /tmp/app.entitlements.xml 2>/dev/null
+          plutil -convert xml1 /tmp/app.entitlements.xml -o /tmp/app.entitlements.plist
+
+          echo "— Extracting embedded mobileprovision Entitlements"
+          openssl smime -inform der -verify -noverify -in "$APP_PATH/embedded.mobileprovision" > /tmp/profile.full.plist
+          plutil -extract Entitlements xml1 -o /tmp/profile.entitlements.plist /tmp/profile.full.plist
+
+          echo "— Running plistlib-based exact-key verification"
+          # Write the verification script to a file to avoid YAML/heredoc
+          # indentation pitfalls (Python is whitespace-sensitive and YAML
+          # block scalars normalize indentation in surprising ways).
+          cat > /tmp/verify_entitlements.py <<'PY'
+          import plistlib, sys
+
+          REQUIRED_APP_KEYS = [
+              "com.apple.developer.healthkit",
+              "com.apple.developer.healthkit.access",
+              "com.apple.developer.healthkit.background-delivery",
+              "com.apple.developer.icloud-services",
+              "com.apple.developer.icloud-container-identifiers",
+              "com.apple.developer.ubiquity-container-identifiers",
+          ]
+          REQUIRED_PROFILE_KEYS = [
+              "com.apple.developer.healthkit",
+              "com.apple.developer.healthkit.access",
+              "com.apple.developer.healthkit.background-delivery",
+              "com.apple.developer.icloud-services",
+          ]
+
+          with open("/tmp/app.entitlements.plist", "rb") as f:
+              app = plistlib.load(f)
+          with open("/tmp/profile.entitlements.plist", "rb") as f:
+              prof = plistlib.load(f)
+
+          print("--- App entitlements (signed binary) ---")
+          for k in sorted(app.keys()):
+              print("  " + k + ": " + repr(app[k]))
+          print("--- Profile Entitlements (allowlist) ---")
+          for k in sorted(prof.keys()):
+              print("  " + k + ": " + repr(prof[k]))
+
+          fails = []
+          for k in REQUIRED_APP_KEYS:
+              if k not in app:
+                  fails.append("app missing required key: " + k)
+          for k in REQUIRED_PROFILE_KEYS:
+              if k not in prof:
+                  fails.append("profile missing required key: " + k)
+          for k in app.keys():
+              if k.startswith("com.apple.developer.") and k not in prof:
+                  fails.append("app declares " + k + " but profile does not allow it")
+
+          if app.get("com.apple.developer.healthkit") is not True:
+              fails.append("com.apple.developer.healthkit must be True in app entitlements")
+          if not isinstance(app.get("com.apple.developer.healthkit.access"), list):
+              fails.append(".healthkit.access must be a list (empty array is fine)")
+          if app.get("com.apple.developer.healthkit.background-delivery") is not True:
+              fails.append(".healthkit.background-delivery must be True in app entitlements")
+
+          if fails:
+              print("\nFAIL: entitlement verification failed")
+              for f_ in fails:
+                  print("  - " + f_)
+              print("\nRemediation: ensure VoltraLive/VoltraLive.entitlements declares")
+              print("all three HealthKit keys (.healthkit = true, .healthkit.access = <array/>,")
+              print(".healthkit.background-delivery = true) to match the profile allowlist.")
+              print("See b49 WORK_LOG entry for full diagnosis.")
+              sys.exit(1)
+
+          print("\nOK: app entitlements + profile allowlist both verified - all keys match")
+          PY
+          # Strip the leading 10 spaces of YAML indentation that the heredoc
+          # picked up; the YAML run: scalar indents lines uniformly so we
+          # can dedent cleanly with sed.
+          sed -i 's/^          //' /tmp/verify_entitlements.py
+          python3 /tmp/verify_entitlements.py
+
           cd - >/dev/null
           rm -rf build/verify
 

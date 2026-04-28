@@ -35,11 +35,13 @@ struct ExerciseStartView: View {
         source: .freeEntry, anchorLb: nil, offsets: []
     )
 
-    /// b48: True when this view is presented as part of a Superset
-    /// chain build-up. Drives the Voltra picker + Add-Another button.
+    /// b49 (was b48): True when both Voltras are paired so the L/R
+    /// assignment + Add-Another panel should render. Workout mode is
+    /// no longer a gate \u2014 b49's unified flow puts assignment
+    /// inside the exercise screen unconditionally when the user has
+    /// a meaningful choice.
     private var inSupersetMode: Bool {
-        mdm.workoutMode == .superset
-            && mdm.left.connectionState.isConnected
+        mdm.left.connectionState.isConnected
             && mdm.right.connectionState.isConnected
     }
 
@@ -309,7 +311,7 @@ struct ExerciseStartView: View {
         } label: {
             HStack {
                 Image(systemName: "plus.circle")
-                Text("Add Another Superset")
+                Text("Add Another Exercise")
             }
             .font(.system(size: 15, weight: .semibold))
             .frame(maxWidth: .infinity)

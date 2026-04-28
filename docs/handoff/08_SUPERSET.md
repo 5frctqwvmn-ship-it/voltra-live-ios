@@ -1,89 +1,160 @@
-# 08 — Superset Spec (deferred to build 31)
+# 08 — Superset (b49 unified flow)
 
-This is **deferred** until dual-Voltra ships and stabilizes in build 30.
-Captured here so the spec doesn't get lost.
+**Status as of b49:** Independent and Superset are no longer separate
+modes. Superset is a TAG, like a rolling dot, that the user toggles on
+during a session. The flow is unified: pair Voltras → day tile →
+exercise screen, no mode picker. WorkoutMode is auto-derived from the
+paired-device count (1 paired → singleLeft/singleRight; 2 paired →
+independent). Combined stays as a same-bar use case, surfaced via a
+"Merge" button on the exercise screen.
 
-## What a superset is (in the user's words)
+This doc supersedes the b46–b48 description of Superset as a distinct
+WorkoutMode the user picked at session start.
 
-Two or more exercises performed back-to-back. Hit Start on the first one;
-when it completes, the system **automatically logs it** and switches to
-the next one. Can be 2, 3, 4, 5+ steps. Each step is bound to a specific
-Voltra (Left or Right).
+## Why we changed this
 
-## Creation flow — "+" button
+After b48 hands-on testing the user said: "Independent mode and
+Superset are functionally identical when there are 2 paired Voltras.
+Superset is just a TAG, like a rolling dot. Don't make me pick a
+mode." The pre-b49 flow forced a 3-way mode pick (Independent /
+Superset / Combined) at session start, which:
 
-The user rejected a separate planner. Supersets are built **from the
-existing workout screens** the user already configures sets on.
+1. Had no functional difference between Independent and Superset for
+   the BLE/telemetry/logging code path.
+2. Made SWAP feel like a separate feature rather than the natural
+   "I'm done with this side, move to the other one" gesture.
+3. Made it impossible to add a second exercise mid-session without
+   re-picking the mode.
 
-- A "+" button on the live workout screen labelled **"Add to superset"**.
-- Tapping it appends the **workout-as-configured** to the in-progress
-  superset:
-  - exercise type
-  - target weight
-  - target reps
-  - Voltra assignment (Left/Right) — comes from how the user is
-    currently set up
-- After tap, returns the user to the main workout picker so they can
-  configure the next step.
+## How Superset works in b49
 
-## Persistent tray chip
+The Superset tag lives on `MultiDeviceManager`:
 
-While a superset is being assembled (or running), a chip is pinned at the
-top or bottom of the screen:
+- `supersetTag: Bool` — toggle exposed in the exercise screen's top
+  panel as a small dot. User taps to turn on / off.
+- `supersetTagLocked: Bool` (private set) — flips true the first time
+  a set starts (`session.currentSet != nil` becomes true). Once locked,
+  the tag is read-only for the rest of the session, so the user can't
+  accidentally toggle it off mid-workout.
+- `lockSupersetTag()` — called from
+  `LiveCaptureView.onChange(of: session.currentSet != nil)`.
 
-```
-Superset · N steps · [Start] [Clear]
-```
+The tag is purely metadata. It does not change BLE routing, telemetry
+slicing, set logging, or anything else underneath. It exists so the
+post-workout summary, history view, and analytics can flag the session
+as "performed as a superset" without changing how the user records.
 
-- `N` is the current step count.
-- `Start` begins execution from step 1.
-- `Clear` discards the in-progress superset.
+At session end, `LiveCaptureView` stamps the SwiftData WorkoutSession
+with `supersetTag = mdm.supersetTag` right before calling
+`logging.endSession()`. The `WorkoutSession.supersetTag` SwiftData
+field is additive and defaults to false, so old sessions are
+unaffected.
 
-## Execution
+## How the chain works (still here from b48)
 
-1. Tap **Start** on the chip.
-2. The superset's first step's Voltra (Left or Right) becomes the
-   **active side**. Tiles, controls, and write surface flip to that side.
-3. Auto-detection of set completion uses the existing 4 s / 10 s
-   drop-cascade detector (same as today).
-4. On set complete:
-   - Auto-log the step (no user tap).
-   - Auto-advance to the next step.
-   - Active side flips to the next step's Voltra.
-5. Repeat until the last step completes. Surface a success toast.
+The chain itself — adding a second exercise to swap between mid-set —
+is unchanged from b48. Two paired Voltras, two exercises, each with a
+slot assignment, swap moves the active focus between them.
 
-## Pre-loading
+`MultiDeviceManager.supersetChain: [SupersetChainEntry]` holds the
+chain. Helpers:
 
-To minimize between-step idle time:
+- `appendSupersetEntry(name:slot:weightLb:)` — called from
+  `ExerciseDetailView.commitStartButton` when both Voltras are paired.
+  Idempotent on `(name, slot)` so re-tapping Start doesn't duplicate.
+- `hasActiveSupersetChain: Bool { supersetChain.count >= 2 }` —
+  controls when the in-session banner + 2-trace force chart light up.
+- `activeSupersetEntry` — the entry the user is currently lifting on.
+- `nextSupersetEntry` — the entry SWAP will land on. With 2 entries,
+  this is the other one.
+- `advanceSupersetIndex()` — called from SWAP. Increments
+  `supersetChainIndex` modulo chain count and points
+  `supersetActiveSlot` at the new entry's slot.
 
-- At superset **Start**, pre-load **both** Voltras with their first
-  upcoming step's weight (one for each side, even if step 1 only uses
-  one side — step 2's weight goes on the other in the background).
-- After each step completes, push the next planned weight for that
-  side in the background, so by the time the user is at the next
-  station the device is ready.
+Same exercise on both sides is now allowed (b49). The chain is
+keyed by `(name, slot)`, so "Bench Press LEFT" and "Bench Press RIGHT"
+are two distinct entries.
 
-## Logging
+## SWAP (full exercise-context swap, b49)
 
-A completed superset is logged in history as **one superset block**,
-with the constituent step rows nested inside. History UI to be designed
-when build 31 starts; for now persist enough metadata to reconstruct.
+`LiveCaptureView.swapSupersetSide()` rewrites b48's partial swap. When
+the user taps SWAP mid-set, the app does six things in one gesture:
 
-## Dependencies
+1. **Force-finalize the in-flight set** if one is active, so the
+   completed-set logger fires and the LoggedSet attributes correctly
+   to the OUTGOING exercise's instance.
+2. **UNLOAD the outgoing side** (sends `0 lb` to the outgoing Voltra).
+3. **Flip `supersetActiveSlot`** to the other side via
+   `advanceSupersetIndex()`.
+4. **Switch the LoggingStore active instance** to the incoming
+   exercise via `LoggingStore.switchActiveInstanceByExerciseName(_:)`.
+   This is what makes the next set's LoggedSet attribute to the right
+   ExerciseInstance.
+5. **Restore the incoming side's stored weight** from its
+   `SupersetChainEntry.weightLb`.
+6. **LOAD the incoming side** at the restored weight, so the user
+   doesn't have to tap LOAD before starting their next set.
 
-- Dual-Voltra Independent mode must work (each step is bound to a side).
-- `VoltraWriter` weight pre-load must be reliable enough that pre-loading
-  the "wrong" side mid-set doesn't corrupt the active set.
+Net effect: one tap moves the entire exercise context from one side to
+the other.
 
-## Open questions for build 31
+## The 2-trace force chart (b49)
 
-Move to `10_OPEN_QUESTIONS.md` when build 31 starts:
+When `hasActiveSupersetChain` is true, the in-session force chart
+shows two distinct labeled traces — one per exercise — so the user can
+compare the rep patterns side by side without leaving the live view.
 
-- Should supersets allow the same Voltra on consecutive steps, or
-  require alternating? (User said any number of steps; assume any
-  combination is allowed.)
-- What's the UI when the user wants to **edit** a superset mid-build
-  (remove a step, reorder)? Tap on the chip → list view with delete
-  and reorder is the obvious fallback.
-- If a Voltra disconnects mid-superset, do we pause execution or skip
-  to the next step on the still-connected side?
+How the secondary trace gets there:
+
+- `LoggingStore.autoLogTelemetrySet` runs each time a set finalizes.
+  At the end of that method, it stashes the finalized samples into
+  `SessionStore.lastFinalizedByExercise[name] = telemetry.samples`,
+  keyed by the active instance's exercise name. Refreshed each set, so
+  the dict always holds the most-recent trace per exercise.
+- `LiveCaptureView.forceChart` checks `mdm.hasActiveSupersetChain` and
+  pulls `lastFinalizedByExercise[nextSupersetEntry.exerciseName]` as
+  the secondary trace.
+- `ForceChartView` got optional `secondarySamples` + `primaryLabel` +
+  `secondaryLabel` parameters in b49. The secondary renders as a
+  dimmed dashed line behind the primary phase-colored trace, with both
+  exercise names in the legend.
+
+The legend swaps from "Pull / Return" to the two exercise names when a
+secondary trace is active, so the user can tell the traces apart.
+
+## Top-of-exercise-screen panel (b49)
+
+`ExerciseDetailView.dualVoltraTopPanel` — shown whenever both Voltras
+are paired (renamed from b48's `superset slot picker`). Three controls:
+
+1. **L / R slot picker** — which side this exercise targets.
+2. **Merge button** — collapses both sides onto this exercise as a
+   Combined virtual twin (b47 math, unchanged underneath).
+3. **Superset tag dot** — the toggle described above.
+
+`addAnotherExerciseButton` (renamed from b48's
+`addAnotherSupersetButton`) is shown below the Start button. Tapping
+it pops the user back to the day-tile screen so they can pick a second
+exercise; on commit, that exercise auto-assigns the unused slot.
+
+## What the user sees end-to-end
+
+1. Pair 2 Voltras.
+2. Tap a day tile (e.g. LEG DAY).
+3. Pick an exercise (e.g. Back Squat). Land on the exercise screen.
+4. Top panel shows L/R picker + Merge + Superset tag dot. L is
+   pre-selected.
+5. Optionally tap the Superset tag dot to mark this session as a
+   superset.
+6. Tap "Add Another Exercise." App pops to day tiles.
+7. Pick a second day tile + exercise (e.g. Back Day → Bent-Over Row).
+   R auto-selected.
+8. Tap Start set 1. Land on live grid. Banner shows the active +
+   next exercise names. Superset tag locks (read-only after this).
+9. Lift. Reps + force display live. After IDLE_GRACE finalizes the
+   set, REST starts immediately.
+10. Tap SWAP. Set is force-finalized, app navigates to the other
+    exercise's live grid, the new side auto-LOADs.
+11. Lift the other exercise. Force chart now shows both traces with
+    exercise names in the legend.
+12. Tap End Session. SwiftData WorkoutSession.supersetTag = true.

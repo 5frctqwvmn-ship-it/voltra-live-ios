@@ -1,76 +1,93 @@
 # 06 — HealthKit
 
-## Goals
+## Status (b49)
 
-- Stream heart rate **continuously** during a live session.
-- Stream active energy burned (calories) **continuously** during a session.
-- Surface a fresh-data indicator on the HR and kcal tiles.
+**Working.** First-launch authorization prompt now appears, VOLTRA Live
+shows up under iOS Settings → Health → Data Access & Devices, and HR /
+active-energy reads stream during workouts.
 
-## Current state (build 29, broken)
+## What was broken before b49
 
-- File: `VoltraLive/Health/HealthKitStore.swift`.
-- HR populates **once** at session start (snapshot read) and never updates.
-- Active calories never appear at all.
+Through b48, the auth prompt never appeared on a fresh install. The IPA
+contained the right entitlement (CI verified
+`com.apple.developer.healthkit` in the embedded provisioning profile),
+the Info.plist had the two required usage strings, and the app called
+`HKHealthStore.requestAuthorization` from
+`VoltraLiveApp.onAppear` — yet iOS silently ignored every request, no
+prompt, no error, no row in Settings.
 
-The user explicitly flagged this in build 29:
+## Root cause
 
-> "Heart rate is updating. I think it just got a snapshot... should be
-> pulling that information the entire time along with calories... There
-> should be an indication... maybe it's blinking when it's actively
-> receiving data."
+iOS 17+ tightened HealthKit entitlement parsing. The signed provisioning
+profile shipped **all three** HealthKit entitlement keys
+(`com.apple.developer.healthkit`,
+`com.apple.developer.healthkit.access`,
+`com.apple.developer.healthkit.background-delivery`), but the app's
+`VoltraLive.entitlements` file declared only the first.
 
-## Build 30 fix plan
+When the embedded profile and the app entitlements don't agree on the
+HealthKit key set, iOS marks the HealthKit registration as malformed
+and drops it on the floor — with no diagnostic surfaced to the app or
+the user. The framework call returns success, but no prompt is shown
+and no entry is written under Settings.
 
-### Streaming reads
+## Fix (b49)
 
-Use `HKAnchoredObjectQuery` for both quantity types:
+`VoltraLive/VoltraLive.entitlements` now declares all three keys to
+match the profile:
 
-- `HKQuantityType.quantityType(forIdentifier: .heartRate)`
-- `HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)`
+```xml
+<key>com.apple.developer.healthkit</key>
+<true/>
+<key>com.apple.developer.healthkit.access</key>
+<array/>
+<key>com.apple.developer.healthkit.background-delivery</key>
+<true/>
+```
 
-Pattern:
+`.access` is intentionally an empty array — we don't request any of the
+three "clinical-records" specializations. `.background-delivery` is set
+to `true` because we observe HR via `HKObserverQuery` while the screen
+may be off; without this key the OS may suspend the observer.
 
-1. Request authorization for both types when the session starts (already
-   wired for HR, confirm kcal is in the read set).
-2. Create one anchored query per type with `updateHandler` set, so new
-   samples deliver as they arrive.
-3. Persist the anchor for the lifetime of the session (in-memory is fine —
-   no need to durably persist between sessions).
-4. On each update, push the latest sample to the live tile.
-5. Stop the query on session end (don't leak across sessions).
+## CI guard
 
-Alternative if anchored queries don't fire while in foreground reliably:
-combine `HKObserverQuery` (callback when data lands) + a short
-`HKSampleQuery` (read the most recent sample). Anchored is preferred.
+The release workflow's "verify-entitlements" step now uses `plistlib` to
+parse the embedded entitlements (instead of regex on raw XML) and
+asserts exact-key presence:
 
-### Fresh-data indicator (`PulseDot`)
+- `com.apple.developer.healthkit == true`
+- `com.apple.developer.healthkit.access == []`
+- `com.apple.developer.healthkit.background-delivery == true`
 
-New SwiftUI view, used on HR and kcal tiles:
+If any of those drift in a future build, the dry-run/release fails
+before signing — preventing a regression where the entitlements file
+silently disagrees with the profile again.
 
-- Tracks a `lastUpdateAt: Date` per tile.
-- If `now - lastUpdateAt < 3 s`, show a green dot with a pulsing animation
-  (scale or opacity loop, ~1 Hz).
-- Else, fade to a solid grey dot.
+## Code paths
 
-Implementation notes:
+- `VoltraLiveApp.swift` — `requestAuthorizationOnce()` called from
+  `WindowGroup.onAppear`; gated by `UserDefaults` so we don't spam the
+  user across launches.
+- `Health/HealthKitClient.swift` — `HKObserverQuery` for HR,
+  `HKAnchoredObjectQuery` for active energy. Both attached on session
+  start, detached on session end.
+- Display surfaces: live HR + kcal pills in `LiveCaptureView` header.
 
-- Drive the staleness check off a `Timer.publish(every: 0.5, on: .main, in: .common)`
-  scoped to the tile, not a global tick — keeps idle tiles cheap.
-- Tile owners pass `lastUpdateAt` in via binding so the dot is decoupled
-  from the data source.
+## What we don't write to HealthKit
 
-## Authorization
+We are read-only for now. Writing a `HKWorkout` on session end is on
+the roadmap (see `03_ROADMAP.md`); when that lands, add
+`com.apple.developer.healthkit.access` entries for `HKWorkoutType` and
+the share-permission usage string to Info.plist.
 
-Verify in `Info.plist` that both `NSHealthShareUsageDescription` and
-`NSHealthUpdateUsageDescription` are populated with user-facing strings
-(don't leak engineering jargon).
+## Smoke test (after each release)
 
-## Test plan
-
-- Real device only — HealthKit doesn't deliver in simulator.
-- Wear an Apple Watch or other HK-source for HR.
-- Start a workout in another app or on the Watch to generate
-  `activeEnergyBurned` samples.
-- Verify both tiles update at least every few seconds.
-- Verify the green pulse appears while data flows and goes grey within
-  ~3 s of the source pausing.
+1. Fresh install on a device that has never seen this build.
+2. First launch → expect HealthKit prompt before the home screen appears.
+3. Approve → open Settings → Health → Data Access & Devices → confirm
+   "VOLTRA Live" row exists.
+4. Start any workout → confirm HR pill updates within ~5 s of putting
+   the device on a wrist that's reporting HR.
+5. End session → kcal pill non-zero (Active Energy summed for the
+   session window).

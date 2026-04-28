@@ -25,6 +25,16 @@ then sets a "imported" flag so it doesn't run again.
 (Defer until build 30 ships.) See `08_SUPERSET.md` "Open questions for
 build 31" — copy them here when build 31 begins.
 
+## Recently closed
+
+### HealthKit first-launch prompt (b47/b48 deferred, b49 closed)
+
+Resolved in b49. Provisioning profile granted all three HealthKit
+entitlement keys but the app-side entitlements only declared
+`.healthkit`. iOS 17+ silently rejected auth on fresh installs. Fixed
+app-side by declaring all three keys; CI verify hardened to assert
+them with exact-key match. See `06_HEALTHKIT.md` for the full writeup.
+
 ## Process
 
 ### "Should we auto-update CloudKit re-enablement?"

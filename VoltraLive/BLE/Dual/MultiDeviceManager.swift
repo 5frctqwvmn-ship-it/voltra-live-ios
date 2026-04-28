@@ -154,17 +154,84 @@ final class MultiDeviceManager: ObservableObject {
     /// pattern as `LoggingStore.sessionExitTick`.
     @Published var supersetReturnToHomeTick: Int = 0
 
+    // MARK: - b49 unified flow
+
+    /// b49: Superset is no longer a workout mode \u2014 it's a tag on a
+    /// session that contains a chain of >=2 exercises. Functionally the
+    /// app behavior is the same whether the tag is on or off: the user
+    /// has multiple exercises bound to specific Voltras and SWAPs
+    /// between them. The tag only changes how the post-workout record
+    /// is stored (with a `supersetSession` flag and a cross-reference
+    /// between the chained exercises).
+    ///
+    /// Locked at the moment set 1 starts (see `lockSupersetTag()`).
+    /// User direction (this session, verbatim): "superset is just a
+    /// tag, like a rolling dot that you can click in the independent
+    /// mode... it's just how they're tracked is a little different."
+    @Published var supersetTag: Bool = false
+
+    /// b49: Becomes true the moment the first set of the session
+    /// finalizes. Once locked, the supersetTag toggle is read-only for
+    /// the rest of the session. Reset on session end via
+    /// `clearSupersetChain()` so the next workout opens unlocked.
+    @Published private(set) var supersetTagLocked: Bool = false
+
+    /// b49: Lock the superset tag. Called from LiveCaptureView when set
+    /// 1 begins for the first chained exercise. Idempotent.
+    func lockSupersetTag() {
+        guard !supersetTagLocked else { return }
+        supersetTagLocked = true
+    }
+
+    /// b49: True iff the user has 2 or more exercises in the chain AND
+    /// has both Voltras connected. Drives the tag toggle visibility and
+    /// the per-exercise context-swap behavior on SWAP. Replaces the
+    /// b48-era `inSupersetMode` predicate that gated on workoutMode.
+    var hasActiveSupersetChain: Bool {
+        supersetChain.count >= 2
+            && left.connectionState.isConnected
+            && right.connectionState.isConnected
+    }
+
+    /// b49: True iff exactly one Voltra is paired (used by the exercise
+    /// screen to skip the L/R picker and auto-bind to the connected side).
+    var soloVoltraConnected: DeviceSlot? {
+        let l = left.connectionState.isConnected
+        let r = right.connectionState.isConnected
+        if l && !r { return .left }
+        if r && !l { return .right }
+        return nil
+    }
+
     /// Append an exercise to the superset chain. Called by ExerciseStartView
     /// when the user taps "Add Another Superset" or "Start" in superset
     /// mode. Also stamps the per-side weight + label so the live banner
     /// renders correctly even if the chain is read piecemeal.
     func appendSupersetEntry(name: String, slot: DeviceSlot, weightLb: Double) {
-        let entry = SupersetChainEntry(
-            exerciseName: name,
-            slot: slot,
-            plannedWeightLb: weightLb
-        )
-        supersetChain.append(entry)
+        // b49: dedupe \u2014 if the active entry is being re-stamped (same
+        // name + same slot), update the planned weight in place rather
+        // than appending a duplicate. This avoids chain growth when the
+        // user taps Start (commits chain entry) on an already-chained
+        // exercise.
+        if let lastIdx = supersetChain.indices.last,
+           supersetChain[lastIdx].exerciseName == name,
+           supersetChain[lastIdx].slot == slot {
+            // Replace last entry with updated weight.
+            supersetChain[lastIdx] = SupersetChainEntry(
+                exerciseName: name,
+                slot: slot,
+                plannedWeightLb: weightLb
+            )
+            // Mirror cache below still applies; fall through.
+            // (We don't return early because the per-side mirror needs
+            // updating regardless.)
+        } else {
+            supersetChain.append(SupersetChainEntry(
+                exerciseName: name,
+                slot: slot,
+                plannedWeightLb: weightLb
+            ))
+        }
         // Mirror onto the per-side caches that LiveCaptureView's banner
         // consults so the OFF-active preview chip shows the right name +
         // weight even before the user has SWAPped into that side.
@@ -194,6 +261,9 @@ final class MultiDeviceManager: ObservableObject {
         supersetRightExercise = ""
         supersetLeftWeightLb = 0
         supersetRightWeightLb = 0
+        // b49: also reset the tag + lock so the next session opens fresh.
+        supersetTag = false
+        supersetTagLocked = false
     }
 
     /// Bump the home-return tick. ExerciseStartView calls this from

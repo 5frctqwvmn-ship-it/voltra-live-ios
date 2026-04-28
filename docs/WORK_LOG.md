@@ -1043,3 +1043,156 @@ the council's recommendation. No other b49 features in flight.
 **Cost callout for this change:** lite. File reads, two edits, one
 markdown write, one memory write, one commit/push. No subagents, no
 polling loops, no model calls beyond this conversation.
+
+
+---
+
+## 2026-04-28 — b49 (v0.4.27/49) — Unified flow + HK fix
+
+One ship bundling: the HealthKit first-launch prompt fix the council
+diagnosed, the unified Independent/Superset flow refactor the user
+asked for after b48 hands-on testing, and a bundle of telemetry display
+bug fixes from the same b48 feedback round.
+
+**HealthKit fix (council-diagnosed):**
+
+Council answer matched the b48 deferred hypothesis: the App Store
+provisioning profile has the full HealthKit capability bundle stamped
+on it (all three keys: `.healthkit`, `.healthkit.access`,
+`.healthkit.background-delivery`), but the app-side entitlements only
+declared `.healthkit = true`. iOS 17+ silently rejects the HK
+authorization request when the embedded entitlements don't match what
+the profile granted, with no Settings → Health row, no first-launch
+prompt, nothing.
+
+Fix is app-side only: declare all three keys in the entitlements file
+to match the profile. Empty `<array/>` on `.access` per Apple's
+developer docs (no usage strings required when array is empty;
+.share/.read are gated by the in-app `requestAuthorization` call which
+already names the types correctly).
+
+- `VoltraLive/VoltraLive.entitlements`: added
+  `com.apple.developer.healthkit.access = <array/>` and
+  `com.apple.developer.healthkit.background-delivery = true`.
+- `.github/workflows/release.yml`: hardened the CI "Verify embedded
+  entitlements" step. Old version did a substring grep on the binary
+  plist, which silently passed when the profile injected the key but
+  the app didn't declare it. New version uses `plistlib` to parse the
+  embedded entitlements XML and asserts ALL THREE keys present with
+  exact key match (no false positives from substring overlap).
+
+**Unified flow refactor:**
+
+User feedback after b48: "Independent mode and Superset are
+functionally identical when there are 2 paired Voltras. Superset is
+just a TAG, like a rolling dot. Don't make me pick a mode." The b46–b48
+WorkoutMode picker is gone. Flow is now: pair Voltras → day tile →
+exercise screen. WorkoutMode is auto-derived from paired-device count
+(1 paired → singleLeft/singleRight, 2 paired → independent). Combined
+stays as a same-bar use case via a "Merge" button on the exercise
+screen (b47 math is unchanged underneath).
+
+The Superset tag is a toggle in the exercise screen's top panel that
+locks at first set start. SWAP rebuilt as a full exercise-context swap:
+auto-end the in-flight set, navigate to the other entry's screen, auto-
+LOAD the incoming side and UNLOAD the outgoing one. Same exercise on
+both sides is now allowed.
+
+- `VoltraLive/Logging/Views/LoggingHomeView.swift`: `commitStart()`
+  auto-derives `workoutMode` from paired count.
+- `VoltraLive/BLE/Dual/MultiDeviceManager.swift`: added `supersetTag`,
+  `supersetTagLocked`, `lockSupersetTag()`, `hasActiveSupersetChain`,
+  `soloVoltraConnected`. Fixed a duplicate `let entry` compile error
+  in `appendSupersetEntry()`.
+- `VoltraLive/Logging/Views/ExerciseDetailView.swift`: `dualVoltraTopPanel`
+  shows a slot picker + Merge button + Superset tag dot whenever both
+  Voltras are paired, regardless of mode. `addAnotherExerciseButton`
+  renamed from "Add Another Superset" since it works in both flows.
+  Removed the `inSupersetMode` shim — everything reads
+  `showsDualVoltraPanel` (paired count).
+- `VoltraLive/Logging/Views/ExerciseStartView.swift`: mirror — gates only
+  on dual-paired, not workoutMode.
+- `VoltraLive/Logging/Persistence/LoggingStore.swift`: exposed
+  `cascadeIntervalSecondsForUI` and `cascadeIdleFinalizeSecondsForUI`
+  for UI sync; added `switchActiveInstanceByExerciseName(_:)` so SWAP
+  can flip the LoggingStore's active instance to the other exercise.
+- `VoltraLive/Logging/Views/LiveCaptureView.swift`: rebuilt
+  `swapSupersetSide()` as a full context swap (force-finalize → unload
+  outgoing → flipSlot → switchInstance → restore weight → push state →
+  load incoming). Added `.onChange(of: session.currentSet != nil)` →
+  `mdm.lockSupersetTag()` so the tag locks at set 1 start.
+
+**Telemetry display bug fixes (b48 hands-on):**
+
+1. Drop-set bars sync. b48 hardcoded `4.0` for the cascade interval
+   progress bar but the actual cascade interval is `2.0`. Bars now
+   read `cascadeIntervalSecondsForUI` so the visual matches the timer.
+   `VoltraLive/Logging/Views/LiveCaptureView.swift`.
+2. Rest activation timer −2s. Rest was anchoring to `Date()` at set
+   end, but the IDLE_GRACE window already burned 2s of "no movement"
+   before the boundary fired, so the user saw a 2s lag before the
+   timer started moving. Backdate `restStartedAt` by 2.0s in
+   `SessionStore.finalizeSet`.
+3. Reps + force display in Independent and Superset modes. b48
+   regression: `onLeftTelemetry`/`onRightTelemetry` were ALWAYS routing
+   into `SessionStore.handleLiveSample` regardless of `supersetActiveSlot`,
+   so the inactive side's telemetry kept overwriting reps/peak. Now
+   only the active slot's stream feeds SessionStore in `.independent`
+   and `.superset` modes. `.combined` still merges both via the virtual
+   twin. `VoltraLive/VoltraLiveApp.swift`.
+4. Force graph: 2 distinct labeled traces during a superset.
+   `SessionStore.lastFinalizedByExercise: [String: [ForceSample]]` is
+   populated at the end of `LoggingStore.autoLogTelemetrySet` keyed by
+   the active instance's exercise name. `ForceChartView` got optional
+   `secondarySamples` + `primaryLabel` + `secondaryLabel` parameters and
+   renders the secondary as a dimmed dashed trace behind the primary
+   phase-colored trace, with the two exercise names in the legend.
+   `LiveCaptureView.forceChart` wires it on whenever a 2+ chain is
+   active and the other entry has a stashed trace.
+5. Set logging supersetTag session metadata. New
+   `WorkoutSession.supersetTag: Bool` SwiftData field (additive,
+   default false) is stamped from `mdm.supersetTag` right before
+   `endSession()`. Per-exercise attribution already works correctly
+   via SWAP flipping the active ExerciseInstance — each LoggedSet
+   inherits the correct exercise from `instance` at insert time.
+
+**Files changed:**
+
+- VoltraLive/VoltraLive.entitlements (HK fix)
+- .github/workflows/release.yml (CI verify hardening)
+- VoltraLive/Logging/Views/LoggingHomeView.swift (auto-derived workoutMode)
+- VoltraLive/BLE/Dual/MultiDeviceManager.swift (tag, lock, helpers, dup-fix)
+- VoltraLive/Logging/Views/ExerciseDetailView.swift (dualVoltraTopPanel)
+- VoltraLive/Logging/Views/ExerciseStartView.swift (paired-count gate)
+- VoltraLive/Logging/Persistence/LoggingStore.swift (UI helpers, switchInstance, lastFinalizedByExercise population)
+- VoltraLive/Logging/Views/LiveCaptureView.swift (drop-bar sync, full SWAP, tag lock, force-chart 2-trace, supersetTag session-end stamp)
+- VoltraLive/Session/SessionStore.swift (rest -2s backdate, lastFinalizedByExercise dict)
+- VoltraLive/VoltraLiveApp.swift (active-slot telemetry routing)
+- VoltraLive/Logging/Model/LoggingModels.swift (WorkoutSession.supersetTag additive field)
+- VoltraLive/Views/ForceChartView.swift (secondarySamples/labels)
+- VoltraLive/Info.plist + project.yml (bumped to 0.4.27/49, label "Unified flow + HK fix")
+
+**Closed deferred items:**
+- HealthKit first-launch prompt (council-diagnosed, fixed in this build).
+
+**Cost callout for this build:** medium. Multi-file refactor with one
+SwiftData additive-field migration, one Charts API extension, no
+subagents, single dry-run + ship cycle.
+
+**Test plan after TestFlight install:**
+
+1. Fresh install → HK prompt appears at first launch.
+2. VOLTRA Live appears under Settings → Health → Data Access & Devices.
+3. HR/kcal flow live during a workout.
+4. Pair 1 Voltra → day tile → exercise screen → only that side, no picker.
+5. Pair 2 Voltras → day tile → exercise screen → L/R picker + Merge + Superset tag dot.
+6. Tap Merge → b47 Combined math live.
+7. Add second exercise → auto-assigns unused side → Superset tag visible.
+8. Toggle Superset ON → start set 1 → tag locks (read-only after).
+9. Reps + force display live during the set on the active side only.
+10. Drop-set timer matches progress bar (2s = 2s).
+11. Rest timer starts immediately at set end (no 2s lag).
+12. Force graph: 2 distinct labeled traces with exercise names.
+13. Tap SWAP mid-set → set auto-ends, app loads other exercise's screen, new side auto-LOADs.
+14. Set 2 logs under correct exercise name.
+15. End session → SwiftData WorkoutSession.supersetTag = true; post-workout shows the tag.

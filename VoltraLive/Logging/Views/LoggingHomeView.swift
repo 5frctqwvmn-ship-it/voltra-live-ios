@@ -166,17 +166,14 @@ struct LoggingHomeView: View {
             .sheet(isPresented: $showingDebug) {
                 DebugView()
             }
-            // Build 42: dual-Voltra workout-mode picker. Only shown when
-            // both Voltras are paired (gated upstream in `beginStart`).
-            .sheet(isPresented: $showingWorkoutModeSheet) {
-                WorkoutVoltraPickerSheet {
-                    if let p = pendingStart {
-                        commitStart(p)
-                    }
-                    pendingStart = nil
-                }
-                .environmentObject(mdm)
-            }
+            // b49: WorkoutVoltraPickerSheet on entry was killed in the
+            // unified-flow refactor. The picker is repurposed and now only
+            // surfaces from the exercise screen's "Merge" button (which
+            // the user only sees when 2 Voltras are paired and they
+            // explicitly want Combined-math same-bar lifting). All other
+            // assignment (LEFT/RIGHT, superset tag) is inline on the
+            // exercise screen — see ExerciseDetailView for the new top
+            // panel.
             .preferredColorScheme(.dark)
         }
     }
@@ -537,19 +534,36 @@ struct LoggingHomeView: View {
         customFieldFocused = false
     }
 
-    /// Build 42: shared entry point for starting a workout from any tile or
-    /// the custom-day card. If both Voltras are paired, defers to the
-    /// WorkoutVoltraPickerSheet; otherwise starts the session immediately.
+    /// b49: UNIFIED FLOW. The workout-mode picker sheet that gated workout
+    /// start when both Voltras were paired (b42–b48) is GONE. The user
+    /// always lands on the day tile picker, then on the exercise screen.
+    /// All per-Voltra assignment, the Combined-math "Merge" path, and the
+    /// Superset tag are now decided INSIDE the exercise screen, where they
+    /// belong contextually. Rationale: forcing a mode decision before the
+    /// user has even picked an exercise was backwards — the same two
+    /// Voltras might be a Combined heavy-lift on Back Squat and a Superset
+    /// pair on Seated Row + Belt Squat. Mode lives at the exercise level.
     private func beginStart(dayType: DayType, customLabel: String?) {
-        if bothVoltrasPaired {
-            pendingStart = PendingStart(dayType: dayType, customLabel: customLabel)
-            showingWorkoutModeSheet = true
-        } else {
-            commitStart(PendingStart(dayType: dayType, customLabel: customLabel))
-        }
+        commitStart(PendingStart(dayType: dayType, customLabel: customLabel))
     }
 
     private func commitStart(_ p: PendingStart) {
+        // b49: auto-derive the underlying WorkoutMode from what's paired.
+        //   1 Voltra paired   \u2192 .singleLeft / .singleRight per slot
+        //   2 Voltras paired  \u2192 .independent (Merge button in the
+        //                      exercise screen flips to .combined when the
+        //                      user wants Combined math)
+        // Superset is no longer a mode \u2014 it's a session-level tag set
+        // when the user toggles the dot in the exercise top panel.
+        let l = mdm.left.connectionState.isConnected
+        let r = mdm.right.connectionState.isConnected
+        if l && r {
+            mdm.workoutMode = .independent
+        } else if l {
+            mdm.workoutMode = .singleLeft
+        } else if r {
+            mdm.workoutMode = .singleRight
+        }
         if let lbl = p.customLabel {
             logging.startSession(dayType: p.dayType, customLabel: lbl)
         } else {

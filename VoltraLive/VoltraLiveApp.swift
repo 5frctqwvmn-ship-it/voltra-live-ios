@@ -185,6 +185,15 @@ struct VoltraLiveApp: App {
                     //   .independent -> both forwarded raw (no summing,
                     //                   user sees combined activity in tile)
                     //   .combined    -> merged virtual-twin reading
+                    // b49: with both Voltras paired, the user is only
+                    // physically on ONE side at a time. b48 .independent
+                    // forwarded BOTH sides into the same telemetry sink,
+                    // which made reps + force flap between the two streams
+                    // (regression report: "reps not counting, force not
+                    // tracking"). Fix: route only the supersetActiveSlot's
+                    // stream into the session, regardless of whether the
+                    // chain has been used. The Merge button switches to
+                    // .combined which falls through to onCombinedTelemetry.
                     multi.onLeftTelemetry = { [weak multi] t in
                         guard let m = multi else { return }
                         let bothConnected = m.left.connectionState.isConnected
@@ -198,16 +207,15 @@ struct VoltraLiveApp: App {
                         }
                         // Both connected: respect workoutMode.
                         switch m.workoutMode {
-                        case .singleLeft, .independent:
+                        case .singleLeft:
                             telemetryHandler(t)
                         case .singleRight, .combined:
                             break  // singleRight ignores left; combined waits for onCombinedTelemetry
-                        case .superset:
-                            // b48: superset routes telemetry from the ACTIVE side
-                            // only \u2014 the user is doing only one exercise at a
-                            // time, so the inactive Voltra (still loaded with
-                            // the other exercise's resistance) should not
-                            // produce session telemetry.
+                        case .independent, .superset:
+                            // b49: route only the active slot \u2014 user
+                            // is only on one side at a time. SWAP flips
+                            // supersetActiveSlot, which atomically moves
+                            // the telemetry stream to the other side.
                             if m.supersetActiveSlot == .left { telemetryHandler(t) }
                         }
                     }
@@ -222,12 +230,12 @@ struct VoltraLiveApp: App {
                             return
                         }
                         switch m.workoutMode {
-                        case .singleRight, .independent:
+                        case .singleRight:
                             telemetryHandler(t)
                         case .singleLeft, .combined:
                             break
-                        case .superset:
-                            // b48: same active-side rule as the left handler.
+                        case .independent, .superset:
+                            // b49: same active-side rule as the left handler.
                             if m.supersetActiveSlot == .right { telemetryHandler(t) }
                         }
                     }
