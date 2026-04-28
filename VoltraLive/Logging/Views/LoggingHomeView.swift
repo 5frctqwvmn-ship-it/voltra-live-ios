@@ -19,6 +19,11 @@ struct LoggingHomeView: View {
     /// the user see at a glance whether HK has been asked for permission
     /// and tap to re-prompt if it never appeared.
     @EnvironmentObject var health: HealthKitStore
+    /// Build 40: dual-Voltra status feeds the connection pill so we can
+    /// show "Left + Right" when both are paired via the unified Connect
+    /// sheet. Selection of which Voltra is active for a workout still
+    /// happens pre-workout (b42), so this chip is purely informational.
+    @EnvironmentObject var mdm: MultiDeviceManager
 
     @State private var pickedDayType: DayType? = nil
     @State private var customLabel: String = ""
@@ -220,14 +225,34 @@ struct LoggingHomeView: View {
         .buttonStyle(.plain)
     }
 
+    /// Build 40: dual-aware connection pill.
+    ///
+    /// Priority for the label:
+    ///   1. If MultiDeviceManager has BOTH slots connected -> "Left + Right".
+    ///   2. If only one MDM slot is connected             -> "Left" or "Right".
+    ///   3. Else fall back to the legacy single-device manager:
+    ///        connected     -> "Connected"
+    ///        anything else -> "Not connected"
+    /// The dot is green whenever ANY of the above is connected.
     private var connectionPill: some View {
-        HStack(spacing: 6) {
+        let leftPaired  = mdm.left.connectionState.isConnected
+        let rightPaired = mdm.right.connectionState.isConnected
+        let blePaired   = ble.connectionState.isConnected
+        let anyConnected = leftPaired || rightPaired || blePaired
+        let label: String = {
+            if leftPaired && rightPaired { return "Left + Right" }
+            if leftPaired  { return "Left connected" }
+            if rightPaired { return "Right connected" }
+            if blePaired   { return "Connected" }
+            return "Not connected"
+        }()
+        return HStack(spacing: 6) {
             Circle()
-                .fill(ble.connectionState.isConnected ? VoltraColor.accent : VoltraColor.textFaint)
+                .fill(anyConnected ? VoltraColor.accent : VoltraColor.textFaint)
                 .frame(width: 8, height: 8)
-                .shadow(color: ble.connectionState.isConnected ? VoltraColor.accent : .clear,
+                .shadow(color: anyConnected ? VoltraColor.accent : .clear,
                         radius: 4)
-            Text(ble.connectionState.isConnected ? "Connected" : "Not connected")
+            Text(label)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(VoltraColor.textDim)
         }
@@ -480,4 +505,5 @@ struct LoggingHomeView: View {
         .environmentObject(LoggingStore())
         .environmentObject(DemoController())
         .environmentObject(HealthKitStore())
+        .environmentObject(MultiDeviceManager())
 }

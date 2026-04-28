@@ -7,9 +7,12 @@ import SwiftUI
 struct ConnectView: View {
     @EnvironmentObject var ble: VoltraBLEManager
     @EnvironmentObject var demo: DemoController
+    @EnvironmentObject var mdm: MultiDeviceManager
 
-    // v0.4.8 build 30: optional dual-Voltra entry. Off by default.
-    @State private var showDualConnect: Bool = false
+    // Build 40: single unified connect sheet replaces both the
+    // auto-connect-first-Voltra path and the separate "Pair 2 Voltras"
+    // page. Tap Connect -> sheet appears -> user picks 1 or 2 Voltras.
+    @State private var showConnectSheet: Bool = false
 
     private var statusMessage: String {
         switch ble.connectionState {
@@ -31,8 +34,10 @@ struct ConnectView: View {
     var body: some View {
         NavigationStack {
             content
-                .navigationDestination(isPresented: $showDualConnect) {
-                    DualConnectView()
+                .sheet(isPresented: $showConnectSheet) {
+                    UnifiedConnectSheet()
+                        .environmentObject(ble)
+                        .environmentObject(mdm)
                 }
         }
     }
@@ -92,9 +97,12 @@ struct ConnectView: View {
                         .lineSpacing(4)
                 }
 
-                // Connect button
+                // Connect button - opens the unified discovery sheet so
+                // the user can see every nearby Voltra and pick one (single
+                // mode) or two (dual mode). No more guessing which device
+                // the auto-scan grabs first.
                 Button {
-                    ble.startScan()
+                    showConnectSheet = true
                 } label: {
                     HStack(spacing: 10) {
                         if isConnecting {
@@ -146,47 +154,11 @@ struct ConnectView: View {
                         .multilineTextAlignment(.center)
                 }
 
-                // Build 31: Demo Mode is now a primary, full-width call to
-                // action under Connect. User reported the previous secondary
-                // text-styled button was missable and "Demo mode does
-                // nothing" \u2014 actually it was working but never visibly
-                // routed away from this screen (ContentView didn't honor
-                // demo.isActive). Both fixed now.
-                Button {
-                    guard let handler = DemoTelemetryBridge.shared.handler else { return }
-                    demo.note(.buttonTap(label: "Skip - Try Demo", screen: "Connect"))
-                    demo.enter(source: .prePair, onTelemetry: handler)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "play.rectangle")
-                        Text("Skip - Try Demo")
-                    }
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(VoltraColor.accent)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(VoltraColor.accent, lineWidth: 1.5)
-                    )
-                }
-                .buttonStyle(.plain)
-                .opacity(demo.isActive ? 0.4 : 1.0)
-                .disabled(demo.isActive)
-                .accessibilityLabel("Skip pairing and enter Demo Mode")
-
-                // v0.4.8 build 30: dual-Voltra opt-in. Tiny tertiary link
-                // — single-device flow above is unchanged.
-                Button {
-                    showDualConnect = true
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "square.split.2x1")
-                        Text("Pair 2 Voltras (beta)")
-                    }
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(VoltraColor.textDim)
-                }
+                // Build 40: removed "Skip - Try Demo" and "Pair 2 Voltras"
+                // buttons from this screen. Demo mode lives in the Debug
+                // sheet (gear icon on the home screen) per user direction;
+                // dual-Voltra pairing is folded into the unified Connect
+                // sheet above (multi-select to pair two at once).
             }
             .padding(40)
             .background(VoltraColor.bgElev)

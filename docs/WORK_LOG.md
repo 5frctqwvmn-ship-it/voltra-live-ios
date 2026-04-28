@@ -663,3 +663,16 @@ Root cause (scan): `VoltraDiscoveryScanner.start()` returned early when `central
 Fix (scan): added `startRequested: Bool` flag, factored the actual scan call into a private `beginScanning()` helper, and made `centralManagerDidUpdateState` call `beginScanning()` when poweredOn arrives if `startRequested` was set. `start()` now sets the flag and either begins immediately or waits for the delegate callback.
 Fix (button): shortened "Connect Both (auto-pair top 2)" -> "Auto-Pair Both" and gave `buttonLabel` a `minHeight: 44` with `lineLimit(1)` + `minimumScaleFactor(0.85)` so the three buttons render at consistent height.
 Files changed: VoltraLive/BLE/Dual/VoltraDiscoveryScanner.swift, VoltraLive/Views/Dual/DualConnectView.swift, VoltraLive/Info.plist, project.yml, docs/WORK_LOG.md
+
+## 2026-04-27 — b40 "Connect unify"
+Single Connect entry point. The old flow forced the user into one of two doors before they knew what was nearby: a big "Connect to VOLTRA" button that auto-grabbed the first Voltra it saw (no choice over which one), OR a separate "Pair 2 Voltras (beta)" link that pushed to DualConnectView. User feedback: "When I hit connect to Bluetooth, it doesn't give me an option of which one to connect to if there are two available... There's a Connect to Voltra button as it is today, you hit that, it brings you to a new menu that shows available voltras. You can either click one or both."
+
+Changes:
+- New `VoltraLive/Views/UnifiedConnectSheet.swift`: discovery list backed by VoltraDiscoveryScanner with multi-select. Tap one row -> "Connect" (single mode, routes through ble.connectKnown). Tap two rows -> "Connect Both" (dual mode, routes through mdm.connectBoth, first tap = LEFT, second = RIGHT). FIFO replacement if a 3rd row is tapped.
+- `ConnectView`: replaced `ble.startScan()` direct call with sheet present. Removed the "Skip - Try Demo" full-width button and the "Pair 2 Voltras (beta)" tertiary link. Demo mode now lives only in the Debug sheet (gear icon on home).
+- `ContentView`: routing gate now also flips to LoggingHomeView when `mdm.left` or `mdm.right` is connected (not only the legacy single-device manager). This is what makes both single- and dual-pair flows land on the same home screen instead of a separate Dual Capture screen.
+- `LoggingHomeView.connectionPill`: dual-aware label. "Left + Right" when both MDM slots are paired, "Left connected" / "Right connected" when one slot, falls back to legacy "Connected" / "Not connected" otherwise. Passive label only -- selection of which Voltra is active for a workout still happens pre-workout (b42).
+
+DualConnectView and DualCaptureView are no longer reachable from the UI but the files remain in the project; b41 will rewire MDM telemetry into the unified pipeline and b42 will add the pre-workout Voltra picker, after which those files can be removed.
+
+Files changed: VoltraLive/Views/UnifiedConnectSheet.swift (new), VoltraLive/Views/ConnectView.swift, VoltraLive/Views/ContentView.swift, VoltraLive/Logging/Views/LoggingHomeView.swift, VoltraLive/Info.plist, project.yml, docs/WORK_LOG.md
