@@ -924,3 +924,66 @@ Files changed: VoltraLive/BLE/Dual/DualMode.swift, VoltraLive/BLE/Dual/MultiDevi
 7. Switch to Independent → nudgers should be **−5 / +5** and **−1 / +1** again.
 8. Single-Voltra and singleLeft / singleRight modes should still work (no regressions).
 
+
+## b48 — v0.4.26 (build 48) — "Superset chain"
+
+**Date:** 2026-04-28
+**Goal:** Iterate on b47's Superset MVP based on the user's first hands-on feedback. Make Superset a real chain-builder: assign each exercise to a specific Voltra at the per-exercise screen, add an "Add Another Superset" CTA that pops back to the day-tile screen so the user can chain N exercises together, surface the real exercise names on the live banner, and fix LOAD/UNLOAD so it only fires the active Voltra in Superset mode.
+
+**User direction (verbatim, this session):**
+- "the moment you select the first part of the superset, you just sign it. you will need to assign it to the Voltra. and then after that, to main menu. we have the main menu with the tile selection where it says leg day, back day, chest day, arm day so that you can select your next set."
+- "instead of start set It should be there should be another button under it. it says Add Another Superset. and then that should take you back up to the main tile screen."
+- "you also need to wait. to indicate which Voltra. this specific activity is going to use. he should be able to select that. so it should be in the superset mode right under the title of the set she show you right or left? Voltra and you just click one therou activate."
+- "and then to the very bottom it should have a 'add another superset'. and that'll take you out back to the main tile screen without having to select the superset again. so that you can chain these activities together and then select to write Voltra to sighted you, and you swap back and forth."
+- "Swapping back and forth mechanism I see works well." (preserve)
+- "you have now exercise A that should be... the name of the exercise. the other name of the exercise [should show, not 'A/B']."
+- "Unload Tonsion isn't tied to whatever exercise A or B it's on, it unloads both of them, which is not the intended behavior." → LOAD/UNLOAD active-side only in Superset.
+- "I also didn't get the prompt for the health kit." (deferred again — see below)
+- Autonomy: "you let it all. I'm going to bed, so use your discretion. to keep it going without needing my input."
+
+**Fixes & features:**
+
+- **A — Per-exercise Voltra assignment in Superset.** ExerciseDetailView (the screen that opens after picking an exercise from a day tile) now shows an "ASSIGN TO VOLTRA" picker at the very top when `mdm.workoutMode == .superset`, with two big LEFT / RIGHT buttons. The user taps one to bind THIS exercise to a specific Voltra slot. A small chip shows "#N IN CHAIN" once the chain has at least one entry so the user knows where they are. The picker pre-selects LEFT for even-indexed entries and RIGHT for odd ones, so a user who just taps through gets natural alternation. Same UI added to ExerciseStartView for the alternate flow.
+
+- **B — "Add Another Superset" CTA chains exercises.** Right under the "Start set N" button, when in Superset mode, ExerciseDetailView (and ExerciseStartView) now shows an "Add Another Superset" button. Tapping it stamps THIS exercise into the chain (`mdm.appendSupersetEntry`), then bumps `mdm.supersetReturnToHomeTick`. LoggingHomeView watches that tick and unwinds the navigation stack back to the day-tile screen. The user is now back at "leg day / back day / chest day / arm day" without ever leaving Superset mode — they pick another exercise, assign it to a Voltra, and either chain again or hit Start to enter the live grid.
+
+- **C — Real exercise names on the live banner.** The Superset banner in LiveCaptureView now reads `mdm.activeSupersetEntry?.exerciseName` and `mdm.nextSupersetEntry?.exerciseName` for the NOW and NEXT chips respectively. So instead of the b47 stub "Exercise A / Exercise B", the user sees "Back Squat / Bent-Over Row" (or whatever they picked). Falls back to the old per-side label cache if the chain isn't populated, then to A/B if nothing is set.
+
+- **D — LOAD/UNLOAD in Superset = active side only.** `MultiDeviceManager.slotsForWorkoutMode()` previously routed LOAD/UNLOAD to BOTH sides in Superset (bundled with combined/independent). Per b48 user feedback, that unloaded the OTHER exercise's Voltra mid-rest, which broke the chain. Now Superset routes to `[supersetActiveSlot]` only. Combined still hits both — the b47 "fires both sides" fix for combined LOAD/UNLOAD is preserved.
+
+- **E — Chain data model in MultiDeviceManager.** New nested struct `SupersetChainEntry { id, exerciseName, slot, plannedWeightLb }`. New published props `supersetChain: [SupersetChainEntry]`, `supersetChainIndex: Int`, `supersetReturnToHomeTick: Int`. New methods `appendSupersetEntry`, `clearSupersetChain`, `requestSupersetReturnToHome`, `flipSupersetActiveSlot` (now chain-aware: 2+ entries → advance index modulo length; <2 entries → toggle left/right as before). Computed `activeSupersetEntry` and `nextSupersetEntry` for view consumption.
+
+- **F — SWAP is chain-aware.** LiveCaptureView's `swapSupersetSide` now restores weight from `mdm.activeSupersetEntry?.plannedWeightLb` first, falling back to the per-side weight cache. So in a chain of 3+ exercises, each exercise remembers its own starting weight and SWAP cycles through them in order.
+
+- **G — Chain lifecycle.** Chain clears on session end (LoggingHomeView watches `sessionExitTick` and calls `mdm.clearSupersetChain()`). Chain also clears when the user changes WorkoutMode in the picker (WorkoutVoltraPickerSheet drops the chain on mode-change confirmation).
+
+**Files changed:**
+- VoltraLive/BLE/Dual/MultiDeviceManager.swift (chain model, append/clear, return-home tick, chain-aware flip + active/next computed props, slotsForWorkoutMode case for superset = active only)
+- VoltraLive/Logging/Views/ExerciseDetailView.swift (supersetSlotPicker, addAnotherSupersetButton, commitChainEntryFromCurrentState, default-slot pre-select on appear)
+- VoltraLive/Logging/Views/ExerciseStartView.swift (same UI for the smart-start screen)
+- VoltraLive/Logging/Views/LiveCaptureView.swift (banner reads chain entry names, swap restores chain entry weight)
+- VoltraLive/Logging/Views/LoggingHomeView.swift (onChange: mdm.supersetReturnToHomeTick → pop to root; onChange: sessionExitTick → also clearSupersetChain)
+- VoltraLive/Views/WorkoutVoltraPickerSheet.swift (clearSupersetChain on mode change)
+- VoltraLive/Info.plist + project.yml (bumped to 0.4.26/48, label "Superset chain")
+
+**Deferred (still — see b47 entry):**
+- **HealthKit first-launch prompt.** User confirmed again in b48 feedback: "I also didn't get the prompt for the health kit on the soil as well." HR/kcal continue to flow from the b46 entitlement fix, but the system permission prompt + the in-Settings Health row still don't appear. Likely cause is the App Store provisioning profile in the Apple Developer portal still has `com.apple.developer.healthkit.access` baked in, which the IPA inherits even though our local entitlements file doesn't declare it. Action item for next build: regenerate the App Store provisioning profile in the portal, or write a build-time check that strips the profile-injected `healthkit.access` key from the embedded entitlements before re-signing. The dry-run "Verify embedded entitlements" step has been showing this clean for the local file — the discrepancy is between local entitlements vs. profile-injected.
+- **Stand-mode in Combined doubles instead of splits.** Low priority.
+- **Dampers in Combined map level 1 → level VIII per side.** Low priority.
+- **Bands in Combined.** Same family. Low priority.
+
+**Test plan after TestFlight install:**
+1. Pair both Voltras → mode picker → Superset → Start Workout.
+2. Tap LEG DAY tile → pick "Back Squat" exercise → land on the exercise screen.
+3. Verify the new "ASSIGN TO VOLTRA" picker at the top with LEFT / RIGHT buttons. Pick LEFT.
+4. Verify a new "Add Another Superset" button appears below the existing Start button.
+5. Tap "Add Another Superset" → app pops back to the day-tile screen ("PICK A DAY"). You should still be in Superset mode (no need to re-pick).
+6. Tap BACK DAY tile → pick "Bent-Over Row" → land on its exercise screen. The slot picker should auto-pre-select RIGHT (alternation). Verify "#2 IN CHAIN" appears in the picker header.
+7. Tap "Start set 1" instead of Add Another → you land on the live grid.
+8. Banner above the grid should read NOW: Back Squat (LEFT, accent) and NEXT: Bent-Over Row (RIGHT, dimmed). Real names, not "Exercise A / B".
+9. Tap UNLOAD → ONLY the LEFT Voltra unloads. Right stays loaded. (b48 fix.)
+10. Tap SWAP → banner flips to NOW: Bent-Over Row (RIGHT) / NEXT: Back Squat (LEFT). Weight retargets to whatever you picked for the row.
+11. Tap UNLOAD again → only RIGHT unloads now.
+12. Optional: chain a third exercise and verify SWAP cycles 1 → 2 → 3 → 1 → 2 → ...
+13. Switch to Combined → confirm chain is cleared and combined routing still hits both sides on LOAD/UNLOAD (b47 regression check).
+

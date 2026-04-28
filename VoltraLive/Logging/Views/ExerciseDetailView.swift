@@ -64,6 +64,10 @@ struct ExerciseDetailView: View {
 
     @State private var navigateToCapture = false
     @State private var didInitialize = false
+    /// b48: per-exercise Voltra assignment in superset mode. Default
+    /// alternates by chain length so the user can just tap through and
+    /// the exercises auto-assign to alternating Voltras.
+    @State private var supersetSlot: DeviceSlot = .left
 
     init() {
         // Build the writer eagerly so the first apply() has a live target.
@@ -72,11 +76,22 @@ struct ExerciseDetailView: View {
         _writerRouter = StateObject(wrappedValue: WriterRouter())
     }
 
+    /// b48: True when this view is presented as part of a Superset
+    /// chain build-up. Drives the Voltra picker + Add-Another button.
+    private var inSupersetMode: Bool {
+        mdm.workoutMode == .superset
+            && mdm.left.connectionState.isConnected
+            && mdm.right.connectionState.isConnected
+    }
+
     var body: some View {
         ZStack {
             VoltraColor.bg.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    if inSupersetMode {
+                        supersetSlotPicker
+                    }
                     historyStrip
                     progressChart
                     modeSection
@@ -84,6 +99,9 @@ struct ExerciseDetailView: View {
                     targetSection
                     voltraConfirmStrip
                     startButton
+                    if inSupersetMode {
+                        addAnotherSupersetButton
+                    }
                     Spacer(minLength: 24)
                 }
                 .padding(20)
@@ -99,6 +117,12 @@ struct ExerciseDetailView: View {
             if !didInitialize {
                 seedFromHistory()
                 didInitialize = true
+            }
+            // b48: pre-select the slot for this entry. Even chain length
+            // -> left, odd -> right so the user can chain entries by
+            // tapping through. They can override before Start/Add.
+            if inSupersetMode {
+                supersetSlot = (mdm.supersetChain.count % 2 == 0) ? .left : .right
             }
             pushToVoltra()
         }
@@ -363,8 +387,111 @@ struct ExerciseDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
+    // MARK: - b48 Superset chain UI
+
+    /// b48: Voltra picker shown above the history strip in Superset mode.
+    /// User picks LEFT or RIGHT to bind THIS exercise to a specific
+    /// Voltra. This is the assignment that drives the live banner +
+    /// LOAD/UNLOAD routing during the actual set.
+    private var supersetSlotPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("ASSIGN TO VOLTRA")
+                    .font(.system(size: 11, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundColor(VoltraColor.textDim)
+                Spacer()
+                if !mdm.supersetChain.isEmpty {
+                    Text("#\(mdm.supersetChain.count + 1) IN CHAIN")
+                        .font(.system(size: 10, weight: .bold))
+                        .kerning(1.0)
+                        .foregroundColor(VoltraColor.accent)
+                }
+            }
+            HStack(spacing: 10) {
+                ForEach(DeviceSlot.allCases) { slot in
+                    let selected = (slot == supersetSlot)
+                    Button {
+                        supersetSlot = slot
+                    } label: {
+                        VStack(spacing: 2) {
+                            Image(systemName: slot == .left ? "l.circle.fill" : "r.circle.fill")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(selected ? VoltraColor.bg : VoltraColor.accent)
+                            Text(slot.label.uppercased())
+                                .font(.system(size: 12, weight: .bold))
+                                .kerning(1.0)
+                                .foregroundColor(selected ? VoltraColor.bg : VoltraColor.text)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(selected ? VoltraColor.accent : VoltraColor.bgElev2)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(selected ? VoltraColor.accent : VoltraColor.border, lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(14)
+        .background(VoltraColor.bgElev)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(VoltraColor.accent.opacity(0.4), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// b48: "Add Another Superset" CTA. Stamps THIS exercise into the
+    /// chain and pops the navigation stack back to the day-tile screen
+    /// so the user can pick the next exercise without leaving Superset
+    /// mode. Does NOT start the live session.
+    private var addAnotherSupersetButton: some View {
+        Button {
+            commitChainEntryFromCurrentState()
+            mdm.requestSupersetReturnToHome()
+        } label: {
+            HStack {
+                Image(systemName: "plus.circle")
+                Text("Add Another Superset")
+            }
+            .font(.system(size: 15, weight: .semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(VoltraColor.accent.opacity(0.15))
+            .foregroundColor(VoltraColor.accent)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(VoltraColor.accent.opacity(0.5), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    /// b48: persist this exercise into the superset chain. Reads weight
+    /// from whichever mode is active; defaults to baseLb in weight mode.
+    private func commitChainEntryFromCurrentState() {
+        let name = logging.activeInstance?.exercise?.name ?? "Exercise"
+        let weight: Double
+        switch mode {
+        case .weight: weight = Double(baseLb)
+        case .band:   weight = Double(bandMaxForceLb)
+        case .damper: weight = 0
+        }
+        mdm.appendSupersetEntry(name: name, slot: supersetSlot, weightLb: weight)
+    }
+
     private var startButton: some View {
         Button {
+            // b48: in superset mode, also stamp this exercise into the
+            // chain before opening live so the banner has the right
+            // labels and slot bindings from the first frame.
+            if inSupersetMode {
+                commitChainEntryFromCurrentState()
+            }
             // v0.4.0 — plumb the FULL upcoming-set context into LoggingStore so
             // when telemetry detects the set boundary, autoLogTelemetrySet()
             // can build a complete LoggedSet without any user prompt.
@@ -636,5 +763,6 @@ private final class WriterHolder: ObservableObject {
             .environmentObject(LoggingStore())
             .environmentObject(SessionStore())
             .environmentObject(VoltraBLEManager())
+            .environmentObject(MultiDeviceManager())
     }
 }

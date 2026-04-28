@@ -150,6 +150,15 @@ struct LoggingHomeView: View {
             // the day-picker home and isn't stranded on a stale capture view.
             .onChange(of: logging.sessionExitTick) { _, _ in
                 pickedDayType = nil
+                // b48: chain is per-session. After end-and-export, drop
+                // it so the next workout starts fresh.
+                mdm.clearSupersetChain()
+            }
+            // b48: "Add Another Superset" pops the user back to the day-tile
+            // home so they can pick the next exercise without leaving
+            // superset mode. We watch the tick and unwind the nav stack.
+            .onChange(of: mdm.supersetReturnToHomeTick) { _, _ in
+                pickedDayType = nil
             }
             .navigationDestination(isPresented: $showingDashboard) {
                 DashboardView()

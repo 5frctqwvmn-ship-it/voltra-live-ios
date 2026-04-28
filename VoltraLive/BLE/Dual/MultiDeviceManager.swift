@@ -107,11 +107,128 @@ final class MultiDeviceManager: ObservableObject {
     @Published var supersetLeftExercise:  String = ""
     @Published var supersetRightExercise: String = ""
 
+    // b48 v2 (build 48): Superset CHAIN. The user can queue an arbitrary
+    // number of exercises into a chain BEFORE the live capture screen
+    // starts; each entry is bound to a specific Voltra slot. The SWAP
+    // button advances through the chain (left/right alternation comes
+    // from the entry order, not from a hardcoded toggle). Empty chain =
+    // legacy two-exercise mode (left = A, right = B).
+    //
+    // User direction (verbatim, this session): "there should be another
+    // button under it. It says Add Another Superset. and then that
+    // should take you back up to the main tile screen." The chain is
+    // built up via that button on ExerciseStartView; LiveCaptureView
+    // just consumes it.
+
+    /// One entry in the superset chain.
+    struct SupersetChainEntry: Equatable, Identifiable {
+        let id: UUID
+        /// Display name from the Exercise catalog (e.g. "Back Squat").
+        let exerciseName: String
+        /// Which Voltra is loaded for this exercise.
+        let slot: DeviceSlot
+        /// Planned starting weight in lb (device coordinate).
+        let plannedWeightLb: Double
+        init(exerciseName: String, slot: DeviceSlot, plannedWeightLb: Double) {
+            self.id = UUID()
+            self.exerciseName = exerciseName
+            self.slot = slot
+            self.plannedWeightLb = plannedWeightLb
+        }
+    }
+
+    /// Ordered queue of exercises in the current superset. Empty before
+    /// the user adds anything (or in non-superset modes). The active
+    /// entry is `supersetChain[supersetChainIndex]` if the index is in
+    /// range; SWAP advances the index modulo chain length.
+    @Published var supersetChain: [SupersetChainEntry] = []
+
+    /// Index into `supersetChain` of the currently-active entry. Wraps
+    /// modulo chain length on SWAP. Ignored when chain is empty.
+    @Published var supersetChainIndex: Int = 0
+
+    /// Tick that ExerciseStartView bumps when the user taps "Add Another
+    /// Superset". LoggingHomeView watches this in `.onChange` and pops
+    /// its NavigationStack back to the day-tile screen so the user can
+    /// pick the next exercise without leaving superset mode. Same
+    /// pattern as `LoggingStore.sessionExitTick`.
+    @Published var supersetReturnToHomeTick: Int = 0
+
+    /// Append an exercise to the superset chain. Called by ExerciseStartView
+    /// when the user taps "Add Another Superset" or "Start" in superset
+    /// mode. Also stamps the per-side weight + label so the live banner
+    /// renders correctly even if the chain is read piecemeal.
+    func appendSupersetEntry(name: String, slot: DeviceSlot, weightLb: Double) {
+        let entry = SupersetChainEntry(
+            exerciseName: name,
+            slot: slot,
+            plannedWeightLb: weightLb
+        )
+        supersetChain.append(entry)
+        // Mirror onto the per-side caches that LiveCaptureView's banner
+        // consults so the OFF-active preview chip shows the right name +
+        // weight even before the user has SWAPped into that side.
+        switch slot {
+        case .left:
+            supersetLeftExercise = name
+            supersetLeftWeightLb = weightLb
+        case .right:
+            supersetRightExercise = name
+            supersetRightWeightLb = weightLb
+        }
+        // The active slot tracks whichever entry is at
+        // supersetChainIndex. If the new entry is the first one, point
+        // the index at it so the user opens at THIS exercise.
+        if supersetChain.count == 1 {
+            supersetChainIndex = 0
+            supersetActiveSlot = slot
+        }
+    }
+
+    /// Reset the chain. Called when the user exits a session or picks a
+    /// non-superset workoutMode.
+    func clearSupersetChain() {
+        supersetChain.removeAll()
+        supersetChainIndex = 0
+        supersetLeftExercise = ""
+        supersetRightExercise = ""
+        supersetLeftWeightLb = 0
+        supersetRightWeightLb = 0
+    }
+
+    /// Bump the home-return tick. ExerciseStartView calls this from
+    /// "Add Another Superset" so LoggingHomeView pops to root.
+    func requestSupersetReturnToHome() {
+        supersetReturnToHomeTick &+= 1
+    }
+
     /// b48: Flip the active side. Called by:
     ///   - The user tapping the SWAP tile in the live grid.
     ///   - LoggingStore on set finalize (auto-advance through the chain).
+    /// When the chain has 2+ entries, advances chainIndex modulo length
+    /// and points supersetActiveSlot at the new entry's slot. With an
+    /// empty chain (legacy mode), just toggles left/right.
     func flipSupersetActiveSlot() {
-        supersetActiveSlot = supersetActiveSlot.other
+        if supersetChain.count >= 2 {
+            supersetChainIndex = (supersetChainIndex + 1) % supersetChain.count
+            supersetActiveSlot = supersetChain[supersetChainIndex].slot
+        } else {
+            supersetActiveSlot = supersetActiveSlot.other
+        }
+    }
+
+    /// Read the active chain entry, or nil if the chain is empty.
+    var activeSupersetEntry: SupersetChainEntry? {
+        guard supersetChain.indices.contains(supersetChainIndex) else { return nil }
+        return supersetChain[supersetChainIndex]
+    }
+
+    /// Read the NEXT chain entry (what SWAP will land on), or nil if the
+    /// chain has fewer than 2 entries.
+    var nextSupersetEntry: SupersetChainEntry? {
+        guard supersetChain.count >= 2 else { return nil }
+        let next = (supersetChainIndex + 1) % supersetChain.count
+        return supersetChain[next]
     }
 
     // MARK: Telemetry routing hooks (set by the app)
@@ -238,12 +355,21 @@ final class MultiDeviceManager: ObservableObject {
         switch (leftOn, rightOn) {
         case (true, true):
             switch workoutMode {
-            case .combined, .independent, .superset:
+            case .combined, .independent:
                 return [.left, .right]
             case .singleLeft:
                 return [.left]
             case .singleRight:
                 return [.right]
+            case .superset:
+                // b48: LOAD/UNLOAD targets the ACTIVE Voltra only (the one
+                // hosting the exercise the user is doing right now).
+                // Sending to both unloaded the inactive side mid-rest,
+                // which broke the chain. Per user (b48 feedback):
+                // "Unload Tonsion isn't tied to whatever exercise A or B
+                // it's on, it unloads both of them, which is not the
+                // intended behavior."
+                return [supersetActiveSlot]
             }
         case (true, false):  return [.left]
         case (false, true):  return [.right]

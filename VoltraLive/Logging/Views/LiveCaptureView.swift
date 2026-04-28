@@ -612,11 +612,20 @@ struct LiveCaptureView: View {
     /// to `pendingPlannedWeightLb` so the live grid reflects what the user
     /// is about to lift.
     private var supersetBanner: some View {
-        let active = mdm.supersetActiveSlot
+        // b48: prefer the chain entry's exerciseName when available so the
+        // banner shows the real exercise the user picked (e.g. "Back Squat"
+        // / "Bent-Over Row") instead of the stub "Exercise A / B". Falls
+        // back to the per-side label cache, then to A/B if neither is set.
+        let active   = mdm.supersetActiveSlot
         let inactive = active.other
-        let activeLabel    = (active   == .left ? mdm.supersetLeftExercise  : mdm.supersetRightExercise)
-        let inactiveLabel  = (inactive == .left ? mdm.supersetLeftExercise  : mdm.supersetRightExercise)
-        let inactiveWeight = (inactive == .left ? mdm.supersetLeftWeightLb  : mdm.supersetRightWeightLb)
+        let activeChain   = mdm.activeSupersetEntry
+        let nextChain     = mdm.nextSupersetEntry
+        let activeLabel    = activeChain?.exerciseName
+            ?? (active   == .left ? mdm.supersetLeftExercise  : mdm.supersetRightExercise)
+        let inactiveLabel  = nextChain?.exerciseName
+            ?? (inactive == .left ? mdm.supersetLeftExercise  : mdm.supersetRightExercise)
+        let inactiveWeight = nextChain?.plannedWeightLb
+            ?? (inactive == .left ? mdm.supersetLeftWeightLb  : mdm.supersetRightWeightLb)
         let activeName    = activeLabel.isEmpty   ? "Exercise \(active   == .left ? "A" : "B")"   : activeLabel
         let inactiveName  = inactiveLabel.isEmpty ? "Exercise \(inactive == .left ? "A" : "B")" : inactiveLabel
         return HStack(spacing: 10) {
@@ -687,18 +696,23 @@ struct LiveCaptureView: View {
     private func swapSupersetSide() {
         let outgoing = mdm.supersetActiveSlot
         // Save the current pending weight as the outgoing side's stored
-        // weight so the next swap restores it.
+        // weight so the next swap restores it. This stays in sync with
+        // mdm.supersetLeft/RightWeightLb regardless of chain mode.
         let curWeight = logging.pendingPlannedWeightLb ?? 0
         switch outgoing {
         case .left:  mdm.supersetLeftWeightLb  = curWeight
         case .right: mdm.supersetRightWeightLb = curWeight
         }
-        // Flip the active slot. WriterRouter will now route through the
-        // other side.
+        // Flip the active slot (or advance the chain index if a chain is
+        // populated). WriterRouter will now route through the new side.
         mdm.flipSupersetActiveSlot()
-        // Restore the incoming side's stored weight.
+        // Restore the incoming side's stored weight. b48: prefer the
+        // chain entry's plannedWeightLb when available so each exercise
+        // remembers its own starting weight; fall back to the per-side
+        // mirror for the two-exercise legacy path.
         let incoming = mdm.supersetActiveSlot
-        let restored: Double = (incoming == .left ? mdm.supersetLeftWeightLb : mdm.supersetRightWeightLb)
+        let mirrored = (incoming == .left ? mdm.supersetLeftWeightLb : mdm.supersetRightWeightLb)
+        let restored: Double = mdm.activeSupersetEntry?.plannedWeightLb ?? mirrored
         logging.pendingPlannedWeightLb = restored
         logging.reanchorCascadeIfActive(toLb: restored)
         pushUpcomingStateToDevice()

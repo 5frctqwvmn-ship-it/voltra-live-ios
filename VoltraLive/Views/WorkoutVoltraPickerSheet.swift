@@ -139,6 +139,13 @@ struct WorkoutVoltraPickerSheet: View {
 
     private var footer: some View {
         Button {
+            // b48: clear stale chain when leaving (or re-entering) superset.
+            // Re-entering Superset starts the chain from scratch; switching
+            // away from superset drops the chain so combined/independent
+            // don't carry stale per-side bindings.
+            if mdm.workoutMode != selection {
+                mdm.clearSupersetChain()
+            }
             mdm.workoutMode = selection
             onConfirm()
             dismiss()
