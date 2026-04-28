@@ -66,6 +66,16 @@ final class WriterRouter: ObservableObject {
                 // is doing the same exercise on both unilaterally.
                 mdm.leftWriter.apply(state)
                 mdm.rightWriter.apply(state)
+            case .superset:
+                // b48 Superset: route writes to the ACTIVE side only.
+                // The active side flips on every set finalize. The view
+                // owns the flip and reads `mdm.supersetActiveSlot` to
+                // decide which writer to drive. State writes to the
+                // inactive side would clobber its standing weight.
+                switch mdm.supersetActiveSlot {
+                case .left:  mdm.leftWriter.apply(state)
+                case .right: mdm.rightWriter.apply(state)
+                }
             }
         case (true, false):
             mdm.leftWriter.apply(state)

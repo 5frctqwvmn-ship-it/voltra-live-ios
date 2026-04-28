@@ -202,6 +202,13 @@ struct VoltraLiveApp: App {
                             telemetryHandler(t)
                         case .singleRight, .combined:
                             break  // singleRight ignores left; combined waits for onCombinedTelemetry
+                        case .superset:
+                            // b48: superset routes telemetry from the ACTIVE side
+                            // only \u2014 the user is doing only one exercise at a
+                            // time, so the inactive Voltra (still loaded with
+                            // the other exercise's resistance) should not
+                            // produce session telemetry.
+                            if m.supersetActiveSlot == .left { telemetryHandler(t) }
                         }
                     }
                     multi.onRightTelemetry = { [weak multi] t in
@@ -219,6 +226,9 @@ struct VoltraLiveApp: App {
                             telemetryHandler(t)
                         case .singleLeft, .combined:
                             break
+                        case .superset:
+                            // b48: same active-side rule as the left handler.
+                            if m.supersetActiveSlot == .right { telemetryHandler(t) }
                         }
                     }
                     multi.onCombinedTelemetry = { [weak multi] c in

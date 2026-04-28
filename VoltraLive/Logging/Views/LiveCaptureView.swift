@@ -104,6 +104,9 @@ struct LiveCaptureView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     header
+                    if mdm.workoutMode == .superset {
+                        supersetBanner
+                    }
                     tileGrid
                     forceChart
                     upcomingSetCard
@@ -175,9 +178,38 @@ struct LiveCaptureView: View {
             // v0.4.6: Begin polling HealthKit for HR + active energy from
             // the user's Apple Watch workout. Lazy-prompts for permission.
             health.start()
+            // b47: push the current workoutMode into LoggingStore so the
+            // drop-set cascade math knows whether to use even (-6 lb) or
+            // odd (-5 lb) steps. We also enforce parity on the standing
+            // pendingPlannedWeightLb if entering Combined from an odd value.
+            logging.applyWorkoutMode(mdm.workoutMode)
+            enforceCombinedParityOnEntry()
+        }
+        .onChange(of: mdm.workoutMode) { _, newMode in
+            // b47: live-update the cascade params if the user switches mode
+            // mid-workout (rare, but possible if they back out to the picker
+            // and re-enter), and round the standing weight down to even on
+            // a Combined entry.
+            logging.applyWorkoutMode(newMode)
+            enforceCombinedParityOnEntry()
         }
         .onDisappear {
             health.stop()
+        }
+    }
+
+    /// b47: when entering (or already in) Combined mode, round the standing
+    /// pendingPlannedWeightLb DOWN to the nearest even pound. Per user choice
+    /// (b47 Q1 = A): "round down to nearest even, never adds weight the user
+    /// didn't ask for." No-op in any other mode.
+    private func enforceCombinedParityOnEntry() {
+        guard mdm.workoutMode.requiresEvenWeight else { return }
+        let cur = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
+        let even = CombinedParity.roundDownToEven(cur)
+        if even != cur {
+            logging.pendingPlannedWeightLb = Double(even)
+            logging.reanchorCascadeIfActive(toLb: Double(even))
+            pushUpcomingStateToDevice()
         }
     }
 
@@ -433,7 +465,11 @@ struct LiveCaptureView: View {
     /// concentric-base value; effective per-rep total updates on the next
     /// re-render.
     private func resistanceNudgerTile(perRepTotalLb: Double, subline: String?) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        // b47: pre-compute step sizes outside the ViewBuilder so we can use
+        // them inline below. Combined: 2/6. Independent/single/superset: 1/5.
+        let small = CombinedParity.smallStepLb(for: mdm.workoutMode)
+        let large = CombinedParity.largeStepLb(for: mdm.workoutMode)
+        return VStack(alignment: .leading, spacing: 4) {
             Text("RESISTANCE")
                 .font(.system(size: 10, weight: .bold))
                 .kerning(1.5)
@@ -458,17 +494,21 @@ struct LiveCaptureView: View {
                     }
                 }
                 Spacer(minLength: 4)
-                // 2\u00d72 grid of nudgers. \u00b15 on top, \u00b11 on bottom.
-                // Compact buttons (28\u00d722) so the row stays under the
-                // 88pt min tile height.
+                // 2\u00d72 grid of nudgers. \u00b1large on top, \u00b1small on
+                // bottom. b47: step magnitudes are mode-aware (computed
+                // above). Combined mode forces even-only weight so the
+                // per-side split is equal (\u00b16 / \u00b12). All other
+                // modes keep the legacy \u00b15 / \u00b11. Compact buttons
+                // (28\u00d722) so the row stays under the 88pt min tile
+                // height.
                 VStack(spacing: 4) {
                     HStack(spacing: 4) {
-                        compactNudger(label: "\u{2212}5") { adjustWeight(-5) }
-                        compactNudger(label: "+5")        { adjustWeight(+5) }
+                        compactNudger(label: "\u{2212}\(large)") { adjustWeight(-large) }
+                        compactNudger(label: "+\(large)")        { adjustWeight(+large) }
                     }
                     HStack(spacing: 4) {
-                        compactNudger(label: "\u{2212}1") { adjustWeight(-1) }
-                        compactNudger(label: "+1")        { adjustWeight(+1) }
+                        compactNudger(label: "\u{2212}\(small)") { adjustWeight(-small) }
+                        compactNudger(label: "+\(small)")        { adjustWeight(+small) }
                     }
                 }
             }
@@ -555,6 +595,113 @@ struct LiveCaptureView: View {
                 .stroke(VoltraColor.border, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - b48 Superset banner
+
+    /// b48: Superset chain top-of-screen banner. Shows the user which side
+    /// is currently the ACTIVE exercise (where state writes route through
+    /// WriterRouter), what's queued on the OTHER side (its standing weight
+    /// + exercise label), and a SWAP button to flip the active slot. Only
+    /// rendered when `mdm.workoutMode == .superset`.
+    ///
+    /// Layout: pill-shaped HStack, active side bold + accent color, inactive
+    /// side faded with the next-up weight as a chip. Tapping SWAP fires
+    /// `mdm.flipSupersetActiveSlot()` which immediately re-routes writes to
+    /// the other Voltra. We also push the new active side's standing weight
+    /// to `pendingPlannedWeightLb` so the live grid reflects what the user
+    /// is about to lift.
+    private var supersetBanner: some View {
+        let active = mdm.supersetActiveSlot
+        let inactive = active.other
+        let activeLabel    = (active   == .left ? mdm.supersetLeftExercise  : mdm.supersetRightExercise)
+        let inactiveLabel  = (inactive == .left ? mdm.supersetLeftExercise  : mdm.supersetRightExercise)
+        let inactiveWeight = (inactive == .left ? mdm.supersetLeftWeightLb  : mdm.supersetRightWeightLb)
+        let activeName    = activeLabel.isEmpty   ? "Exercise \(active   == .left ? "A" : "B")"   : activeLabel
+        let inactiveName  = inactiveLabel.isEmpty ? "Exercise \(inactive == .left ? "A" : "B")" : inactiveLabel
+        return HStack(spacing: 10) {
+            // Active side
+            VStack(alignment: .leading, spacing: 2) {
+                Text("NOW \u{2022} \(active.label.uppercased())")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.2)
+                    .foregroundColor(VoltraColor.accent)
+                Text(activeName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(VoltraColor.text)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            // Swap button
+            Button {
+                swapSupersetSide()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 12, weight: .bold))
+                    Text("SWAP")
+                        .font(.system(size: 11, weight: .bold))
+                        .kerning(1.0)
+                }
+                .foregroundColor(VoltraColor.accent)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .background(VoltraColor.accent.opacity(0.18))
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            Spacer(minLength: 6)
+            // Inactive side preview
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("NEXT \u{2022} \(inactive.label.uppercased())")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.2)
+                    .foregroundColor(VoltraColor.textDim)
+                HStack(spacing: 6) {
+                    Text(inactiveName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(VoltraColor.textDim)
+                        .lineLimit(1)
+                    Text("\(formatLbCompact(inactiveWeight)) lb")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(VoltraColor.textFaint)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(VoltraColor.bgElev)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(VoltraColor.accent.opacity(0.4), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// b48: Flip the active superset side. Saves the current pending weight
+    /// to whichever side WAS active, then loads the other side's stored
+    /// weight into `pendingPlannedWeightLb` so the live grid retargets, and
+    /// pushes the new state to the (now-active) Voltra. Net effect: tap
+    /// SWAP and the user's resistance, drop-set state, and writes all flip
+    /// to the other Voltra atomically.
+    private func swapSupersetSide() {
+        let outgoing = mdm.supersetActiveSlot
+        // Save the current pending weight as the outgoing side's stored
+        // weight so the next swap restores it.
+        let curWeight = logging.pendingPlannedWeightLb ?? 0
+        switch outgoing {
+        case .left:  mdm.supersetLeftWeightLb  = curWeight
+        case .right: mdm.supersetRightWeightLb = curWeight
+        }
+        // Flip the active slot. WriterRouter will now route through the
+        // other side.
+        mdm.flipSupersetActiveSlot()
+        // Restore the incoming side's stored weight.
+        let incoming = mdm.supersetActiveSlot
+        let restored: Double = (incoming == .left ? mdm.supersetLeftWeightLb : mdm.supersetRightWeightLb)
+        logging.pendingPlannedWeightLb = restored
+        logging.reanchorCascadeIfActive(toLb: restored)
+        pushUpcomingStateToDevice()
     }
 
     /// LOAD command. Prefers MDM when any slot is paired; otherwise legacy ble.
@@ -1057,9 +1204,12 @@ struct LiveCaptureView: View {
     }
 
     private var weightNudgerRow: some View {
-        HStack(spacing: 8) {
-            nudgeButton(label: "−5") { adjustWeight(-5) }
-            nudgeButton(label: "−1") { adjustWeight(-1) }
+        // b47: mode-aware step sizes match the live-grid resistance tile.
+        let small = CombinedParity.smallStepLb(for: mdm.workoutMode)
+        let large = CombinedParity.largeStepLb(for: mdm.workoutMode)
+        return HStack(spacing: 8) {
+            nudgeButton(label: "\u{2212}\(large)") { adjustWeight(-large) }
+            nudgeButton(label: "\u{2212}\(small)") { adjustWeight(-small) }
             VStack(spacing: 2) {
                 Text("\(Int(weightLb))")
                     .font(.system(size: 44, weight: .bold, design: .monospaced))
@@ -1079,8 +1229,8 @@ struct LiveCaptureView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            nudgeButton(label: "+1") { adjustWeight(+1) }
-            nudgeButton(label: "+5") { adjustWeight(+5) }
+            nudgeButton(label: "+\(small)") { adjustWeight(+small) }
+            nudgeButton(label: "+\(large)") { adjustWeight(+large) }
         }
     }
 
@@ -1270,7 +1420,14 @@ struct LiveCaptureView: View {
 
     private func adjustWeight(_ delta: Int) {
         let cur = Int(logging.pendingPlannedWeightLb ?? 0)
-        let next = max(0, min(500, cur + delta))
+        // b47: in Combined mode, force even result so the per-side split
+        // (CombinedMath.splitWeight) is exactly equal. The +/- delta is
+        // already even (±2 / ±6) when caller honors
+        // CombinedParity.smallStepLb / largeStepLb, but enforce here too
+        // as a defensive belt-and-suspenders for any caller that passes a
+        // raw delta. Independent / single / superset pass through.
+        let raw = max(0, min(500, cur + delta))
+        let next = CombinedParity.enforce(raw, mode: mdm.workoutMode)
         logging.pendingPlannedWeightLb = Double(next)
         // Build 38: if the user nudges weight DURING an active drop
         // cascade, re-anchor the chain to the new value so the next

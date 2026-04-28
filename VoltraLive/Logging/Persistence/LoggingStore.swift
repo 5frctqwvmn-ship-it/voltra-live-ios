@@ -164,6 +164,25 @@ final class LoggingStore: ObservableObject {
     /// the next set's logging so the user can see the actual rest duration.
     @Published var restAnchor: Date? = nil
 
+    // MARK: - b47 Combined parity
+
+    /// b47: when true, drop-set cascade uses the EVEN step (\u22126 lb per drop,
+    /// rounded to 2 lb) so the per-side split stays equal. The view layer
+    /// owns the source of truth (MultiDeviceManager.workoutMode) and pushes
+    /// it down with `applyWorkoutMode(_:)` whenever it changes. LoggingStore
+    /// reads it inside the cascade callers \u2014 keeps the helpers themselves
+    /// pure and avoids a hard dependency on MultiDeviceManager.
+    @Published private(set) var combinedModeActive: Bool = false
+
+    /// b47: called by LiveCaptureView whenever `mdm.workoutMode` changes.
+    /// Idempotent.
+    func applyWorkoutMode(_ mode: WorkoutMode) {
+        let active = mode.requiresEvenWeight
+        if combinedModeActive != active {
+            combinedModeActive = active
+        }
+    }
+
     // MARK: - Dependencies
 
     var modelContext: ModelContext?
@@ -483,11 +502,18 @@ final class LoggingStore: ObservableObject {
     private func nextCascadeWeight() -> Double? {
         guard chainAnchorLb > 0 else { return nil }
         let nextIndex = cascadeStepIndex + 1
+        // b47: in Combined mode, drop in even (-6 lb) steps with 2 lb
+        // rounding so totals stay even and split equally across the two
+        // Voltras. Default (-5 lb / 2.5 lb rounding) for all other modes.
+        let baseLb: Double = combinedModeActive ? CombinedParity.combinedDropStepLb : 5.0
+        let roundingLb: Double = combinedModeActive ? 2.0 : 2.5
         let next = LoggingStore.cascadeAnchoredDeviceWeight(
             anchorDeviceLb: chainAnchorLb,
             tier: cascadeTier,
             stepIndex: nextIndex,
-            multiplier: pulleyMultiplier
+            multiplier: pulleyMultiplier,
+            baseLb: baseLb,
+            roundingLb: roundingLb
         )
         // b43: stop firing when we hit the device floor (next equals prev
         // because the floor clamp is sticky) or when rounding made the step
@@ -510,6 +536,9 @@ final class LoggingStore: ObservableObject {
     /// `currentLb` is the current EFFECTIVE weight (i.e. already multiplied).
     func previewNextCascade(from currentLb: Double, count: Int, tier: Int? = nil) -> [Double] {
         let useTier = tier ?? cascadeTier
+        // b47: combined-mode preview matches the live cascade math.
+        let baseLb: Double = combinedModeActive ? CombinedParity.combinedDropStepLb : 5.0
+        let roundingLb: Double = combinedModeActive ? 2.0 : 2.5
         var out: [Double] = []
         // v0.4.6.2: preview now matches anchor-relative math — each step is
         // computed off the original `currentLb` (the anchor) at increasing
@@ -520,7 +549,9 @@ final class LoggingStore: ObservableObject {
                 anchorDeviceLb: currentLb,
                 tier: useTier,
                 stepIndex: i,
-                multiplier: 1.0
+                multiplier: 1.0,
+                baseLb: baseLb,
+                roundingLb: roundingLb
             )
             // b43: stop on floor or non-progress. Once the cascade has
             // bottomed out at the 5 lb device floor, subsequent steps clamp
@@ -686,28 +717,35 @@ final class LoggingStore: ObservableObject {
     /// honor that here. The clamp is applied AFTER mapping back to device
     /// coordinates; pulley mode (multiplier=2) thus gets a 5 lb device floor
     /// = 10 lb effective floor, matching the user-stated hardware range.
+    /// b47: added `baseLb` / `basePct` / `roundingLb` overrides so Combined
+    /// mode can drop in EVEN steps (-6 per drop, rounded to 2 lb). Defaults
+    /// match the legacy (pre-b47) behavior so existing callers stay correct.
     static func cascadeAnchoredDeviceWeight(anchorDeviceLb: Double,
                                             tier: Int,
                                             stepIndex: Int,
                                             multiplier: Double,
-                                            deviceFloorLb: Double = 5.0) -> Double {
-        guard anchorDeviceLb > 0, tier >= 1, stepIndex >= 1, multiplier > 0 else { return 0 }
+                                            deviceFloorLb: Double = 5.0,
+                                            baseLb: Double = 5.0,
+                                            basePct: Double = 0.05,
+                                            roundingLb: Double = 2.5) -> Double {
+        guard anchorDeviceLb > 0, tier >= 1, stepIndex >= 1, multiplier > 0,
+              roundingLb > 0 else { return 0 }
         let anchorEffective = anchorDeviceLb * multiplier
         // Per-step magnitude (constant across the chain at the current tier).
-        let perStepLb = 5.0 * Double(tier)
-        let perStepPct = 0.05 * Double(tier)
+        let perStepLb = baseLb * Double(tier)
+        let perStepPct = basePct * Double(tier)
         let perStep = max(perStepLb, anchorEffective * perStepPct)
         let totalDrop = perStep * Double(stepIndex)
         let nextEffective = anchorEffective - totalDrop
         let backToDevice = nextEffective / multiplier
-        let stepped = (backToDevice / 2.5).rounded() * 2.5
+        let stepped = (backToDevice / roundingLb).rounded() * roundingLb
         // b43: clamp at the hardware floor so cascade never returns 2.5/0.
-        // Anchor < floor is degenerate — return the anchor unchanged so the
+        // Anchor < floor is degenerate \u2014 return the anchor unchanged so the
         // chain immediately stalls (caller treats next==prev as "no progress"
         // and stops firing).
         let floored = max(deviceFloorLb, stepped)
         if anchorDeviceLb <= deviceFloorLb { return anchorDeviceLb }
-        if floored >= anchorDeviceLb { return max(deviceFloorLb, anchorDeviceLb - 2.5) }
+        if floored >= anchorDeviceLb { return max(deviceFloorLb, anchorDeviceLb - roundingLb) }
         return floored
     }
 

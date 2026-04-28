@@ -84,6 +84,36 @@ final class MultiDeviceManager: ObservableObject {
     /// Persisted in memory only; resets to .singleLeft on app relaunch.
     @Published var workoutMode: WorkoutMode = .singleLeft
 
+    /// b48: Superset chain \u2014 which side is currently the ACTIVE exercise.
+    /// The user does set A on this side, then taps the swap button (or
+    /// finalizes a set, which auto-flips), and the active slot flips. State
+    /// writes route only to the active side so each Voltra's standing
+    /// resistance for its own exercise is preserved while the other is
+    /// being used. Default `.left` so the user opens at exercise A.
+    @Published var supersetActiveSlot: DeviceSlot = .left
+
+    /// b48: Per-side standing weight in Superset mode. Each Voltra holds
+    /// its OWN exercise's resistance independently; flipping `supersetActiveSlot`
+    /// must NOT clobber the other side's setting. The view layer reads
+    /// these to render the inactive-side preview chip and writes them when
+    /// the user changes resistance for whichever side is currently active.
+    /// Stored in lb on the device coordinate (not effective).
+    @Published var supersetLeftWeightLb:  Double = 0
+    @Published var supersetRightWeightLb: Double = 0
+
+    /// b48: Per-side exercise label. Free-form because the user picks
+    /// arbitrary exercise names from the catalog \u2014 we don't try to
+    /// validate. Empty string means "no name set yet" (UI shows a hint).
+    @Published var supersetLeftExercise:  String = ""
+    @Published var supersetRightExercise: String = ""
+
+    /// b48: Flip the active side. Called by:
+    ///   - The user tapping the SWAP tile in the live grid.
+    ///   - LoggingStore on set finalize (auto-advance through the chain).
+    func flipSupersetActiveSlot() {
+        supersetActiveSlot = supersetActiveSlot.other
+    }
+
     // MARK: Telemetry routing hooks (set by the app)
     /// Fired on every Telemetry packet from the LEFT device.
     var onLeftTelemetry:  ((Telemetry) -> Void)?
@@ -179,15 +209,46 @@ final class MultiDeviceManager: ObservableObject {
     }
 
     /// Send LOAD to one side (Independent) or both (Combined).
+    /// b47 (v0.4.25): when `target` is nil, route per `workoutMode` so combined
+    /// fires BOTH sides while singleLeft/singleRight only fires the engaged
+    /// side. Previously target=nil unconditionally fanned out, but only one
+    /// side actually loaded \u2014 likely because the same frame (same seq) was
+    /// being deduplicated somewhere in the BLE stack on rapid back-to-back
+    /// writes. b47 builds an INDEPENDENT frame per side with its own seq.
     func load(target: DeviceSlot? = nil) {
         let payload = VoltraControlFrames.loadPayload()
         sendControlPayload(payload, label: "LOAD", target: target)
     }
 
     /// Send UNLOAD to one side (Independent) or both (Combined).
+    /// b47: same workoutMode-aware routing + per-side seqs as `load()`.
     func unload(target: DeviceSlot? = nil) {
         let payload = VoltraControlFrames.unloadPayload()
         sendControlPayload(payload, label: "UNLOAD", target: target)
+    }
+
+    /// b47: workout-mode-aware control fan-out. Returns the slots that should
+    /// receive a given control command when the caller hasn't named a
+    /// specific target. Mirrors the routing matrix in WriterRouter so command
+    /// fan-out matches state-write fan-out (e.g. combined writes to both,
+    /// singleLeft to left only).
+    private func slotsForWorkoutMode() -> [DeviceSlot] {
+        let leftOn  = left.connectionState.isConnected
+        let rightOn = right.connectionState.isConnected
+        switch (leftOn, rightOn) {
+        case (true, true):
+            switch workoutMode {
+            case .combined, .independent, .superset:
+                return [.left, .right]
+            case .singleLeft:
+                return [.left]
+            case .singleRight:
+                return [.right]
+            }
+        case (true, false):  return [.left]
+        case (false, true):  return [.right]
+        case (false, false): return []
+        }
     }
 
     // MARK: - Combined-mode device-state apply
@@ -373,28 +434,38 @@ final class MultiDeviceManager: ObservableObject {
     /// via writer.apply() for state-driven writes, but for ad-hoc commands
     /// (LOAD/UNLOAD) we frame here using a static seq slot per call.
     private func sendControlPayload(_ payload: Data, label: String, target: DeviceSlot?) {
-        // Build a frame with a per-call seq. We don't share the writer's
-        // monotonic counter because LOAD/UNLOAD aren't part of the diffed
-        // device state; collisions with writer seq numbers are harmless on
-        // the device (it doesn't enforce uniqueness across cmds).
-        let frame = VoltraFrameBuilder.build(
-            cmd: VoltraControlFrames.CMD_PARAM_WRITE,
-            payload: payload,
-            seq: nextAdHocSeq()
-        )
-        switch target {
-        case .none:
-            // Default to "both", which is what Combined mode wants.
-            left.writeControlFrame(frame)
-            right.writeControlFrame(frame)
-            left.addLog("\u{2192} \(label) (combined)")
-            right.addLog("\u{2192} \(label) (combined)")
-        case .some(.left):
-            left.writeControlFrame(frame)
-            left.addLog("\u{2192} \(label)")
-        case .some(.right):
-            right.writeControlFrame(frame)
-            right.addLog("\u{2192} \(label)")
+        // b47: build a SEPARATE frame per recipient with its own seq. Earlier
+        // code reused one frame across both peripherals \u2014 user reported
+        // "only one Voltra unloads in Combined," most likely because both
+        // writes went out with identical bytes back-to-back and one of the
+        // peripherals' transport stacks coalesced or dropped the duplicate.
+        // Per-side seqs guarantee distinct frames at the wire.
+        let recipients: [DeviceSlot]
+        if let t = target {
+            recipients = [t]
+        } else {
+            recipients = slotsForWorkoutMode()
+        }
+        let suffix = (recipients.count == 2) ? " (\(workoutMode.label.lowercased()))" : ""
+        for slot in recipients {
+            let frame = VoltraFrameBuilder.build(
+                cmd: VoltraControlFrames.CMD_PARAM_WRITE,
+                payload: payload,
+                seq: nextAdHocSeq()
+            )
+            switch slot {
+            case .left:
+                left.writeControlFrame(frame)
+                left.addLog("\u{2192} \(label)\(suffix)")
+            case .right:
+                right.writeControlFrame(frame)
+                right.addLog("\u{2192} \(label)\(suffix)")
+            }
+        }
+        if recipients.isEmpty {
+            // No connected recipients \u2014 nothing to do, but log it once on
+            // either side so the BLE log makes the no-op visible.
+            left.addLog("\u{26a0} \(label) skipped \u{2014} no devices connected", level: .warn)
         }
     }
 

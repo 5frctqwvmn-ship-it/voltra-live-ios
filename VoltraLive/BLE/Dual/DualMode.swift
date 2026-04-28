@@ -61,6 +61,13 @@ enum WorkoutMode: String, CaseIterable, Equatable {
     case singleRight
     case independent
     case combined
+    /// b48 (v0.4.26): Superset chain. Both Voltras are paired but each is
+    /// loaded with a DIFFERENT exercise (e.g. left = bench press, right =
+    /// bent-over row). The user alternates A \u2192 B \u2192 A \u2192 B; each
+    /// Voltra logs its own sets, but the chain is tracked as a tied A/B
+    /// superset rather than two parallel independent sets. Only surfaced
+    /// in the picker when both Voltras are paired.
+    case superset
 
     var label: String {
         switch self {
@@ -68,6 +75,7 @@ enum WorkoutMode: String, CaseIterable, Equatable {
         case .singleRight: return "Right only"
         case .independent: return "Independent"
         case .combined:    return "Combined"
+        case .superset:    return "Superset"
         }
     }
 
@@ -77,6 +85,7 @@ enum WorkoutMode: String, CaseIterable, Equatable {
         case .singleRight: return "Use just the Right Voltra. Left stays paired but idle."
         case .independent: return "Track both Voltras side-by-side. Reps and force are not summed."
         case .combined:    return "Treat both Voltras as one. Set total weight; force and reps are summed."
+        case .superset:    return "Two exercises, one chain. Set A on Left, B on Right \u{2014} alternate sets back-to-back."
         }
     }
 
@@ -86,6 +95,19 @@ enum WorkoutMode: String, CaseIterable, Equatable {
         case .singleRight: return "r.circle.fill"
         case .independent: return "square.split.2x1"
         case .combined:    return "link"
+        case .superset:    return "arrow.left.arrow.right"
+        }
+    }
+
+    /// b47: combined-mode parity rule \u2014 weights split per CombinedMath
+    /// across two Voltras, so the total must be EVEN to split evenly.
+    /// Resistance nudgers, drop-set step, and mode-switch rounding all
+    /// consult this to enforce the constraint. Independent / single /
+    /// superset do NOT have this constraint (each side is independent).
+    var requiresEvenWeight: Bool {
+        switch self {
+        case .combined: return true
+        default:        return false
         }
     }
 }

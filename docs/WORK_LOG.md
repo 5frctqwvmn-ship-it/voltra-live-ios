@@ -847,3 +847,80 @@ Files changed: VoltraLive/BLE/Dual/DualMode.swift, VoltraLive/BLE/Dual/MultiDevi
 4. Verify left-to-right tile order: Row 1 RES + LOAD, Row 2 REPS + DROP, Row 3 FORCE + REST, Row 4 HR/KCAL + TOTAL VOL.
 5. Tap LOAD → label flips to UNLOAD, weight loads. Tap UNLOAD → label flips back to LOAD, weight unloads.
 6. HR/KCAL tile: both numbers should be the same large (28pt) size, each with its own blinking pulse-dot, with "HR" / "KCAL" / "bpm" / "kcal" rendered as small caption text.
+
+## b47 — v0.4.25 (build 47) — "Combined parity"
+
+**Date:** 2026-04-28
+**Goal:** Fix the LOAD/UNLOAD-only-fires-one-Voltra bug, enforce even-weight parity in Combined mode (per-side split must be equal), and ship a Superset workout mode (alternates between left and right Voltra as exercise A / exercise B). User explicitly bundled b47+b48 ("Combined parity" + "Superset") into this single build.
+
+**User direction (verbatim, this session):**
+- Combined mode: "when the Voltras are combined, you're only allowed to have even numbers, so it can split evenly."
+- LOAD/UNLOAD bug: "if i hit unload it only unloads one of them" — fix so both fire in Combined.
+- Drop-set step in combined: −6 lb (matches +6 nudger for symmetry).
+- Round-on-entry: round DOWN (35 → 34) — never add weight the user didn't ask for.
+- "make sure there is a super set mode in the build youre working on now."
+- Stand-mode + dampers + bands behavior in Combined: deferred (low priority).
+- Autonomy: "im going to sleep now, if you need to ask me a question before pushing this build, just do what you would recommend instead of asking me."
+
+**Fixes & features:**
+
+- **A — LOAD / UNLOAD only fires one Voltra in Combined.** Root cause: `MultiDeviceManager.sendControlPayload` was reusing the same `VoltraProtocol.encodeFrame(...)` output across both peripherals back-to-back. CoreBluetooth (and/or the firmware on the receiving end) appears to coalesce or drop a second write whose bytes (and `seq`) are identical to the previous one when issued in quick succession. Symptom: only one Voltra reacted to LOAD/UNLOAD; the other stayed at its prior state.
+  - **Fix:** `sendControlPayload` now builds a SEPARATE frame per recipient with its own `seq` (so the bytes differ). Each side's writer schedules its own write through its own queue, and a debug-only log prints `[MDM] LOAD->left seq=N ; LOAD->right seq=N+1` so we can confirm both fired. Same path is used for stand-toggle and damper writes, which inherits the fix for free.
+
+- **B — Combined-mode parity enforcement (even total weight only).** New file `VoltraLive/BLE/Dual/CombinedParity.swift` centralizes the rule:
+  - `smallStepLb(for: WorkoutMode)` → 2 in Combined, 1 elsewhere.
+  - `largeStepLb(for: WorkoutMode)` → 6 in Combined, 5 elsewhere.
+  - `roundDownToEven(_:)` for Int and Double.
+  - `combinedDropStepLb: Double = 6.0`.
+  - `enforce(_:mode:)` floors to nearest even pound when mode requires parity, passes through otherwise.
+  - `WorkoutMode.requiresEvenWeight: Bool` (true only for `.combined`) drives all the call sites.
+  - **Resistance nudgers:** `resistanceNudgerTile` and the upcoming-card weight nudger now read `let small/large = CombinedParity.{small,large}StepLb(for: mdm.workoutMode)` outside the ViewBuilder block and render `−large/+large` on top, `−small/+small` on bottom. Combined shows ±6 / ±2; everything else shows ±5 / ±1.
+  - **Drop-set cascade step:** `LoggingStore.cascadeAnchoredDeviceWeight` now takes optional `baseLb` / `basePct` / `roundingLb` parameters (defaults preserve the legacy 5.0 / 0.05 / 2.5 behavior). `nextCascadeWeight()` and `previewNextCascade()` pass `baseLb=6.0, roundingLb=2.0` when a new `combinedModeActive: Bool` published flag is true. The flag is pushed by LiveCaptureView via `LoggingStore.applyWorkoutMode(_:)` in `.onAppear` and `.onChange(of: mdm.workoutMode)`.
+  - **Mode-switch rounding:** `enforceCombinedParityOnEntry()` in LiveCaptureView fires when the user enters Combined mode and rounds the standing planned weight DOWN to the nearest even pound (35 → 34). Defensive `CombinedParity.enforce(...)` call inside `adjustWeight(_:)` catches any path that bypasses the nudgers.
+
+- **C — Superset workout mode.** New `case superset` in `WorkoutMode` (label "Superset", subtitle explaining A/B alternation, icon `arrow.left.arrow.right`). Picker shows the option only when both slots are paired (gating already handled by the existing dual-slot mode picker, which lists every WorkoutMode case). New state on `MultiDeviceManager`:
+  - `supersetActiveSlot: DeviceSlot = .left` (user opens at exercise A on the left Voltra).
+  - `supersetLeftWeightLb` / `supersetRightWeightLb` (per-side pending weight memory across SWAPs).
+  - `supersetLeftExercise` / `supersetRightExercise` (per-side exercise label memory).
+  - `flipSupersetActiveSlot()` toggles `.left ↔ .right`.
+  - `slotsForWorkoutMode()` helper returns `[active]` for superset, `[both]` for combined/independent, `[that one]` for single-slot — so LOAD/UNLOAD in superset writes to BOTH (we want both Voltras pre-loaded), state writes go ONLY to the active side.
+
+  **Routing (`WriterRouter.swift`):** new `.superset` branch under `(true, true)` routes weight-state writes to `mdm.supersetActiveSlot` only.
+
+  **Telemetry (`VoltraLiveApp.swift`):** added `.superset` cases to the two non-exhaustive `switch m.workoutMode` blocks in `onLeftTelemetry` / `onRightTelemetry` — telemetry forwards from the active side only (so HR/force/reps reflect the exercise the user is doing right now, not the unused side).
+
+  **UI (`LiveCaptureView.swift`):** new `supersetBanner` view rendered between the header and `tileGrid` whenever `mdm.workoutMode == .superset`. Shows:
+  - **NOW** chip on the active side (accent color) with the exercise label + current weight.
+  - **SWAP** button in the middle.
+  - **NEXT** chip on the inactive side (dimmed) with the exercise label + stored weight.
+  - `swapSupersetSide()` saves the outgoing pending weight to `mdm.supersetLeft/RightWeightLb`, calls `flipSupersetActiveSlot()`, then restores the incoming side's stored weight to `logging.pendingPlannedWeightLb` and pushes new state to the device.
+
+- **D — Combined drop-set step is now −6 lb with even ladder.** Per user spec, drop-cascade in Combined uses 6 lb steps (matching the large nudger) and floors to the nearest even pound at every tier so totals stay even all the way to BOTTOM. Example from 30 lb: 30 → 24 → 18 → 12 → 6 → BOTTOM. Independent / single keep the legacy −5 lb step.
+
+**Files changed:**
+- VoltraLive/BLE/Dual/CombinedParity.swift (NEW — parity helpers, even-step constants, mode-aware enforce)
+- VoltraLive/BLE/Dual/DualMode.swift (added `.superset` case + `requiresEvenWeight` computed prop)
+- VoltraLive/BLE/Dual/MultiDeviceManager.swift (per-side seq for control payloads — LOAD/UNLOAD fix; superset state + flip + slotsForWorkoutMode helper)
+- VoltraLive/BLE/WriterRouter.swift (`.superset` routing → active side only)
+- VoltraLive/Logging/Persistence/LoggingStore.swift (combinedModeActive flag + applyWorkoutMode; cascadeAnchoredDeviceWeight params; previewNextCascade + nextCascadeWeight pass baseLb=6/roundingLb=2 in combined)
+- VoltraLive/Logging/Views/LiveCaptureView.swift (mode-aware nudger steps; enforceCombinedParityOnEntry; supersetBanner; swapSupersetSide; onAppear/onChange push mode to LoggingStore)
+- VoltraLive/VoltraLiveApp.swift (`.superset` telemetry routing in two switches)
+- VoltraLive/Info.plist + project.yml (bumped to 0.4.25/47, label "Combined parity")
+
+**Deferred (carried to a later build):**
+- **Stand mode in Combined** doubles instead of splitting (each Voltra stands to 60 instead of 30/30 split). User flagged as low priority.
+- **Dampers in Combined** — level 1 maps to level VIII per side; user flagged as low priority.
+- **Bands in Combined** — same family of issues. Low priority.
+- **HealthKit permission prompt** still doesn't fire on session start despite the b46 entitlement fix. The fix did help delivery (HR/kcal now flow steadily per user feedback), but the in-Settings Health row appearance and the first-launch system prompt still need investigation. Likely related to the `healthkit.access` key being baked into the App Store provisioning profile in the developer portal — needs profile regen.
+- **Independent mode HR slight delay** — user OK with this.
+
+**Test plan after TestFlight install:**
+1. Pair both Voltras → mode picker should now show **Superset** alongside Combined / Independent. Pick Superset. Banner should appear above the grid with NOW (active, accent), SWAP, NEXT (dimmed). Initial active = LEFT.
+2. Tap **SWAP** → active flips to RIGHT, weight retargets to right Voltra's stored value, banner sides swap.
+3. Pair both → pick **Combined**. Tap UNLOAD → BOTH Voltras unload (was the bug). Tap LOAD → BOTH load.
+4. In Combined: nudgers should show **−6 / +6** (top row) and **−2 / +2** (bottom row). Tap any → weight stays even.
+5. Switch from Independent at an odd weight (e.g. 35) into Combined → on entry, weight rounds DOWN to 34.
+6. In Combined start drop-cascade from 30 lb → expect 30 → 24 → 18 → 12 → 6 → BOTTOM (even steps only).
+7. Switch to Independent → nudgers should be **−5 / +5** and **−1 / +1** again.
+8. Single-Voltra and singleLeft / singleRight modes should still work (no regressions).
+
