@@ -158,6 +158,68 @@ struct VoltraLiveApp: App {
                     // synthetic generator the same handler.
                     DemoTelemetryBridge.shared.handler = telemetryHandler
 
+                    // Build 41: route MultiDeviceManager telemetry into
+                    // the SAME pipeline as the single-device flow.
+                    //
+                    // Before b41, the dual-Voltra screen wired its own
+                    // local closures inside DualCaptureView.onAppear, so
+                    // anyone who paired two Voltras and went to the regular
+                    // home screen (the b40 default) saw zero telemetry from
+                    // either side. The user reported this as 'when I combine
+                    // them, it only works on one of the Voltras' / 'left
+                    // shows connected but no phase, reps, or force'.
+                    //
+                    // Routing rule:
+                    //   - If BOTH MDM slots have produced telemetry, use the
+                    //     combined virtual-twin reading (force=sum,
+                    //     reps=sum) which fires after every per-device
+                    //     packet from MDM.handleTelemetry.
+                    //   - If only ONE side is connected, that side's raw
+                    //     telemetry passes through unchanged.
+                    // This makes both single-paired-via-MDM and dual-paired
+                    // flows feed the same SessionStore + LoggingStore that
+                    // the legacy single-device manager does.
+                    multi.onLeftTelemetry = { [weak multi] t in
+                        // Forward only when the right side is NOT connected,
+                        // so we don't double-count alongside the combined
+                        // fanout below.
+                        guard let m = multi else { return }
+                        if !m.right.connectionState.isConnected {
+                            telemetryHandler(t)
+                        }
+                    }
+                    multi.onRightTelemetry = { [weak multi] t in
+                        guard let m = multi else { return }
+                        if !m.left.connectionState.isConnected {
+                            telemetryHandler(t)
+                        }
+                    }
+                    multi.onCombinedTelemetry = { [weak multi] c in
+                        // Only fire when both sides are actually connected;
+                        // CombinedTelemetry is computed on every per-device
+                        // packet but its left/right inputs are nil-safe, so
+                        // gating here prevents single-side packets from
+                        // re-entering the pipeline as half-populated
+                        // 'combined' readings.
+                        guard let m = multi,
+                              m.left.connectionState.isConnected,
+                              m.right.connectionState.isConnected else { return }
+                        // Synthesize a Telemetry struct from the merged
+                        // combined reading. Phase comes from whichever side
+                        // is currently in a non-idle phase (caller-side
+                        // logic prefers the more 'active' phase).
+                        let phase: VoltraPhase = {
+                            if c.phaseLeft != .idle { return c.phaseLeft }
+                            return c.phaseRight
+                        }()
+                        var merged = Telemetry()
+                        merged.phase     = phase
+                        merged.forceLb   = c.forceLb
+                        merged.repCount  = c.repCount
+                        merged.peakPowerWatts = c.peakPower
+                        telemetryHandler(merged)
+                    }
+
                     // First-launch: seed Exercise/WorkoutSession rows from
                     // the bundled history.md.
                     HistoryImporter.runIfNeeded(context: ctx)

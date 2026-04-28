@@ -676,3 +676,19 @@ Changes:
 DualConnectView and DualCaptureView are no longer reachable from the UI but the files remain in the project; b41 will rewire MDM telemetry into the unified pipeline and b42 will add the pre-workout Voltra picker, after which those files can be removed.
 
 Files changed: VoltraLive/Views/UnifiedConnectSheet.swift (new), VoltraLive/Views/ConnectView.swift, VoltraLive/Views/ContentView.swift, VoltraLive/Logging/Views/LoggingHomeView.swift, VoltraLive/Info.plist, project.yml, docs/WORK_LOG.md
+
+## 2026-04-27 — b41 "Dual telemetry"
+After b40 unified the connect flow, the dual-pair path landed users on the regular logging home screen — but the per-side telemetry hooks (`mdm.onLeftTelemetry` / `onRightTelemetry` / `onCombinedTelemetry`) were only ever wired inside DualCaptureView.onAppear, which the new flow no longer reaches. Result: paired both Voltras, home shows "Left + Right connected", but starting a workout produced zero phase/reps/force on the live tile.
+
+Root cause: the live pipeline (SessionStore.handleLiveSample + LoggingStore.noteTelemetryActivity) is fed exclusively by `bleManager.onTelemetry` (single-device) plus the synthetic Demo path. MDM's hooks were dangling unless DualCaptureView was on screen.
+
+Fix: wire MDM telemetry into the same `telemetryHandler` closure used by the single-device manager, in VoltraLiveApp's onAppear right after the bleManager hook is set.
+- onLeftTelemetry: forwards Left telemetry through telemetryHandler ONLY when right is not connected (so we don't double-count alongside the combined fanout below).
+- onRightTelemetry: symmetric for right when left is not connected.
+- onCombinedTelemetry: only fires through telemetryHandler when BOTH sides are connected; converts CombinedTelemetry into a Telemetry struct (force=sum, reps=sum, peakPower=sum, phase = whichever side is non-idle, prefer left). This gives the user a virtual-twin reading on the existing live tile.
+
+Net effect with two Voltras paired: the live tile, rep counter, and drop-cascade timers all see merged readings. With one paired (single-device through MDM), that side passes through unchanged.
+
+Sacred files (Telemetry struct in TelemetryExtractor.swift) are not modified — the merged struct is populated via memberwise property assignment after `Telemetry()`.
+
+Files changed: VoltraLive/VoltraLiveApp.swift, VoltraLive/Info.plist, project.yml, docs/WORK_LOG.md
