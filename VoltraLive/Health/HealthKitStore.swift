@@ -288,6 +288,17 @@ final class HealthKitStore: ObservableObject {
         let kcal: Double?
     }
 
+    /// b53: Session-level snapshot. Like InstanceSnapshot but also
+    /// carries min/max HR across the full session window so the
+    /// summary can show a heart-rate range (e.g. 94-164 BPM) alongside
+    /// the average.
+    struct SessionSnapshot {
+        let avgHR: Double?
+        let minHR: Double?
+        let maxHR: Double?
+        let kcal: Double?
+    }
+
     /// Query HealthKit for HR + active-energy samples between
     /// `[startedAt, endedAt]` and return the average HR and total kcal
     /// burned over that window. Called from `LoggingStore.finalizeActiveInstance`
@@ -305,6 +316,46 @@ final class HealthKitStore: ObservableObject {
         async let kcal = sumKcalInWindow(start: start, end: end)
         let (h, k) = await (hr, kcal)
         return InstanceSnapshot(avgHR: h, kcal: k)
+    }
+
+    /// b53: Session-level windowed snapshot. Same shape as
+    /// snapshotInstance but additionally fetches min + max HR over the
+    /// window so the summary card can render "HR 124 BPM (94-164)".
+    func snapshotSession(start: Date, end: Date) async -> SessionSnapshot {
+        guard isAvailable else {
+            return SessionSnapshot(avgHR: nil, minHR: nil, maxHR: nil, kcal: nil)
+        }
+        async let avg = averageHRInWindow(start: start, end: end)
+        async let mn  = extremumHRInWindow(start: start, end: end, isMin: true)
+        async let mx  = extremumHRInWindow(start: start, end: end, isMin: false)
+        async let kcal = sumKcalInWindow(start: start, end: end)
+        let (a, lo, hi, k) = await (avg, mn, mx, kcal)
+        return SessionSnapshot(avgHR: a, minHR: lo, maxHR: hi, kcal: k)
+    }
+
+    /// b53: Min or max HR across a window via HKStatisticsQuery. Returns
+    /// nil when no samples cover the window or HK auth was denied.
+    private func extremumHRInWindow(start: Date, end: Date, isMin: Bool) async -> Double? {
+        guard let type = HKObjectType.quantityType(forIdentifier: .heartRate) else { return nil }
+        let predicate = HKQuery.predicateForSamples(
+            withStart: start,
+            end: end,
+            options: .strictStartDate
+        )
+        return await withCheckedContinuation { (cont: CheckedContinuation<Double?, Never>) in
+            let q = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: isMin ? .discreteMin : .discreteMax
+            ) { _, stats, _ in
+                let unit = HKUnit.count().unitDivided(by: .minute())
+                let v = isMin
+                    ? stats?.minimumQuantity()?.doubleValue(for: unit)
+                    : stats?.maximumQuantity()?.doubleValue(for: unit)
+                cont.resume(returning: v)
+            }
+            store.execute(q)
+        }
     }
 
     private func averageHRInWindow(start: Date, end: Date) async -> Double? {
@@ -357,8 +408,18 @@ extension HealthKitStore {
         let avgHR: Double?
         let kcal: Double?
     }
+    /// b53: parity stub for the non-HealthKit (simulator / preview) build.
+    struct SessionSnapshot {
+        let avgHR: Double?
+        let minHR: Double?
+        let maxHR: Double?
+        let kcal: Double?
+    }
     func snapshotInstance(start: Date, end: Date) async -> InstanceSnapshot {
         InstanceSnapshot(avgHR: nil, kcal: nil)
+    }
+    func snapshotSession(start: Date, end: Date) async -> SessionSnapshot {
+        SessionSnapshot(avgHR: nil, minHR: nil, maxHR: nil, kcal: nil)
     }
 }
 #endif

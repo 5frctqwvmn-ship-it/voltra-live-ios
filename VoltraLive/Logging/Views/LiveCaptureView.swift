@@ -313,7 +313,11 @@ struct LiveCaptureView: View {
                 damperLevel: 0
             )
         )
-        writerRouter.apply(state, mdm: mdm)
+        // b53: pass the active instance's per-exercise Voltra assignment
+        // so the writer routes only to the slot(s) the user picked for
+        // THIS exercise. Falls back to legacy chain-derived routing when
+        // the assignment is nil (e.g. session imported pre-b53).
+        writerRouter.apply(state, mdm: mdm, assignment: logging.activeInstance?.assignedVoltra)
     }
 
     // MARK: - Header
@@ -329,11 +333,24 @@ struct LiveCaptureView: View {
             }
             return "SET \(setNum)"
         }()
+        // b53: when the user tagged this session as a superset and the
+        // chain has multiple entries, the header collapses into a
+        // single "Superset · {head} · HR {bpm} · {day}" line so the
+        // user can read the full session context from the top of the
+        // screen at a glance. The big exercise name still shows below
+        // (so the user knows which exercise their reps are routing to
+        // RIGHT NOW), but the kicker now contains the workout shape.
+        let isSupersetTagged = mdm.supersetTag && mdm.supersetChain.count >= 2
+        let headExerciseName = mdm.supersetChain.first?.exerciseName ?? exName
+        let hrText = health.currentHR.map { "HR \($0)" } ?? "HR \u{2014}"
+        let supersetKicker = "Superset \u{00B7} \(headExerciseName) \u{00B7} \(hrText) \u{00B7} \(dayLabel)"
         return VStack(alignment: .leading, spacing: 6) {
-            Text(dayLabel.uppercased())
+            Text(isSupersetTagged ? supersetKicker.uppercased() : dayLabel.uppercased())
                 .font(.system(size: 11, weight: .bold))
-                .kerning(2)
+                .kerning(isSupersetTagged ? 1.4 : 2)
                 .foregroundColor(VoltraColor.accent)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             Text(exName)
                 .font(.system(size: 22, weight: .bold))
                 .foregroundColor(VoltraColor.text)
@@ -907,17 +924,28 @@ struct LiveCaptureView: View {
         //    chain entry's plannedWeightLb when available so each exercise
         //    remembers its own starting weight; fall back to the per-side
         //    mirror for the two-exercise legacy path.
+        // b53: `incoming` is the newly-active slot after the flip; used
+        // only to look up the mirrored standing weight. Auto-LOAD was
+        // removed below, so we no longer need to reference `incoming`
+        // anywhere except this lookup.
         let incoming = mdm.supersetActiveSlot
         let mirrored = (incoming == .left ? mdm.supersetLeftWeightLb : mdm.supersetRightWeightLb)
         let restored: Double = mdm.activeSupersetEntry?.plannedWeightLb ?? mirrored
         logging.pendingPlannedWeightLb = restored
         logging.reanchorCascadeIfActive(toLb: restored)
         pushUpcomingStateToDevice()
-        // 6. Auto-LOAD the incoming Voltra at the restored weight so the
-        //    user can grab the cable and start the next set without an
-        //    extra tap. (b48 required a manual LOAD after every SWAP,
-        //    which the user reported as a friction point.)
-        mdm.load(target: incoming)
+        // b53: REMOVED auto-LOAD on SWAP. Prior behavior fired
+        // `mdm.load(target: incoming)` here so the user could start
+        // the next set without a manual LOAD tap, but the user
+        // reported this as dangerous — the newly-active Voltra
+        // would suddenly tension up while they were still walking
+        // over to it from the other side. b53 explicitly removes
+        // the auto-LOAD: the unload signal to the OUTGOING side
+        // still fires (step 2 above), and the device-state push in
+        // step 5 reflects the restored weight on the incoming
+        // side's writer cache, but no LOAD command is sent. The
+        // user pulls the cable, then manually taps LOAD, matching
+        // the b48 flow they explicitly preferred.
     }
 
     /// LOAD command. Prefers MDM when any slot is paired; otherwise legacy ble.
@@ -1744,7 +1772,8 @@ struct LiveCaptureView: View {
                 damperLevel: 0
             )
         )
-        writerRouter.apply(state, mdm: mdm)
+        // b53: route by per-exercise assignment when available.
+        writerRouter.apply(state, mdm: mdm, assignment: logging.activeInstance?.assignedVoltra)
     }
 
     // MARK: - Logged sets section

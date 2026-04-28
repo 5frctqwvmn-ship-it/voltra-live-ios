@@ -1020,9 +1020,32 @@ final class LoggingStore: ObservableObject {
 
     func endSession() -> WorkoutSession? {
         guard let session = activeSession else { return nil }
-        session.endedAt = Date()
+        let endedAt = Date()
+        session.endedAt = endedAt
         finalizeActiveInstance()
         try? modelContext?.save()
+
+        // b53: fire async session-level HK snapshot covering the FULL
+        // workout window. Lands avgHR / minHR / maxHR / kcal onto the
+        // session so the post-workout summary card can render heart-rate
+        // range + total energy without re-querying HK at view time. The
+        // per-instance snapshots fired by finalizeActiveInstance are
+        // independent — instance windows are subsets of the session
+        // window so the rollup numbers won't always equal the sum of
+        // the instance numbers (the session covers rest periods too).
+        if let hk = healthStore {
+            let target = session
+            let start = session.startedAt
+            let end = endedAt
+            Task { @MainActor [weak self] in
+                let snap = await hk.snapshotSession(start: start, end: end)
+                target.avgHRSession = snap.avgHR
+                target.minHRSession = snap.minHR
+                target.maxHRSession = snap.maxHR
+                target.kcalSession = snap.kcal
+                try? self?.modelContext?.save()
+            }
+        }
 
         let result = session
         activeSession = nil
@@ -1407,10 +1430,25 @@ final class LoggingStore: ObservableObject {
         let durStr = formatDuration(dur)
 
         var out = ""
-        out += "Session \(sessionNumber) — \(df.string(from: session.startedAt)) — \(session.displayLabel)\n"
+        out += "Session \(sessionNumber) \u{2014} \(df.string(from: session.startedAt)) \u{2014} \(session.displayLabel)\n"
         out += "Equipment: \(uniqueEquipment(in: session))   "
-        out += "Time: \(timeF.string(from: session.startedAt)) – \(timeF.string(from: ended))   "
-        out += "Duration: \(durStr)\n\n"
+        out += "Time: \(timeF.string(from: session.startedAt)) \u{2013} \(timeF.string(from: ended))   "
+        out += "Duration: \(durStr)\n"
+        // b53: Session-level vitals + comparison line. Renders only
+        // when HK captured at least one of the values, so legacy /
+        // imported sessions don't see stubs.
+        if let avgHR = session.avgHRSession, avgHR > 0 {
+            var line = "Session HR: avg \(Int(avgHR.rounded())) bpm"
+            if let lo = session.minHRSession, let hi = session.maxHRSession,
+               lo > 0, hi > 0 {
+                line += " (\(Int(lo.rounded()))\u{2013}\(Int(hi.rounded())))"
+            }
+            if let kcal = session.kcalSession, kcal > 0 {
+                line += ", \(Int(kcal.rounded())) kcal"
+            }
+            out += "\(line)\n"
+        }
+        out += "\n"
 
         for inst in (session.instances ?? []).sorted(by: { $0.orderIndex < $1.orderIndex }) {
             let exerciseName = inst.exercise?.name ?? "Exercise"
@@ -1420,23 +1458,47 @@ final class LoggingStore: ObservableObject {
             // b52: Per-exercise header with order index so chain ordering
             // is unambiguous in the export.
             out += "\(inst.orderIndex). \(title)\n\n"
-            out += "Set    Label      Weight     Eccentric    Reps    Peak lb    Notes\n"
+            // b53: Fixed-width columns rendered through `formatRow`.
+            // Pre-b53 the export hand-padded each column with mismatched
+            // widths and inline string separators which caused mid-row
+            // line wraps the moment a single value exceeded its column
+            // (visible in the b52 ship as Reps and Peak lb columns
+            // stacking vertically). The new helper declares all column
+            // widths in one place so every row aligns regardless of
+            // value length.
+            let header = formatRow(
+                set: "Set",
+                label: "Label",
+                weight: "Weight",
+                ecc: "Eccentric",
+                reps: "Reps",
+                peak: "Peak lb",
+                notes: "Notes"
+            )
+            out += "\(header)\n"
             for s in inst.orderedSets {
-                let w = s.weightLb > 0 ? "\(formatLb(s.weightLb)) lbs" : "—"
-                let e = (s.eccentricLb ?? 0) > 0 ? "+\(formatLb(s.eccentricLb!)) ecc" : "—"
+                let w = s.weightLb > 0 ? "\(formatLb(s.weightLb)) lb" : "\u{2014}"
+                let e = (s.eccentricLb ?? 0) > 0 ? "+\(formatLb(s.eccentricLb!))" : "\u{2014}"
                 let baseLabel = s.labelText.isEmpty ? s.mode.label : s.labelText
                 let chain = s.fullDropChain
                 let label: String = {
                     if chain.count > 1 {
-                        return "\(baseLabel) (drop×\(chain.count))"
+                        return "\(baseLabel) (drop\u{00D7}\(chain.count))"
                     }
                     return baseLabel
                 }()
                 let notes = s.notes ?? ""
-                // b52: include peakForceLb on each row — needed for chain
-                // summary review per b51 user feedback.
-                let peakStr = s.peakForceLb > 0 ? formatLb(s.peakForceLb) : "—"
-                out += "\(s.orderIndex)      \(label.padded(8))  \(w.padded(10))  \(e.padded(11))  \(s.reps)       \(peakStr.padded(8))   \(notes)\n"
+                let peakStr = s.peakForceLb > 0 ? formatLb(s.peakForceLb) : "\u{2014}"
+                let row = formatRow(
+                    set: "\(s.orderIndex)",
+                    label: label,
+                    weight: w,
+                    ecc: e,
+                    reps: "\(s.reps)",
+                    peak: peakStr,
+                    notes: notes
+                )
+                out += "\(row)\n"
 
                 // v0.4.5: Drop-set chain. Render an indented arrow line
                 // listing each drop's weight×reps, plus a per-drop peak
@@ -1480,6 +1542,28 @@ final class LoggingStore: ObservableObject {
             out += "\n"
         }
         return out
+    }
+
+    /// b53: Render a single export row with fixed-width columns. Widths
+    /// chosen to fit the widest realistic value (e.g. "Drop Set" label,
+    /// "199.5 lb" weight) without wrap. Trailing notes column is
+    /// unbounded.
+    private func formatRow(
+        set: String,
+        label: String,
+        weight: String,
+        ecc: String,
+        reps: String,
+        peak: String,
+        notes: String
+    ) -> String {
+        let setW    = 4
+        let labelW  = 14
+        let weightW = 9
+        let eccW    = 8
+        let repsW   = 5
+        let peakW   = 9
+        return "\(set.padded(setW)) \(label.padded(labelW)) \(weight.padded(weightW)) \(ecc.padded(eccW)) \(reps.padded(repsW)) \(peak.padded(peakW)) \(notes)"
     }
 
     private func uniqueEquipment(in session: WorkoutSession) -> String {

@@ -203,6 +203,18 @@ final class WorkoutSession {
     /// each LoggedSet via its ExerciseInstance.
     var supersetTag: Bool = false
 
+    /// b53: Session-level average heart rate (BPM) across the FULL session
+    /// window (startedAt → endedAt). Captured by HealthKit on endSession.
+    /// nil = HK denied, no samples, or imported session.
+    var avgHRSession: Double? = nil
+    /// b53: Session-level active energy burned (kcal) across the full
+    /// session window. Same nil-safety as `avgHRSession`.
+    var kcalSession: Double? = nil
+    /// b53: Session-level minimum HR across the window (BPM).
+    var minHRSession: Double? = nil
+    /// b53: Session-level maximum HR across the window (BPM).
+    var maxHRSession: Double? = nil
+
     @Relationship(deleteRule: .cascade, inverse: \ExerciseInstance.session)
     var instances: [ExerciseInstance]? = nil
 
@@ -248,6 +260,35 @@ final class WorkoutSession {
     var totalSets: Int { allSets.count }
     var totalReps: Int { allSets.reduce(0) { $0 + $1.reps } }
     var peakLb: Double { allSets.map(\.weightLb).max() ?? 0 }
+
+    // MARK: - b53 session rollups
+
+    /// b53: Distinct exercise count for this session. The pre-b53
+    /// summary tile counted instances WITH endedAt non-nil, which broke
+    /// the live preview while sets were in flight; this version counts
+    /// every instance that has at least one logged set.
+    var distinctExerciseCount: Int {
+        (instances ?? []).filter { !($0.sets ?? []).isEmpty }.count
+    }
+
+    /// b53: Total volume across the entire session (lb).
+    var totalVolumeLb: Double {
+        (instances ?? []).reduce(0.0) { $0 + $1.totalVolumeLb }
+    }
+
+    /// b53: Peak force across all sets in the session (lb). Distinct
+    /// from `peakLb` (which is peak commanded weight).
+    var peakForceLbSession: Double {
+        (instances ?? []).map(\.peakForceLb).max() ?? 0
+    }
+
+    /// b53: Wall-clock duration. Falls back to "now" while the session
+    /// is still active so the export view can render a sensible value
+    /// during the brief window between the user tapping End Session and
+    /// the export sheet appearing.
+    var duration: TimeInterval {
+        (endedAt ?? Date()).timeIntervalSince(startedAt)
+    }
 }
 
 // MARK: - ExerciseInstance (one exercise within a session)
@@ -274,6 +315,17 @@ final class ExerciseInstance {
     /// `avgHRDuringInstance`.
     var kcalDuringInstance: Double? = nil
 
+    /// b53: Per-exercise Voltra assignment for the routing model. Stored as
+    /// the raw string of `DeviceSlotAssignment` ("left" / "right" / "both").
+    /// nil = legacy / single-Voltra session, fall back to MDM's chain-based
+    /// routing. When non-nil, WriterRouter routes writes directly to the
+    /// assigned slot regardless of `mdm.supersetActiveSlot` — this replaces
+    /// the b52 `hasAnySupersetChainEntry` predicate which was the wrong
+    /// abstraction (it tied routing to chain length, not to the user's
+    /// per-exercise intent). Additive SwiftData migration: existing rows
+    /// decode with nil and continue using legacy routing.
+    var assignedVoltraRaw: String? = nil
+
     // Owning relationships — both optional for CloudKit compatibility.
     var session: WorkoutSession? = nil
     var exercise: Exercise? = nil
@@ -289,6 +341,7 @@ final class ExerciseInstance {
         equipment: String = "",
         avgHRDuringInstance: Double? = nil,
         kcalDuringInstance: Double? = nil,
+        assignedVoltraRaw: String? = nil,
         session: WorkoutSession? = nil,
         exercise: Exercise? = nil
     ) {
@@ -299,8 +352,16 @@ final class ExerciseInstance {
         self.equipment = equipment
         self.avgHRDuringInstance = avgHRDuringInstance
         self.kcalDuringInstance = kcalDuringInstance
+        self.assignedVoltraRaw = assignedVoltraRaw
         self.session = session
         self.exercise = exercise
+    }
+
+    /// b53: Typed accessor for the per-exercise Voltra assignment. Persists
+    /// to `assignedVoltraRaw`.
+    var assignedVoltra: DeviceSlotAssignment? {
+        get { DeviceSlotAssignment(rawValue: assignedVoltraRaw ?? "") }
+        set { assignedVoltraRaw = newValue?.rawValue }
     }
 
     var orderedSets: [LoggedSet] {

@@ -140,6 +140,56 @@ enum DeviceSlot: String, CaseIterable, Equatable, Identifiable {
     }
 }
 
+// MARK: - DeviceSlotAssignment (b53)
+
+/// b53: Per-exercise Voltra assignment. Distinct from `DeviceSlot` because
+/// an exercise can target BOTH Voltras simultaneously (bilateral movement
+/// where the user wants the same weight on each side, e.g. a barbell
+/// substitute) in addition to a single side. Persisted on
+/// `ExerciseInstance.assignedVoltraRaw` as the raw string.
+///
+/// Routing semantics in WriterRouter when both Voltras are paired:
+///   - .left  → writes go to mdm.leftWriter only
+///   - .right → writes go to mdm.rightWriter only
+///   - .both  → writes broadcast to both writers (same target on each)
+///
+/// nil on the instance falls back to MDM-driven routing (legacy / chain-
+/// derived, for sessions imported before b53).
+enum DeviceSlotAssignment: String, CaseIterable, Equatable, Identifiable {
+    case left
+    case right
+    case both
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .left:  return "Left"
+        case .right: return "Right"
+        case .both:  return "Both"
+        }
+    }
+
+    /// Convert from a single-slot pick. `.both` cannot be expressed as a
+    /// `DeviceSlot` so we collapse to the active slot at routing time.
+    init(slot: DeviceSlot) {
+        switch slot {
+        case .left:  self = .left
+        case .right: self = .right
+        }
+    }
+
+    /// Project to a single slot when needed (e.g. for the chain banner's
+    /// active-side rendering). `.both` projects to `.left` by convention.
+    var projectedSlot: DeviceSlot {
+        switch self {
+        case .left:  return .left
+        case .right: return .right
+        case .both:  return .left
+        }
+    }
+}
+
 // MARK: - Combined-mode math
 
 /// Helpers for translating user-facing TOTAL values into per-device values in

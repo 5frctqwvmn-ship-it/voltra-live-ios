@@ -1562,3 +1562,136 @@ view rewrite. No protocol or BLE state-machine churn.
    for share-link export.
 5. **No regression**: solo (non-chain) sessions still work — single
    instance card, no chain banner, telemetry attributes correctly.
+
+---
+
+## Build 53 (v0.4.31, "V2 preview + chain fixes") — 2026-04-28
+
+**Goal: Two-pronged build.** (1) Fix the chain-routing bugs the
+user surfaced after b52 ("first exercise loads both Voltras"
+on superset start, header showing exercise 2 while ACTIVE banner
+loads exercise 1, SWAP auto-loading the new side dangerously,
+summary mislabels and EXERCISES count zeroed). (2) Land the V2
+LiveCaptureView preview as a separate code path the user can opt
+into without touching V1. Combined into one build for ~30% cost
+savings vs shipping b53 + b54 separately, per user direction.
+
+### Chain-routing fixes
+
+**Root cause from screenshots (IMG_2384, IMG_2385).** The header
+read `activeInstance.exercise.name` while the ACTIVE banner +
+WriterRouter routed off `mdm.supersetActiveSlot` /
+`hasAnySupersetChainEntry`. Those two source-of-truth paths could
+disagree the moment the chain mutated, e.g. on first exercise add
+when only one chain entry existed and the b52 fallback predicate
+broadcast to BOTH writers. The fix is to move routing onto a
+per-instance field so the header and the writer always agree.
+
+**Architecture change: per-instance `assignedVoltra`.**
+
+1. `ExerciseInstance` (SwiftData) gets `assignedVoltraRaw: String?`
+   plus a typed `assignedVoltra: DeviceSlotAssignment?` accessor.
+   Additive migration; existing rows decode as nil → falls through
+   to b52 chain-predicate routing for backward compat.
+2. New enum `DeviceSlotAssignment { left, right, both }` in
+   `DualMode.swift` with `.projectedSlot` (`.both → .left` for
+   chain-entry storage) and human label.
+3. `WriterRouter.apply(_:mdm:assignment:)` takes an optional
+   assignment. When non-nil it routes by it directly (left → left
+   writer, right → right writer, both → broadcast). When nil it
+   falls back to the b52 chain predicate. Added
+   `unload(slot:mdm:)` that pushes weight=0 to a single writer.
+4. `LiveCaptureView` and `ExerciseDetailView` now pass
+   `assignment: logging.activeInstance?.assignedVoltra` at every
+   `apply` call site. The header for chain sessions reads
+   `"Superset · {head} · HR {bpm} · {day}"` using the live HR.
+5. `ExerciseStartView`'s superset slot picker is now 3-way (Left
+   / Right / Both), driven by `DeviceSlotAssignment.allCases`. On
+   commit it persists the choice to `activeInstance.assignedVoltra`
+   AND appends the chain entry with the projected slot.
+6. **SWAP no longer auto-LOADs.** The new side gets an unload
+   (weight=0) so the cable is safe to grab, but the LOAD step is
+   removed — the user manually taps LOAD after switching machines.
+   Prevents the dangerous "I just walked over and the device
+   already loaded itself" surprise from the b52 video.
+
+### Session rollups + summary fixes
+
+7. `WorkoutSession` gets `avgHRSession`, `minHRSession`,
+   `maxHRSession`, `kcalSession` (Double?), plus computed
+   `distinctExerciseCount`, `totalVolumeLb`, `peakForceLbSession`,
+   `duration`. `endSession()` fires an async HK snapshot via the
+   new `HealthKitStore.snapshotSession(start:end:)` (HK + non-HK
+   stub).
+8. `ExportSheet` adds a `sessionVitalsCard` (AVG HR / KCAL / TOTAL
+   VOL / DUR with min-max HR header) ABOVE the per-exercise cards,
+   and a `comparisonCard` showing VOL/PEAK/DUR deltas vs the most
+   recent prior session of the same `dayTypeRaw`. EXERCISES tile
+   now uses `distinctExerciseCount` (was zeroed in b52).
+9. `markdownExport` is rewritten with a fixed-width `formatRow`
+   helper (set 4 / label 14 / weight 9 / ecc 8 / reps 5 / peak 9)
+   so the share-link table no longer wraps mid-row, and adds a
+   `Session HR:` line under Duration when HR is present.
+
+### V2 preview
+
+10. **NEW** `LiveCaptureContainer.swift` — wraps V1/V2 selection.
+    Reads `@AppStorage("liveCaptureUIVersion")`. On first launch
+    (empty value) presents `LiveCaptureUIPickerSheet` with two
+    cards (V1 RECOMMENDED default, V2 Preview). `shouldUseV2`
+    requires uiVersion == "v2" AND NOT bothPaired AND chain<2 — so
+    V2 always falls back to V1 for dual-Voltra or chain sessions.
+11. **NEW** `LiveCaptureViewV2.swift` — single-Voltra clean
+    redesign using `VoltraColor` / `VoltraFont` tokens. Layout:
+    header card → 2x2 tile grid (REPS / PEAK / HR / REST) → force
+    chart (same `ForceChartView` as the dashboard) → plan card +
+    one-tap LOG SET CTA. No chain UI, no SWAP, no drop cascade,
+    no nudge chips. The toolbar shows a `V2` accent pill so the
+    user can tell which screen they're on.
+12. `ExerciseDetailView.swift:116` and `ExerciseStartView.swift:81`
+    now navigate to `LiveCaptureContainer()` instead of
+    `LiveCaptureView()`. The `#Preview` inside `LiveCaptureView`
+    is unchanged (V1 preview only).
+
+**Sacred files untouched.** No changes to `VoltraProtocol.swift`,
+`TelemetryExtractor.swift`, `PacketParser.swift`,
+`FrameAssembler.swift`.
+
+**SwiftData migration**: additive only. `assignedVoltraRaw` and
+the four session HK rollup fields default to nil; existing rows
+decode unchanged. b52 chain-predicate routing is preserved as the
+nil fallback so any in-flight session upgraded to b53 keeps
+working without forcing the user to reassign.
+
+**Cost callout for this build:** medium-heavy. 9 source files
+changed + 2 new files (Container, V2) + extension to WriterRouter
++ HK snapshot API + ExportSheet rewrite. No protocol or BLE
+state-machine churn. Combined cost ~30-35% under shipping b53 and
+the V2 preview as separate builds.
+
+**Test plan after install**
+
+1. **Solo session, V1.** Skip the picker (Use V1). Live screen
+   should look identical to b52. End a session: summary shows the
+   new sessionVitalsCard + comparisonCard if a prior arm-day exists,
+   EXERCISES tile shows the right count, markdown export table is
+   clean and unwrapped.
+2. **Solo session, V2.** Pick V2 on the first-launch sheet. The
+   live screen should be the new clean layout with the V2 pill in
+   the toolbar. LOG SET should commit a row with the right reps +
+   peak. Backing out and re-entering should keep V2 (uiVersion
+   persisted).
+3. **Pair both Voltras → pick A on LEFT → Start.** Even if the
+   user opted into V2, the container falls back to V1 because
+   bothPaired==true. ACTIVE banner says `ACTIVE • LEFT`, only the
+   LEFT Voltra applies the load.
+4. **Add Another Exercise → pick B on RIGHT (or BOTH) → Start.**
+   Header shows `Superset · A · HR {n} · {day}`. Only the
+   selected slot applies B's load (or BOTH writers if user picked
+   Both).
+5. **Run sets on A, SWAP.** New side unloads to 0. NO automatic
+   LOAD — the user must tap LOAD after grabbing the cable. SWAP
+   back continues working.
+6. **End session.** Summary shows session vitals card, comparison
+   to last arm day (if any), per-exercise cards, and a markdown
+   table whose set rows do NOT wrap mid-row.

@@ -113,7 +113,10 @@ struct ExerciseDetailView: View {
         .navigationTitle(navTitle)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(isPresented: $navigateToCapture) {
-            LiveCaptureView()
+            // b53: route through the V1/V2 container instead of pinning
+            // V1. Container reads @AppStorage("liveCaptureUIVersion")
+            // and falls back to V1 for any session V2 cannot render.
+            LiveCaptureContainer()
         }
         .onAppear {
             writerRouter.attach(ble: ble)
@@ -874,7 +877,8 @@ struct ExerciseDetailView: View {
                 damperLevel: damperLevel
             )
         )
-        writerRouter.apply(state, mdm: mdm)
+        // b53: route by per-exercise Voltra assignment when available.
+        writerRouter.apply(state, mdm: mdm, assignment: logging.activeInstance?.assignedVoltra)
     }
 
     private func formatLb(_ d: Double) -> String {

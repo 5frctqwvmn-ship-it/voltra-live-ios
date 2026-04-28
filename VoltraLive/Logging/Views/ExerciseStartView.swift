@@ -26,10 +26,12 @@ struct ExerciseStartView: View {
     /// Free-entry mirror of chosenWeight as a String for the TextField.
     @State private var freeEntryText: String = ""
     @State private var navigateToCapture = false
-    /// b48: per-exercise Voltra assignment in superset mode. Default
-    /// follows the existing chain length (entry 0 -> left, entry 1 ->
-    /// right, entry 2 -> left, ...) so the user can just tap through.
-    @State private var supersetSlot: DeviceSlot = .left
+    /// b53: per-exercise Voltra assignment. Default follows the existing
+    /// chain length (entry 0 -> left, entry 1 -> right, entry 2 -> left,
+    /// ...) so the user can just tap through. Replaces the b48
+    /// `DeviceSlot`-typed state — b53 lets the user pick BOTH so a
+    /// single exercise can drive both Voltras with the same target.
+    @State private var supersetSlot: DeviceSlotAssignment = .left
     /// Refreshed on appear and after each set is logged.
     @State private var suggestion: SetSuggestion = SetSuggestion(
         source: .freeEntry, anchorLb: nil, offsets: []
@@ -76,7 +78,10 @@ struct ExerciseStartView: View {
             }
         }
         .navigationDestination(isPresented: $navigateToCapture) {
-            LiveCaptureView()
+            // b53: V1/V2 container \u2014 see ExerciseDetailView for the
+            // full reasoning. V1 stays the default; V2 is opted into on
+            // first launch via the picker sheet.
+            LiveCaptureContainer()
         }
         .onAppear {
             refreshSuggestion()
@@ -84,7 +89,15 @@ struct ExerciseStartView: View {
             // -> left (so entry 0 = left, entry 2 = left), odd -> right.
             // The user can override before tapping Start / Add Another.
             if inSupersetMode {
-                supersetSlot = (mdm.supersetChain.count % 2 == 0) ? .left : .right
+                // b53: default to the per-instance assignment if this
+                // instance was already assigned (e.g. user navigated
+                // back into the Start screen). Otherwise fall back to
+                // the chain-length default introduced in b48.
+                if let prior = logging.activeInstance?.assignedVoltra {
+                    supersetSlot = prior
+                } else {
+                    supersetSlot = (mdm.supersetChain.count % 2 == 0) ? .left : .right
+                }
             }
         }
         // When the user logs a set in the capture flow, setNumber bumps —
@@ -265,16 +278,19 @@ struct ExerciseStartView: View {
                 .kerning(1.4)
                 .foregroundColor(VoltraColor.textDim)
             HStack(spacing: 10) {
-                ForEach(DeviceSlot.allCases) { slot in
-                    let selected = (slot == supersetSlot)
+                // b53: three-way picker. BOTH means this single exercise
+                // drives both Voltras (e.g. a bilateral movement where
+                // the user wants identical targets on each side).
+                ForEach(DeviceSlotAssignment.allCases) { assignment in
+                    let selected = (assignment == supersetSlot)
                     Button {
-                        supersetSlot = slot
+                        supersetSlot = assignment
                     } label: {
                         VStack(spacing: 2) {
-                            Image(systemName: slot == .left ? "l.circle.fill" : "r.circle.fill")
+                            Image(systemName: iconName(for: assignment))
                                 .font(.system(size: 18, weight: .bold))
                                 .foregroundColor(selected ? VoltraColor.bg : VoltraColor.accent)
-                            Text(slot.label.uppercased())
+                            Text(assignment.label.uppercased())
                                 .font(.system(size: 12, weight: .bold))
                                 .kerning(1.0)
                                 .foregroundColor(selected ? VoltraColor.bg : VoltraColor.text)
@@ -330,10 +346,35 @@ struct ExerciseStartView: View {
     /// b48: persist this exercise into the superset chain. Called from
     /// both the Start CTA (which then opens live capture) and the Add
     /// Another CTA (which then pops home).
+    ///
+    /// b53: ALSO stamps the per-exercise assignment onto the active
+    /// `ExerciseInstance.assignedVoltra` so WriterRouter can route by
+    /// it directly — the source of truth for routing moves from
+    /// MDM.supersetChain to the instance itself.
     private func commitSupersetEntry() {
         let name = logging.activeInstance?.exercise?.name ?? "Exercise"
         let weight = chosenWeight > 0 ? chosenWeight : (logging.pendingPlannedWeightLb ?? 0)
-        mdm.appendSupersetEntry(name: name, slot: supersetSlot, weightLb: weight)
+        // b53: persist the assignment on the instance.
+        logging.activeInstance?.assignedVoltra = supersetSlot
+        // Mirror onto the MDM chain. `.both` projects to a single slot
+        // here for legacy banner / chain-mirror compatibility — the
+        // routing path already broadcasts to both writers when the
+        // instance assignment is `.both`, so the projection only
+        // affects which side of the banner shows the active dot.
+        mdm.appendSupersetEntry(
+            name: name,
+            slot: supersetSlot.projectedSlot,
+            weightLb: weight
+        )
+    }
+
+    /// b53: SF Symbol for each assignment option.
+    private func iconName(for assignment: DeviceSlotAssignment) -> String {
+        switch assignment {
+        case .left:  return "l.circle.fill"
+        case .right: return "r.circle.fill"
+        case .both:  return "square.split.2x1.fill"
+        }
     }
 
     private var startButton: some View {

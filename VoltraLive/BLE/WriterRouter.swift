@@ -43,7 +43,19 @@ final class WriterRouter: ObservableObject {
     }
 
     /// Apply a device state, routing through MDM when dual is paired.
-    func apply(_ state: VoltraDeviceState, mdm: MultiDeviceManager?) {
+    ///
+    /// b53: Added optional `assignment` parameter — the per-exercise Voltra
+    /// assignment from the active `ExerciseInstance.assignedVoltra`. When
+    /// non-nil, this is the FIRST and ONLY routing signal (we trust the
+    /// user's per-exercise intent over chain length / workoutMode). When
+    /// nil, falls back to the b52 chain-derived predicate, then to
+    /// workoutMode — the legacy / pre-b53 routing path for sessions and
+    /// flows that don't carry an instance assignment.
+    func apply(
+        _ state: VoltraDeviceState,
+        mdm: MultiDeviceManager?,
+        assignment: DeviceSlotAssignment? = nil
+    ) {
         guard let mdm = mdm else {
             singleWriter?.apply(state)
             return
@@ -53,25 +65,29 @@ final class WriterRouter: ObservableObject {
 
         switch (leftOn, rightOn) {
         case (true, true):
-            // b50: chain length is the FIRST source of truth. The b49
-            // unified flow auto-derives workoutMode = .independent when
-            // 2 Voltras are paired, but if the user added a second
-            // exercise (chain count >= 2), each side is targeting its
-            // OWN exercise's weight — broadcasting both like .independent
-            // does would clobber the inactive side's standing weight.
-            // Active-slot-only routing is the correct behavior whenever
-            // a chain exists, regardless of WorkoutMode.
-            //
-            // b52: this also fires for a 1-entry chain (the user picked
-            // exercise A on slot Left, hasn't added B yet). Prior behavior
-            // required count >= 2 (`hasActiveSupersetChain`) and fell
-            // through to the `.independent` broadcast below for 1-entry
-            // chains, which loaded BOTH Voltras with A's weight even
-            // though A was bound to a single slot. The new predicate
-            // `hasAnySupersetChainEntry` (count >= 1) routes to the
-            // active slot the moment the chain has any entry, matching
-            // user expectation that picking exercise A for slot Left
-            // does not move the right Voltra.
+            // b53 (Issue 1): per-exercise assignment is the source of
+            // truth when present. If the user picked Left for this
+            // exercise, the right Voltra never sees writes from it —
+            // even if the chain happens to be empty or in a transitional
+            // state. This is the correct fix for the b52 "first exercise
+            // loads both Voltras" complaint: the b52 fix used
+            // `hasAnySupersetChainEntry` which depends on chain mutation
+            // ordering. Here we read directly off the instance the user
+            // is actively logging into.
+            if let assignment = assignment {
+                switch assignment {
+                case .left:  mdm.leftWriter.apply(state)
+                case .right: mdm.rightWriter.apply(state)
+                case .both:
+                    mdm.leftWriter.apply(state)
+                    mdm.rightWriter.apply(state)
+                }
+                break
+            }
+            // b50/b52 fallback: chain-derived routing for legacy paths
+            // that don't yet pass an assignment. Preserved unchanged so
+            // imports and any non-LiveCaptureView write site behaves
+            // exactly as in b52.
             if mdm.hasAnySupersetChainEntry {
                 switch mdm.supersetActiveSlot {
                 case .left:  mdm.leftWriter.apply(state)
@@ -120,5 +136,32 @@ final class WriterRouter: ObservableObject {
     /// connection drops so the next apply re-sends the full state.
     func resetAppliedState() {
         singleWriter?.resetAppliedState()
+    }
+
+    /// b53: Send an unload signal (weight = 0, eccentric off) to a
+    /// specific slot. Used by SWAP to drop tension on the OUTGOING
+    /// Voltra before the user transitions to the next exercise — prevents
+    /// the dangerous behavior where a SWAP auto-loads the newly-active
+    /// side's standing weight while the previously-active Voltra still
+    /// holds the prior exercise's load. The user pulls the cable from
+    /// one and walks to the other; we want the one they leave behind to
+    /// be at zero.
+    func unload(slot: DeviceSlot, mdm: MultiDeviceManager?) {
+        guard let mdm = mdm else { return }
+        let zero = VoltraDeviceState(
+            mode: .weight,
+            modifiers: VoltraModifiers(eccentric: false, chains: false, inverse: false),
+            weights: VoltraWeights(
+                baseLb: 0,
+                eccentricLb: 0,
+                chainsLb: 0,
+                bandMaxForceLb: 0,
+                damperLevel: 0
+            )
+        )
+        switch slot {
+        case .left:  mdm.leftWriter.apply(zero)
+        case .right: mdm.rightWriter.apply(zero)
+        }
     }
 }
