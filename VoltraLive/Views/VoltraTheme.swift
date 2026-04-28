@@ -26,6 +26,14 @@ enum VoltraColor {
     static let warn       = Color(hex: "#ff7a4d")
     static let danger     = Color(hex: "#ff4d6d")
 
+    // b53: phase washes for the V2 phase tile background tint, and
+    // freshness dots for HR/KCAL secondary tiles. Matches
+    // design-system/colors_and_type.css exactly.
+    static let pullWash    = Color(red: 0,        green: 0.831, blue: 0.667).opacity(0.12)  // rgba(0,212,170,0.12)
+    static let returnWash  = Color(red: 1,        green: 0.722, blue: 0.302).opacity(0.12)  // rgba(255,184,77,0.12)
+    static let fresh       = Color(red: 0.20,     green: 0.85,  blue: 0.40)                  // rgb(51,217,102)
+    static let freshStale  = Color(red: 0.349,    green: 0.349, blue: 0.349)                 // rgb(89,89,89)
+
     static func phase(_ p: VoltraPhase) -> Color {
         switch p {
         case .pull:       return Self.pull

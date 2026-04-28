@@ -1695,3 +1695,100 @@ the V2 preview as separate builds.
 6. **End session.** Summary shows session vitals card, comparison
    to last arm day (if any), per-exercise cards, and a markdown
    table whose set rows do NOT wrap mid-row.
+
+---
+
+## Build 54 (v0.4.32, "V2 spec match") — 2026-04-28
+
+**Goal: hotfix b53.** The V2 screen I shipped in b53 did NOT match
+the design-studio spec the user pulled in (branch HEAD 74d0d3b9,
+files under `design-system/`). I built V2 from the resumed-context
+summary instead of opening the spec, so it shipped as a generic
+clean screen with the wrong tile set (REPS / PEAK / HR / REST) and
+no phase-tinted PHASE tile, no HR+KCAL paired pulse-dot strip, and
+no CompareStripView. The user (correctly) called this out: "the
+preview doesn't look anything like the screen shot from the Claude
+studio". This build is the fix.
+
+### What changed
+
+1. **`VoltraLive/Views/VoltraTheme.swift`** — added the missing
+   tokens from `design-system/colors_and_type.css`:
+   `pullWash` (rgba(0,212,170,.12)), `returnWash`
+   (rgba(255,184,77,.12)), `fresh` (rgb(51,217,102)),
+   `freshStale` (rgb(89,89,89)). These are required by the
+   PHASE tile background tint and the HR/KCAL pulse-dot freshness
+   indicator, both spec'd in `ui-kit.html`.
+
+2. **`VoltraLive/Logging/Views/LiveCaptureViewV2.swift`** — full
+   rewrite to a 1:1 port of `design-system/ui-kit.html`. Layout
+   top \u2192 bottom:
+   - **Header strip**: LIVE kicker + exercise name + day pill +
+     SET N pill.
+   - **Primary 2x2 grid (REPS / PHASE / FORCE / REST)** \u2014 the
+     canonical four tiles per `design-system/preview/index.html`
+     principle 06. Mono tabular numerals at 72px, label is 11px
+     uppercase +2 tracked. PHASE tile uses a phase-tinted wash
+     background that animates on phase change. FORCE value tints
+     to the live phase color.
+   - **HR / KCAL secondary pair** \u2014 28px mono value, icon
+     (heart for HR, flame for KCAL), pulse dot that blinks at
+     1Hz when the HK sample is < 5s old, flat grey when stale.
+   - **CompareStripView** \u2014 3 cells (LAST \u00B7 REPS / BEST
+     \u00B7 FORCE / TARGET) with deltas vs the active instance's
+     prior set + best-ever peak. Empty cells render \u2014.
+   - **Force chart card** \u2014 reuses `ForceChartView` (same
+     30s rolling phase-segmented waveform the dashboard renders).
+   - **PLAN + LOG SET** \u2014 single 50px primary CTA, disabled
+     opacity 0.4 per spec, color `#002b22` text on accent fill.
+
+3. **`VoltraLive/Logging/Views/LiveCaptureContainer.swift`** \u2014
+   tightened the V2 gate. Was `mdm.supersetChain.count >= 2`,
+   now `!mdm.supersetChain.isEmpty`. Reasoning: a user mid-add
+   of the second chain exercise has count == 1 and is already
+   mentally in chain mode, but V2 has no chain affordances. We
+   should fall back to V1 the moment any chain entry exists.
+
+### Mode handling matrix (post-b54)
+
+| Scenario | Renders |
+|---|---|
+| 1 Voltra paired, no chain, V1 chosen | V1 |
+| 1 Voltra paired, no chain, V2 chosen | **V2** |
+| 1 Voltra paired, chain has \u22651 entry | V1 (was V2 if count=1, regression-fixed) |
+| 2 Voltras paired, Independent | V1 |
+| 2 Voltras paired, Combined | V1 |
+| 2 Voltras paired, Superset chain | V1 (b53 chain fixes apply here) |
+
+V2 is single-Voltra-no-chain only by design. Every other shape
+silently falls back to V1, so the b53 chain fixes (per-instance
+`assignedVoltra`, 3-way Left/Right/Both picker, "Superset \u00B7
+{head} \u00B7 HR \u00B7 {day}" header, no SWAP auto-LOAD) all keep
+working untouched.
+
+**Sacred files untouched.** No changes to `VoltraProtocol.swift`,
+`TelemetryExtractor.swift`, `PacketParser.swift`,
+`FrameAssembler.swift`. No model migration. No BLE state-machine
+changes.
+
+**Cost callout:** lite. One file rewrite + one container line +
+4 color tokens + version bump. No protocol churn, no SwiftData
+churn, no new HK API.
+
+**Test plan**
+
+1. **Solo session, V2 chosen.** Live screen shows the 2x2 PHASE
+   grid \u2014 PHASE tile background tints teal during PULL,
+   amber during RETURN, plain during TRANSITION/IDLE. FORCE tile
+   value color follows the live phase color.
+2. **HR / KCAL pulse dots.** With Apple Watch paired, dots blink
+   green at 1Hz when fresh; pull the watch off, dots go flat grey.
+3. **CompareStrip after first set.** LAST cell shows rep delta
+   ("+2 vs last" green / "-1 vs last" amber / "= last" dim).
+   BEST cell shows force delta vs all-time peak for this exercise.
+   TARGET shows planned weight + "on track".
+4. **Mid-set chain start.** Add a second exercise to the chain.
+   The moment that second entry appears, V2 should silently swap
+   to V1 (b54 gate change). Backing out of the chain returns V2.
+5. **Both Voltras paired.** V2 never renders even if opted in
+   (bothPaired fallback unchanged from b53).

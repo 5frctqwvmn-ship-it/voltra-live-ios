@@ -71,7 +71,11 @@ struct LiveCaptureContainer: View {
         guard uiVersion == "v2" else { return false }
         let bothPaired = mdm.left.connectionState.isConnected
             && mdm.right.connectionState.isConnected
-        let hasChain = mdm.supersetChain.count >= 2
+        // b54: tighten the gate. Was `chain.count >= 2` in b53, but a
+        // user who's mid-add of the second exercise has chain.count == 1
+        // and is mentally already in chain mode \u2014 V2 has no chain
+        // affordances, so we fall back the moment any chain entry exists.
+        let hasChain = !mdm.supersetChain.isEmpty
         return !bothPaired && !hasChain
     }
 }
