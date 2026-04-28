@@ -138,7 +138,7 @@ struct VoltraLiveApp: App {
                     // sources. The DemoController.enter(.prePair) path
                     // hands the SAME closure to SyntheticTelemetryGenerator
                     // so downstream code can't tell real from fake.
-                    let telemetryHandler: (Telemetry) -> Void = { [weak sessionStore, weak loggingStore, weak demo] telem in
+                    let telemetryHandler: (Telemetry) -> Void = { [weak sessionStore, weak loggingStore, weak demo, weak bleManager] telem in
                         guard let ss = sessionStore else { return }
                         let phase    = telem.phase    ?? .idle
                         let forceLb  = telem.forceLb  ?? 0
@@ -151,6 +151,14 @@ struct VoltraLiveApp: App {
                             // v0.4.6.3: real-device telemetry also gets logged
                             // into the active demo trace, when applicable.
                             demo?.trace?.recordTelemetry(telem)
+                            // b51: mirror routed telemetry into the
+                            // single-source bleManager so LiveCaptureView's
+                            // reps + force tiles (which read `ble.telemetry`)
+                            // update in chain + merge modes. Without this,
+                            // bleManager.telemetry only mutates when the
+                            // singleton is the one decoding frames \u2014 i.e.
+                            // single-Voltra pairings only.
+                            bleManager?.ingestRoutedTelemetry(telem)
                         }
                     }
                     bleManager.onTelemetry = telemetryHandler

@@ -25,6 +25,14 @@ struct LoggingHomeView: View {
     /// happens pre-workout (b42), so this chip is purely informational.
     @EnvironmentObject var mdm: MultiDeviceManager
 
+    /// b51: 1 Hz tick driving the telemetry pulse indicator + connection
+    /// freshness check. SwiftUI's @Published bindings only re-render when
+    /// the underlying state changes, so a stalled telemetry stream wouldn't
+    /// flip the pulse off without an external nudge. This timer just
+    /// updates `now` once per second.
+    @State private var now: Date = Date()
+    private let pulseTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
+
     @State private var pickedDayType: DayType? = nil
     @State private var customLabel: String = ""
     /// Build 42: pre-workout Voltra picker. When both Voltras are paired,
@@ -175,6 +183,11 @@ struct LoggingHomeView: View {
             // exercise screen — see ExerciseDetailView for the new top
             // panel.
             .preferredColorScheme(.dark)
+            // b51: drive the telemetry-pulse pill freshness check. The
+            // pill reads `now.timeIntervalSince(ble.telemetry.lastUpdate)`,
+            // so we have to nudge `now` once a second or the pill stays
+            // stuck on "LIVE" after the stream stalls.
+            .onReceive(pulseTimer) { t in self.now = t }
         }
     }
 
@@ -198,7 +211,7 @@ struct LoggingHomeView: View {
                     // covers this case more consistently.
                 }
                 Spacer()
-                healthPill
+                telemetryPulsePill
                 connectionPill
                 Button {
                     showingDebug = true
@@ -219,34 +232,47 @@ struct LoggingHomeView: View {
         .padding(.horizontal, 18)
     }
 
-    /// Build 35: tappable HealthKit status chip. Apple deliberately hides
-    /// READ-permission status, so we surface the next-best proxies:
-    ///   - red dot  = HealthKit unavailable on device
-    ///   - amber    = available but never prompted yet (tap to prompt)
-    ///   - blue     = prompted but no live samples seen yet
-    ///   - green    = receiving live samples (last < 30s)
-    /// Tapping ALWAYS calls requestAuthIfNeeded() so the user can
-    /// recover if the system sheet never appeared the first time.
-    private var healthPill: some View {
-        let now = Date()
-        let fresh: Bool = {
-            guard let t = health.lastHRSampleAt else { return false }
-            return now.timeIntervalSince(t) < 30
-        }()
+    /// b51: real-time telemetry pulse indicator. Replaces the b35
+    /// always-on HK badge with a live signal that lights up when ANY
+    /// paired Voltra is actively streaming telemetry packets, and dims
+    /// when the stream stalls.
+    ///
+    /// Source of truth: `bleManager.telemetry.lastUpdate` (refreshed on
+    /// every routed packet; b51 ingestRoutedTelemetry mirrors 2-Voltra
+    /// streams into this same field). Considered "live" if a packet
+    /// arrived within the last 2 seconds.
+    ///
+    /// Tap = HealthKit re-prompt (preserves the legacy recovery path the
+    /// HK pill used to provide). The pill's label says PULSE / STALE /
+    /// IDLE so the user knows what they're looking at; the HK action is
+    /// secondary and surfaces via long-press tooltip-style label only.
+    private var telemetryPulsePill: some View {
+        let last = ble.telemetry.lastUpdate
+        let secsSince = now.timeIntervalSince(last)
+        let live = last != .distantPast && secsSince < 2.0
+        let anyPaired =
+            mdm.left.connectionState.isConnected
+            || mdm.right.connectionState.isConnected
+            || ble.connectionState.isConnected
         let (dotColor, label): (Color, String) = {
-            if !health.isAvailable { return (VoltraColor.textFaint, "HK n/a") }
-            if !health.hasRequestedAuthorization { return (.orange, "HK ask") }
-            if fresh { return (VoltraColor.accent, "HK live") }
-            return (.blue, "HK on")
+            if !anyPaired         { return (VoltraColor.textFaint, "IDLE") }
+            if live               { return (VoltraColor.accent,    "LIVE") }
+            return (VoltraColor.textDim, "WAIT")
         }()
         return Button {
+            // Preserve the b35 recovery affordance: tapping re-asks for
+            // HealthKit auth if it never appeared the first time.
             health.requestAuthIfNeeded()
         } label: {
             HStack(spacing: 6) {
                 Circle()
                     .fill(dotColor)
                     .frame(width: 8, height: 8)
-                    .shadow(color: dotColor.opacity(0.7), radius: 4)
+                    // Pulsing shadow when LIVE, no shadow otherwise.
+                    .shadow(color: live ? dotColor : .clear, radius: live ? 5 : 0)
+                    .scaleEffect(live ? 1.0 : 0.85)
+                    .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true),
+                               value: live)
                 Text(label)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(VoltraColor.textDim)
@@ -260,46 +286,65 @@ struct LoggingHomeView: View {
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Telemetry signal: \(label)")
     }
 
-    /// Build 40: dual-aware connection pill.
+    /// b51: dual-aware connection pill, side-aware.
     ///
-    /// Priority for the label:
-    ///   1. If MultiDeviceManager has BOTH slots connected -> "Left + Right".
-    ///   2. If only one MDM slot is connected             -> "Left" or "Right".
-    ///   3. Else fall back to the legacy single-device manager:
-    ///        connected     -> "Connected"
-    ///        anything else -> "Not connected"
-    /// The dot is green whenever ANY of the above is connected.
+    /// Pre-b51 the pill said "Left connected" / "Right connected" / "Left
+    /// + Right" / "Connected" / "Not connected". User wanted the word
+    /// "Connected" gone when only one Voltra is paired \u2014 just the
+    /// side name with a dot, e.g. `Left \u2022`. Both paired shows both
+    /// rows: `Left \u2022 Right \u2022`. Falls back to the legacy single-
+    /// device manager only if the user hasn't migrated to MDM pairing.
     private var connectionPill: some View {
         let leftPaired  = mdm.left.connectionState.isConnected
         let rightPaired = mdm.right.connectionState.isConnected
         let blePaired   = ble.connectionState.isConnected
         let anyConnected = leftPaired || rightPaired || blePaired
-        let label: String = {
-            if leftPaired && rightPaired { return "Left + Right" }
-            if leftPaired  { return "Left connected" }
-            if rightPaired { return "Right connected" }
-            if blePaired   { return "Connected" }
-            return "Not connected"
-        }()
-        return HStack(spacing: 6) {
-            Circle()
-                .fill(anyConnected ? VoltraColor.accent : VoltraColor.textFaint)
-                .frame(width: 8, height: 8)
-                .shadow(color: anyConnected ? VoltraColor.accent : .clear,
-                        radius: 4)
-            Text(label)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(VoltraColor.textDim)
+        return HStack(spacing: 8) {
+            if leftPaired || rightPaired {
+                if leftPaired  { connectionDot(label: "Left") }
+                if rightPaired { connectionDot(label: "Right") }
+            } else if blePaired {
+                // Legacy fallback for users still on the single-device
+                // pairing flow.
+                connectionDot(label: "Voltra")
+            } else {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(VoltraColor.textFaint)
+                        .frame(width: 8, height: 8)
+                    Text("Not paired")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(VoltraColor.textDim)
+                }
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(VoltraColor.bgElev)
         .overlay(
-            Capsule().stroke(VoltraColor.border, lineWidth: 1)
+            Capsule().stroke(
+                anyConnected ? VoltraColor.accent.opacity(0.4) : VoltraColor.border,
+                lineWidth: 1
+            )
         )
         .clipShape(Capsule())
+    }
+
+    /// b51: a single side label + dot. Used inside connectionPill for
+    /// per-Voltra status when one or both slots are paired.
+    private func connectionDot(label: String) -> some View {
+        HStack(spacing: 5) {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(VoltraColor.text)
+            Circle()
+                .fill(VoltraColor.accent)
+                .frame(width: 7, height: 7)
+                .shadow(color: VoltraColor.accent, radius: 3)
+        }
     }
 
     // MARK: - Tiles

@@ -359,8 +359,15 @@ struct LiveCaptureView: View {
         // dropping into the cascade.
         return LazyVGrid(columns: cols, spacing: 10) {
             // Row 1
+            // b51: tile now takes baseEff (just the Voltra base concentric)
+            // as the headline number, with eccentric + chains rendered as
+            // tap-to-toggle rows below. Pre-b51 it received perRepTotalLb
+            // and the headline jumped whenever ecc/chains/plates changed,
+            // which conflated "weight on the cable" with "total per-rep
+            // load." Subline still shows the math breakdown.
             resistanceNudgerTile(
-                perRepTotalLb: perRepTotalLb,
+                baseEffLb: baseEff,
+                eccEffLb: eccEff,
                 subline: resistanceSubline
             )
             loadUnloadTile
@@ -485,33 +492,45 @@ struct LiveCaptureView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    /// b46: RESISTANCE tile with inline \u00b15 / \u00b11 nudgers.
+    /// b51: RESISTANCE tile, redesigned.
     ///
-    /// Layout:
+    /// Headline number is the BASE weight only (Voltra concentric, after
+    /// pulley multiplier). Eccentric and Chains overlays render as small
+    /// rows below the headline, each with a Voltra-style icon you can tap
+    /// to toggle the motor on/off without losing the value.
+    ///
     ///   RESISTANCE
-    ///   <big number> lb        [-5][+5]
-    ///   <subline math>         [-1][+1]
+    ///   <base number> lb       [-5][+5]
+    ///   [ecc icon] +25 ecc      [-1][+1]   (icon = arrow.down.to.line)
+    ///   [chain icon] +10 chains            (icon = link)
     ///
-    /// Tapping a nudger calls `adjustWeight(\u00b1n)` (the same helper the
-    /// upcoming-set card uses) so the new weight is pushed to the Voltra
-    /// IMMEDIATELY through WriterRouter \u2014 no drop-cascade, no rest-tile
-    /// dance. The nudger writes pendingPlannedWeightLb, which is the
-    /// concentric-base value; effective per-rep total updates on the next
-    /// re-render.
-    private func resistanceNudgerTile(perRepTotalLb: Double, subline: String?) -> some View {
+    /// Tapping the eccentric icon flips `logging.upcomingEccEnabled`;
+    /// tapping the chains icon flips `logging.upcomingChainsEnabled`. The
+    /// underlying lb value is preserved either way. Toggling immediately
+    /// re-pushes device state through WriterRouter so the motor
+    /// engages/disengages on the spot.
+    ///
+    /// Pre-b51, the headline was perRepTotalLb (base + ecc + plates) and
+    /// \u00b1 buttons appeared to change ecc/chains too because they were
+    /// folded into the same number. Now the \u00b1 visibly only changes
+    /// the base.
+    private func resistanceNudgerTile(baseEffLb: Double, eccEffLb: Double, subline: String?) -> some View {
         // b47: pre-compute step sizes outside the ViewBuilder so we can use
         // them inline below. Combined: 2/6. Independent/single/superset: 1/5.
         let small = CombinedParity.smallStepLb(for: mdm.workoutMode)
         let large = CombinedParity.largeStepLb(for: mdm.workoutMode)
-        return VStack(alignment: .leading, spacing: 4) {
+        let m = logging.pulleyMultiplier
+        let chainsEffLb = logging.upcomingChainsLb * m
+        return VStack(alignment: .leading, spacing: 6) {
             Text("RESISTANCE")
                 .font(.system(size: 10, weight: .bold))
                 .kerning(1.5)
                 .foregroundColor(VoltraColor.textDim)
-            HStack(alignment: .lastTextBaseline, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    // Headline: BASE weight only.
                     HStack(alignment: .lastTextBaseline, spacing: 4) {
-                        Text(formatLbCompact(perRepTotalLb))
+                        Text(formatLbCompact(baseEffLb))
                             .font(.system(size: 28, weight: .bold, design: .monospaced))
                             .foregroundColor(VoltraColor.text)
                             .minimumScaleFactor(0.5)
@@ -519,6 +538,34 @@ struct LiveCaptureView: View {
                         Text("lb")
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundColor(VoltraColor.textDim)
+                    }
+                    // Eccentric row (always rendered when value > 0; tap
+                    // icon to toggle motor). When motor is off, value
+                    // is dimmed.
+                    if eccEffLb > 0 || logging.upcomingEccLb > 0 {
+                        modOverlayRow(
+                            iconName: "arrow.down.to.line",
+                            label: "ecc",
+                            valueLb: eccEffLb,
+                            enabled: logging.upcomingEccEnabled,
+                            onTap: {
+                                logging.upcomingEccEnabled.toggle()
+                                pushUpcomingStateToDevice()
+                            }
+                        )
+                    }
+                    // Chains row (same pattern).
+                    if chainsEffLb > 0 || logging.upcomingChainsLb > 0 {
+                        modOverlayRow(
+                            iconName: "link",
+                            label: "chain",
+                            valueLb: chainsEffLb,
+                            enabled: logging.upcomingChainsEnabled,
+                            onTap: {
+                                logging.upcomingChainsEnabled.toggle()
+                                pushUpcomingStateToDevice()
+                            }
+                        )
                     }
                     if let sub = subline {
                         Text(sub)
@@ -532,9 +579,9 @@ struct LiveCaptureView: View {
                 // bottom. b47: step magnitudes are mode-aware (computed
                 // above). Combined mode forces even-only weight so the
                 // per-side split is equal (\u00b16 / \u00b12). All other
-                // modes keep the legacy \u00b15 / \u00b11. Compact buttons
-                // (28\u00d722) so the row stays under the 88pt min tile
-                // height.
+                // modes keep the legacy \u00b15 / \u00b11. b51: only ever
+                // adjusts the BASE \u2014 ecc/chains values are absolute
+                // and stay put.
                 VStack(spacing: 4) {
                     HStack(spacing: 4) {
                         compactNudger(label: "\u{2212}\(large)") { adjustWeight(-large) }
@@ -555,6 +602,31 @@ struct LiveCaptureView: View {
                 .stroke(VoltraColor.border, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// b51: One row inside the resistance tile that represents an overlay
+    /// modifier (eccentric or chains). The icon is the tap target; the
+    /// label + value are passive readouts. Disabled state: dim icon + a
+    /// strikethrough on the value to communicate "motor is off but value
+    /// is remembered."
+    @ViewBuilder
+    private func modOverlayRow(iconName: String, label: String, valueLb: Double, enabled: Bool, onTap: @escaping () -> Void) -> some View {
+        Button(action: onTap) {
+            HStack(spacing: 5) {
+                Image(systemName: iconName)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(enabled ? VoltraColor.accent : VoltraColor.textFaint)
+                    .frame(width: 14, height: 14)
+                Text("+\(formatLbCompact(valueLb))")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundColor(enabled ? VoltraColor.text : VoltraColor.textFaint)
+                    .strikethrough(!enabled, color: VoltraColor.textFaint)
+                Text(label)
+                    .font(.system(size: 10))
+                    .foregroundColor(enabled ? VoltraColor.textDim : VoltraColor.textFaint)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     /// Compact \u00b1n nudger button used inside the RESISTANCE tile.
@@ -662,39 +734,58 @@ struct LiveCaptureView: View {
             ?? (inactive == .left ? mdm.supersetLeftWeightLb  : mdm.supersetRightWeightLb)
         let activeName    = activeLabel.isEmpty   ? "Exercise \(active   == .left ? "A" : "B")"   : activeLabel
         let inactiveName  = inactiveLabel.isEmpty ? "Exercise \(inactive == .left ? "A" : "B")" : inactiveLabel
+        // b51: stronger active-side indicator. Adds a pulsing accent dot
+        // next to the active side's label and a SIDE column on the
+        // active card so the user can tell at a glance which Voltra
+        // their reps are routing to. SWAP icon is a left/right double-
+        // arrow, sized up so it reads as the visual "swap left\u2194right"
+        // pivot between the two cards.
         return HStack(spacing: 10) {
-            // Active side
-            VStack(alignment: .leading, spacing: 2) {
-                Text("NOW \u{2022} \(active.label.uppercased())")
-                    .font(.system(size: 9, weight: .bold))
-                    .kerning(1.2)
-                    .foregroundColor(VoltraColor.accent)
-                Text(activeName)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(VoltraColor.text)
-                    .lineLimit(1)
+            // Active side card.
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(VoltraColor.accent)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: VoltraColor.accent, radius: 4)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("ACTIVE \u{2022} \(active.label.uppercased())")
+                        .font(.system(size: 9, weight: .bold))
+                        .kerning(1.2)
+                        .foregroundColor(VoltraColor.accent)
+                    Text(activeName)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(VoltraColor.text)
+                        .lineLimit(1)
+                }
             }
-            Spacer(minLength: 6)
-            // Swap button
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .background(VoltraColor.accent.opacity(0.10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(VoltraColor.accent.opacity(0.6), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            Spacer(minLength: 4)
+            // Swap button \u2014 sits visually BETWEEN the two side cards
+            // so the action reads as "flip left \u2194 right."
             Button {
                 swapSupersetSide()
             } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.left.arrow.right")
-                        .font(.system(size: 12, weight: .bold))
-                    Text("SWAP")
-                        .font(.system(size: 11, weight: .bold))
-                        .kerning(1.0)
-                }
-                .foregroundColor(VoltraColor.accent)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 10)
-                .background(VoltraColor.accent.opacity(0.18))
-                .clipShape(Capsule())
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(VoltraColor.accent)
+                    .frame(width: 36, height: 36)
+                    .background(VoltraColor.accent.opacity(0.18))
+                    .clipShape(Circle())
+                    .overlay(
+                        Circle().stroke(VoltraColor.accent.opacity(0.5), lineWidth: 1)
+                    )
             }
             .buttonStyle(.plain)
-            Spacer(minLength: 6)
-            // Inactive side preview
+            .accessibilityLabel("Swap active Voltra side")
+            Spacer(minLength: 4)
+            // Inactive side preview.
             VStack(alignment: .trailing, spacing: 2) {
                 Text("NEXT \u{2022} \(inactive.label.uppercased())")
                     .font(.system(size: 9, weight: .bold))
@@ -711,8 +802,8 @@ struct LiveCaptureView: View {
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(VoltraColor.bgElev)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
@@ -1588,18 +1679,23 @@ struct LiveCaptureView: View {
             }
         }()
         let baseLb = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
-        let eccLb  = Int(logging.upcomingEccLb.rounded())
+        // b51: honor the per-mode motor toggles so tapping the eccentric
+        // or chains icon disables the motor without losing the user's
+        // last-set value. eccLb / chainsLb only get sent to the device
+        // when their respective enabled flag is true.
+        let eccLb     = logging.upcomingEccEnabled    ? Int(logging.upcomingEccLb.rounded())    : 0
+        let chainsLb  = logging.upcomingChainsEnabled ? Int(logging.upcomingChainsLb.rounded()) : 0
         let state = VoltraDeviceState(
             mode: voltraMode,
             modifiers: VoltraModifiers(
                 eccentric: eccLb > 0,
-                chains: false,
+                chains: chainsLb > 0,
                 inverse: false
             ),
             weights: VoltraWeights(
                 baseLb: baseLb,
                 eccentricLb: eccLb,
-                chainsLb: 0,
+                chainsLb: chainsLb,
                 bandMaxForceLb: 0,
                 damperLevel: 0
             )

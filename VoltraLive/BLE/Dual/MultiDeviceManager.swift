@@ -243,23 +243,32 @@ final class MultiDeviceManager: ObservableObject {
             supersetRightExercise = name
             supersetRightWeightLb = weightLb
         }
-        // b50: Whenever appendSupersetEntry is called, point the active
-        // slot at the entry the user is starting RIGHT NOW. Tapping Start
-        // on an exercise screen always means "I am about to lift this
-        // one" — so writer + telemetry routing must follow.
+        // b51: Chain-start ordering. Two cases:
         //
-        // Pre-b50: only the FIRST entry set supersetActiveSlot, so when
-        // the user added a second exercise and tapped Start on its
-        // screen, the active slot stayed pointed at the first entry's
-        // slot. Result: telemetry from the side they were physically
-        // lifting on got dropped, and the writer broadcast to both
-        // sides instead of the active one. Fix: always realign.
-        if let idx = supersetChain.firstIndex(where: { $0.slot == slot && $0.exerciseName == name }) {
-            supersetChainIndex = idx
-        } else if supersetChain.count == 1 {
+        //   Case 1 \u2014 chain has exactly 1 entry after append.
+        //     User just picked their first exercise. Active = this entry.
+        //     This is the b50 single-entry path and stays unchanged.
+        //
+        //   Case 2 \u2014 chain just transitioned to 2+ entries.
+        //     User flow: pick A \u2192 "Add Another Exercise" \u2192 pick B
+        //     \u2192 tap Start. They expect the workout to BEGIN at A,
+        //     not B. So when count >= 2, snap chainIndex back to 0 (the
+        //     head of the chain, which is exercise A) and point
+        //     supersetActiveSlot at A's slot.
+        //
+        // Pre-b51 / b50 behavior was "active = the entry just appended",
+        // which made the chain start at B (the second-added exercise).
+        // The b50 rationale ("Tapping Start means I'm about to lift this
+        // one") still holds for single-exercise sessions, but breaks the
+        // mental model when building a chain.
+        if supersetChain.count >= 2 {
             supersetChainIndex = 0
+            supersetActiveSlot = supersetChain[0].slot
+        } else {
+            // Single-entry: active is this newly appended entry.
+            supersetChainIndex = 0
+            supersetActiveSlot = slot
         }
-        supersetActiveSlot = slot
     }
 
     /// Reset the chain. Called when the user exits a session or picks a

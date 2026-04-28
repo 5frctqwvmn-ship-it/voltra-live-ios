@@ -208,6 +208,15 @@ final class VoltraBLEManager: NSObject, ObservableObject {
         }
     }
 
+    /// b51: Public mirror so routed telemetry (from MultiDeviceManager when
+    /// 2 Voltras are paired) can update this manager's @Published
+    /// `telemetry`, which LiveCaptureView reads to drive the reps + force
+    /// tiles. Pre-b51 the routed packet only updated SessionStore, so the
+    /// tiles were stuck at zero in any 2-Voltra flow (chain or merge).
+    func ingestRoutedTelemetry(_ telem: Telemetry) {
+        mergeTelemetry(telem)
+    }
+
     private func mergeTelemetry(_ telem: Telemetry) {
         if let v = telem.batteryPercent { batteryPercent = v }
         if let v = telem.serial         { serial = v }

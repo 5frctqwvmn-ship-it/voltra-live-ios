@@ -47,6 +47,17 @@ final class LoggingStore: ObservableObject {
     @Published var upcomingMode: SetMode = .working
     @Published var upcomingEccLb: Double = 0
     @Published var upcomingTargetReps: Int = 0
+    /// b51: Eccentric motor toggle. When false, eccentric is disabled at
+    /// the device but `upcomingEccLb` is preserved so re-enabling restores
+    /// the prior value. Tap the eccentric icon in the resistance tile to
+    /// toggle. Default ON (legacy behavior).
+    @Published var upcomingEccEnabled: Bool = true
+    /// b51: Chains weight in lb (digital chains-mode overload, simulating
+    /// chain links lifting off the floor). Persists across sets in the
+    /// active instance like ecc.
+    @Published var upcomingChainsLb: Double = 0
+    /// b51: Chains motor toggle. Same semantics as `upcomingEccEnabled`.
+    @Published var upcomingChainsEnabled: Bool = true
     /// Generalized non-Voltra added load. Persists across sets in the
     /// active instance — you don't usually re-rack chains between sets.
     /// Reset to nil on `pickExercise`.
@@ -525,7 +536,12 @@ final class LoggingStore: ObservableObject {
         // rounding so totals stay even and split equally across the two
         // Voltras. Default (-5 lb / 2.5 lb rounding) for all other modes.
         let baseLb: Double = combinedModeActive ? CombinedParity.combinedDropStepLb : 5.0
-        let roundingLb: Double = combinedModeActive ? 2.0 : 2.5
+        // b51: drop-set cascade rounds to WHOLE pounds (1 lb). The Voltra
+        // device only accepts integer weight, so the prior 2.5 lb step
+        // could surface fractional displays like 92.5 lb that the device
+        // had to silently round. Combined mode keeps 2 lb so left/right
+        // split stays even.
+        let roundingLb: Double = combinedModeActive ? 2.0 : 1.0
         let next = LoggingStore.cascadeAnchoredDeviceWeight(
             anchorDeviceLb: chainAnchorLb,
             tier: cascadeTier,
@@ -557,7 +573,12 @@ final class LoggingStore: ObservableObject {
         let useTier = tier ?? cascadeTier
         // b47: combined-mode preview matches the live cascade math.
         let baseLb: Double = combinedModeActive ? CombinedParity.combinedDropStepLb : 5.0
-        let roundingLb: Double = combinedModeActive ? 2.0 : 2.5
+        // b51: drop-set cascade rounds to WHOLE pounds (1 lb). The Voltra
+        // device only accepts integer weight, so the prior 2.5 lb step
+        // could surface fractional displays like 92.5 lb that the device
+        // had to silently round. Combined mode keeps 2 lb so left/right
+        // split stays even.
+        let roundingLb: Double = combinedModeActive ? 2.0 : 1.0
         var out: [Double] = []
         // v0.4.6.2: preview now matches anchor-relative math — each step is
         // computed off the original `currentLb` (the anchor) at increasing
@@ -746,7 +767,7 @@ final class LoggingStore: ObservableObject {
                                             deviceFloorLb: Double = 5.0,
                                             baseLb: Double = 5.0,
                                             basePct: Double = 0.05,
-                                            roundingLb: Double = 2.5) -> Double {
+                                            roundingLb: Double = 1.0) -> Double {
         guard anchorDeviceLb > 0, tier >= 1, stepIndex >= 1, multiplier > 0,
               roundingLb > 0 else { return 0 }
         let anchorEffective = anchorDeviceLb * multiplier
@@ -782,8 +803,10 @@ final class LoggingStore: ObservableObject {
         if nextEffective <= 0 || nextEffective >= effective { return 0 }
         let backToDevice = nextEffective / multiplier
         // Re-round to 2.5 lb on the device coordinate.
-        let stepped = (backToDevice / 2.5).rounded() * 2.5
-        if stepped >= deviceLb { return max(0, deviceLb - 2.5) }
+        // b51: device-coordinate re-round uses 1 lb (whole numbers) so the
+        // pulley-mode cascade also lands on integer weights.
+        let stepped = (backToDevice / 1.0).rounded() * 1.0
+        if stepped >= deviceLb { return max(0, deviceLb - 1.0) }
         return max(0, stepped)
     }
 

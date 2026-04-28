@@ -1278,3 +1278,134 @@ device shows components separately.
 6. End session and start a fresh single-Voltra session — first LOAD
    writes the correct exercise starting weight to the device, not the
    stale value from the previous session.
+
+## 2026-04-28 18:55 UTC — b51 (v0.4.29/51) — Telemetry + UI fixes
+
+User reported on b50 hands-on: with two Voltras paired, reps and force
+never displayed in any 2-Voltra mode (chain or merge); single-Voltra
+worked. Plus a list of 10 UI corrections: resistance tile conflated
+base + ecc + chains into one number, ± stepper appeared to change
+all overlays, no way to toggle ecc/chains motors without losing
+values, chain auto-started on the second-added exercise (B) instead
+of the first (A), couldn't tell which Voltra was active during reps,
+SWAP button placement was unclear, drop-set weights landed on
+fractional pounds (e.g. 92.5), Merge with odd totals split unevenly
+across the two Voltras, the always-on HK badge on Home didn't
+reflect anything actionable, and the Connected pill said "Left
+connected" / "Connected" instead of just side-with-dot. All 11 fixes
+in one build:
+
+1. **Telemetry root-cause.** `LiveCaptureView` reads `ble.telemetry`
+   for the reps + force tiles, but `bleManager.telemetry` is only
+   ever updated when the singleton itself decodes BLE frames (i.e.
+   single-Voltra pairings). With 2 Voltras, frames decode in
+   `multi.left` / `multi.right`, fire `onLeftTelemetry` /
+   `onRightTelemetry`, route through `telemetryHandler` → SessionStore
+   only — never touching `bleManager.telemetry`. Fix: added a public
+   `VoltraBLEManager.ingestRoutedTelemetry(_:)` that wraps the
+   private `mergeTelemetry`, and the unified `telemetryHandler`
+   in `VoltraLiveApp` now calls it on every routed packet (both per-
+   side handlers and the combined virtual-twin handler). One change
+   covers chain mode AND merge mode.
+2. **Resistance tile redesign.** Headline = base weight only (Voltra
+   concentric, after pulley multiplier). Eccentric and chains overlays
+   render as separate rows below the headline. Pre-b51 the headline
+   was `perRepTotalLb` (base + ecc + plates) so the displayed number
+   jumped whenever any overlay changed.
+3. **± stepper now visibly changes only the base.** No code change to
+   `adjustWeight` itself (it was already correct under the hood) —
+   the user's perception was driven by (2). Fixed by (2).
+4. **Tap-to-toggle motor on/off.** New `LoggingStore` flags
+   `upcomingEccEnabled` and `upcomingChainsEnabled`; tapping the
+   ecc icon (`arrow.down.to.line`) or chains icon (`link`) flips
+   the flag and re-pushes device state. The lb value is preserved
+   when off (strikethrough + dim), restored on tap-on.
+5. **Chain start ordering.** `appendSupersetEntry` previously set
+   `supersetActiveSlot` to the slot of the just-appended entry,
+   meaning the chain started at exercise B (the second add). Now
+   when chain.count >= 2 the active slot snaps back to chain[0]'s
+   slot (exercise A, the first add). Single-entry behavior unchanged.
+6. **Active-side indicator.** Banner active card now has a pulsing
+   accent dot, "ACTIVE • LEFT/RIGHT" label, accent-tinted background,
+   and accent stroke. Inactive side stays dim.
+7. **SWAP button placement.** Already between the two side cards;
+   redesigned as a circular accent button with a left-right arrow so
+   the action reads visually as "swap left ↔ right."
+8. **Drop-set whole-number rounding.** Cascade `roundingLb` changed
+   from 2.5 → 1.0 in both live cascade math and preview math.
+   Combined mode keeps 2.0 so the per-side split is even. Pulley-
+   mode device coordinate re-round also moved to 1.0.
+9. **Merge even-snap.** Tapping Merge in `ExerciseDetailView` now
+   snaps `pendingPlannedWeightLb`, `upcomingEccLb`, and
+   `upcomingChainsLb` to the next even integer before flipping
+   `mdm.workoutMode = .combined`. ± stepper continues to enforce
+   even via `CombinedParity.enforce` while merged.
+10. **Home: real-time telemetry pulse pill.** Replaces the always-on
+    HK badge. Reads `ble.telemetry.lastUpdate`; lights LIVE when
+    the last packet was within 2s, WAIT when stalled, IDLE when
+    nothing is paired. A 1 Hz timer drives freshness check via
+    `@State now`. Tap = HK re-prompt (preserving b35's recovery path).
+11. **Home: side-aware Connected pill.** When 1 Voltra paired, shows
+    `Left •` or `Right •` (no word "Connected"). When both paired,
+    shows `Left •` and `Right •` side-by-side. Legacy single-device
+    fallback still says "Voltra •".
+
+**Files changed:**
+
+- VoltraLive/BLE/VoltraBLEManager.swift (public ingestRoutedTelemetry)
+- VoltraLive/VoltraLiveApp.swift (telemetryHandler mirrors into bleManager)
+- VoltraLive/Logging/Persistence/LoggingStore.swift (upcomingEccEnabled,
+  upcomingChainsLb, upcomingChainsEnabled, drop cascade rounding 2.5→1.0)
+- VoltraLive/Logging/Views/LiveCaptureView.swift (resistance tile
+  redesign, modOverlayRow, banner stronger active indicator, SWAP
+  redesign, push state honors enabled flags + chains)
+- VoltraLive/BLE/Dual/MultiDeviceManager.swift (chain start at index 0
+  when count >= 2)
+- VoltraLive/Logging/Views/ExerciseDetailView.swift (Merge even-snap,
+  surface chains via upcomingChainsLb)
+- VoltraLive/Logging/Views/LoggingHomeView.swift (telemetryPulsePill,
+  side-aware connectionPill, 1 Hz pulseTimer)
+- VoltraLive/Info.plist + project.yml (bumped to 0.4.29/51, label
+  "Telemetry + UI fixes")
+
+**Verification:** code review only; awaiting TestFlight install. The
+b50-era DropSetCascadeTests still pass mathematically since 5 lb
+steps already land on whole numbers; the rounding change only
+affects fractional outputs.
+
+**Risks:**
+- Resistance tile minHeight stayed at 88pt but now hosts up to 4
+  vertical elements (headline, ecc row, chains row, subline). If a
+  user has all four populated, the tile may exceed 88pt and reflow
+  the grid. Acceptable; LazyVGrid handles unequal heights.
+- Pre-b51 sessions in flight will have `upcomingEccEnabled = true`
+  by default; no migration needed.
+
+**Cost callout for this build:** medium. 11 changes across 7 files,
+including UI redesigns and one root-cause fix.
+
+**Test plan after install:**
+
+1. **Telemetry on 2 Voltras (the big one).** Pair both, start a
+   chain (A then B), tap Start → reps + force tiles update on the
+   active side. SWAP → tiles continue updating on the new active
+   side. Same with Merge: reps + force show summed from both sides.
+2. **Chain starts on A.** Pick A, then "Add Another Exercise", pick
+   B, tap Start → banner says "ACTIVE • LEFT" (or whichever side A
+   was assigned), not B's side.
+3. **Active side is unmistakable.** Pulsing dot + accent fill on
+   active card; inactive is dim.
+4. **Resistance tile.** Headline = base weight only. Tap +5 → only
+   the headline changes; ecc/chains rows stay at their values.
+5. **Ecc / chains tap-to-toggle.** Tap the down-arrow icon → ecc row
+   strikes through and dims, motor disengages on the device.
+   Tap again → restores the same value, motor re-engages.
+6. **Drop-set whole numbers.** Start a drop cascade from 100 lb →
+   weights are 95, 90, 85... no 92.5 / 87.5.
+7. **Merge even-snap.** On pre-start screen with base 65, tap Merge
+   → base snaps to 66; per-side split is 33 / 33 not 32.5 / 32.5.
+8. **Home pulse pill.** With a Voltra streaming, dot pulses LIVE.
+   Power off the Voltra → pill drops to WAIT within 2s. Unpair →
+   IDLE.
+9. **Home connected pill.** 1 Voltra paired → just `Left •` or
+   `Right •`. Both paired → `Left • Right •`. Neither → `Not paired`.

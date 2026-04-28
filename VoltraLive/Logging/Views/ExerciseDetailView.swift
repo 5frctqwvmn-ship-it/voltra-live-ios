@@ -492,6 +492,26 @@ struct ExerciseDetailView: View {
             if active {
                 mdm.workoutMode = .independent
             } else {
+                // b51: snap base + ecc + chains to even pounds the moment
+                // Merge engages, so the per-side split (CombinedMath) is
+                // exactly equal and the user can't accidentally enter
+                // Combined with an odd total (e.g. 65 = 32.5 / 32.5).
+                // Going forward, \u00b1 stepper enforces even via
+                // CombinedParity.enforce(); this just fixes the entry
+                // value.
+                let snap: (Double) -> Double = { v in
+                    let n = Int(v.rounded())
+                    return Double(n.isMultiple(of: 2) ? n : (n + 1))
+                }
+                if let cur = logging.pendingPlannedWeightLb {
+                    logging.pendingPlannedWeightLb = snap(cur)
+                }
+                if logging.upcomingEccLb > 0 {
+                    logging.upcomingEccLb = snap(logging.upcomingEccLb)
+                }
+                if logging.upcomingChainsLb > 0 {
+                    logging.upcomingChainsLb = snap(logging.upcomingChainsLb)
+                }
                 mdm.workoutMode = .combined
             }
         } label: {
@@ -626,6 +646,21 @@ struct ExerciseDetailView: View {
                 logging.upcomingAddedLoadLb = Double(chainsLb)
                 logging.upcomingAddedLoadType = inverse ? "inverse_chains" : "chains"
             }
+            // b51: also surface chains as a first-class digital chains-mode
+            // overload so the live RESISTANCE tile can render the chains
+            // row (with tap-to-toggle motor) separately from the added-
+            // plates subline. Inverse keeps using the added-load path only;
+            // it isn't a positive overload at the bottom of the lift.
+            if chains, chainsLb > 0 {
+                logging.upcomingChainsLb = Double(chainsLb)
+                logging.upcomingChainsEnabled = true
+            } else {
+                logging.upcomingChainsLb = 0
+            }
+            // b51: ecc enable bit follows the eccentric toggle on this
+            // screen so a fresh entry doesn't carry over a previously-
+            // disabled ecc motor.
+            logging.upcomingEccEnabled = true
             navigateToCapture = true
         } label: {
             HStack {
