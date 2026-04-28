@@ -308,7 +308,7 @@ struct ExportSheet: View {
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .foregroundColor(VoltraColor.textDim)
                 .frame(width: 50, alignment: .leading)
-            Text("\(formatLbInt(s.weightLb)) \u00d7 \(s.reps)")
+            Text("\(formatLbInt(s.weightLb)) \u{00D7} \(s.reps)")
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .foregroundColor(VoltraColor.text)
             if s.peakForceLb > 0 {
