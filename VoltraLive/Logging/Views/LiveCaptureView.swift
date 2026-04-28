@@ -79,6 +79,12 @@ struct LiveCaptureView: View {
     /// Added-plates chip expansion state.
     @State private var addWeightOpen: Bool = false
 
+    /// b46: local belief about whether the Voltra cable is currently engaged.
+    /// Voltra protocol doesn't broadcast load-state, so this is best-effort:
+    /// false on entry (button shows "LOAD"), flips on each tap of the
+    /// LOAD/UNLOAD button. See loadUnloadTile for the full reasoning.
+    @State private var deviceLoaded: Bool = false
+
     /// v0.4.5: Drop-set planner sheet.
 
     /// VoltraWriter for live mid-session weight changes. v0.4.2: every nudge
@@ -271,39 +277,41 @@ struct LiveCaptureView: View {
             if logging.pulleyMode { pieces.append("\u{00d7}2 pulley") }
             return pieces.isEmpty ? nil : pieces.joined(separator: " ")
         }()
+        // b46: tile order rewritten left-to-right per user spec. The 2\u00d74
+        // grid reads top-to-bottom by row, but each ROW reads left-to-right,
+        // and the user wanted the high-frequency-touch controls (resistance
+        // nudgers + load toggle) on row 1 where the thumb naturally lands.
+        //
+        //   Row 1: [RESISTANCE \u00b1]   [LOAD/UNLOAD toggle]
+        //   Row 2: [REPS]            [DROP SET]
+        //   Row 3: [FORCE]           [REST]
+        //   Row 4: [HR + KCAL]       [TOTAL VOL]
+        //
+        // RESISTANCE was a passive readout in b45; in b46 it gains \u22125 / +5 /
+        // \u22121 / +1 nudgers that write a new pendingPlannedWeightLb through
+        // WriterRouter immediately, so the user can adjust mid-set without
+        // dropping into the cascade.
         return LazyVGrid(columns: cols, spacing: 10) {
-            // v0.4.6: REPS tile gets a tiny inline phase pill + an under-tile
-            // 4s idle countdown bar so the user can see auto-finalize coming.
+            // Row 1
+            resistanceNudgerTile(
+                perRepTotalLb: perRepTotalLb,
+                subline: resistanceSubline
+            )
+            loadUnloadTile
+
+            // Row 2
             repsTile(live: live)
-            // v0.4.6: PHASE tile is gone — force curve already shows that.
-            // DROP SET tile replaces it: button when inactive, cascade
-            // progress + 4s/10s countdown bars when active.
+            // v0.4.6: PHASE tile is gone \u2014 force curve already shows that.
+            // DROP SET tile is button when inactive, cascade progress
+            // + 4s/10s countdown bars when active.
             dropSetTile(perRepTotalLb: perRepTotalLb)
+
+            // Row 3
             tile(
                 label: "FORCE",
                 value: String(format: "%.0f", live.forceLb * m),
                 unit: "lb",
                 color: VoltraColor.accent
-            )
-            // v0.4.5: RESISTANCE = total per-rep load (con + ecc + plates).
-            // This is the Vulture-equivalent "how much you're actually
-            // pushing each rep" readout.
-            tile(
-                label: "RESISTANCE",
-                value: formatLbCompact(perRepTotalLb),
-                unit: "lb",
-                color: VoltraColor.text,
-                subline: resistanceSubline
-            )
-            // v0.4.5: TOTAL VOLUME = resistance × reps so far this set.
-            tile(
-                label: "TOTAL VOL",
-                value: formatLbCompact(totalVolumeLb),
-                unit: "lb",
-                color: VoltraColor.pull,
-                subline: liveSetReps > 0
-                    ? "\(formatLbCompact(perRepTotalLb)) × \(liveSetReps) reps"
-                    : nil
             )
             // REST tile is tap-to-reset (parity with DashboardView). Tapping
             // restarts the rest countdown via SessionStore.tapRestTile().
@@ -312,64 +320,207 @@ struct LiveCaptureView: View {
             } label: {
                 tile(
                     label: "REST",
-                    // Read from SessionStore.restActive — the SAME source-of-truth
-                    // DashboardView uses, which works correctly. No second timer,
-                    // no Combine sink, no view-recreation reset bug.
                     value: session.restActive ? session.restFormatted : "0:00",
                     color: session.restActive ? VoltraColor.returnPhase : VoltraColor.textFaint,
                     subline: session.restActive ? "tap to restart" : "tap to start"
                 )
             }
             .buttonStyle(.plain)
-            // v0.4.6: HealthKit tiles. Em-dash empty state when nil/zero so
-            // the user knows the data isn't flowing yet vs reading 0.
-            //
-            // b45 (I): merged HR + KCAL into a single tile so the freed slot
-            // can host LOAD / UNLOAD controls. The user can still see both
-            // values at a glance (HR is the headline number; kcal sits in the
-            // subline). Pulse-dot uses the most-recent of the two HK sample
-            // timestamps so it stays green whenever ANY HK data is flowing.
-            healthMergedTile
-            loadUnloadTile
+
+            // Row 4
+            // b46: HR + KCAL re-merged but with parity sizing \u2014 the b45
+            // version made kcal a tiny subline; user reported this read as
+            // "too small" and asked for both numbers to be the same size,
+            // each with its own pulse-dot tied to its own HK sample stream.
+            healthDualTile
+            // v0.4.5: TOTAL VOLUME = resistance \u00d7 reps so far this set.
+            tile(
+                label: "TOTAL VOL",
+                value: formatLbCompact(totalVolumeLb),
+                unit: "lb",
+                color: VoltraColor.pull,
+                subline: liveSetReps > 0
+                    ? "\(formatLbCompact(perRepTotalLb)) \u{00d7} \(liveSetReps) reps"
+                    : nil
+            )
         }
     }
 
-    /// b45 (I): combined Heart Rate + Calories tile. HR headline, kcal subline.
-    /// Pulse-dot reflects whichever HK source is freshest.
-    private var healthMergedTile: some View {
+    /// b46: HR + KCAL tile, parity-sized.
+    ///
+    /// b45 had kcal as a tiny subline beneath HR. The user reported this read
+    /// as "too small" \u2014 they want kcal to feel as prominent as HR. So this
+    /// tile is now a horizontal split: small label + pulse-dot per side, big
+    /// monospaced number per side, small unit beneath. Each pulse-dot tracks
+    /// its OWN HK sample timestamp so the user can see at a glance which of
+    /// the two streams is alive.
+    private var healthDualTile: some View {
         let hrText = health.currentHR.map { String($0) } ?? "\u{2014}"
-        let kcalText: String = {
-            if health.sessionKcal > 0 {
-                return "\(Int(health.sessionKcal.rounded())) kcal"
+        let kcalText = health.sessionKcal > 0
+            ? String(Int(health.sessionKcal.rounded()))
+            : "\u{2014}"
+        return HStack(alignment: .top, spacing: 12) {
+            // HR side
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("HR")
+                        .font(.system(size: 10, weight: .bold))
+                        .kerning(1.5)
+                        .foregroundColor(VoltraColor.textDim)
+                    PulseDot(lastSampleAt: health.lastHRSampleAt)
+                    Spacer(minLength: 0)
+                }
+                Text(hrText)
+                    .font(.system(size: 28, weight: .bold, design: .monospaced))
+                    .foregroundColor(VoltraColor.danger)
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+                Text(health.currentHR != nil ? "BPM" : " ")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(VoltraColor.textDim)
             }
-            return "\u{2014} kcal"
-        }()
-        // Pick the more recent of the two timestamps for the freshness dot,
-        // falling back gracefully when only one stream has fired.
-        let freshest: Date? = {
-            switch (health.lastHRSampleAt, health.lastKcalSampleAt) {
-            case let (h?, k?): return max(h, k)
-            case let (h?, nil): return h
-            case let (nil, k?): return k
-            default: return nil
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Thin vertical separator so the two halves read as distinct
+            // metrics, not one merged blob.
+            Rectangle()
+                .fill(VoltraColor.border)
+                .frame(width: 1)
+                .padding(.vertical, 4)
+
+            // KCAL side
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("KCAL")
+                        .font(.system(size: 10, weight: .bold))
+                        .kerning(1.5)
+                        .foregroundColor(VoltraColor.textDim)
+                    PulseDot(lastSampleAt: health.lastKcalSampleAt)
+                    Spacer(minLength: 0)
+                }
+                Text(kcalText)
+                    .font(.system(size: 28, weight: .bold, design: .monospaced))
+                    .foregroundColor(VoltraColor.accent)
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+                Text(health.sessionKcal > 0 ? "kcal" : " ")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(VoltraColor.textDim)
             }
-        }()
-        return tile(
-            label: "HR \u{2022} KCAL",
-            value: hrText,
-            unit: health.currentHR != nil ? "BPM" : nil,
-            color: VoltraColor.danger,
-            subline: kcalText,
-            freshnessIndicator: .some(freshest)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
+        .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
+        .background(VoltraColor.bgElev)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(VoltraColor.border, lineWidth: 1)
         )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    /// b45 (I): LOAD / UNLOAD control tile. Routes through MDM when dual is
-    /// paired (so Combined-mode splits the command per-side, Independent mirrors
-    /// to both, single-slot fires only the connected side); falls back to the
-    /// legacy single-Voltra writer when no dual slots are paired.
+    /// b46: RESISTANCE tile with inline \u00b15 / \u00b11 nudgers.
+    ///
+    /// Layout:
+    ///   RESISTANCE
+    ///   <big number> lb        [-5][+5]
+    ///   <subline math>         [-1][+1]
+    ///
+    /// Tapping a nudger calls `adjustWeight(\u00b1n)` (the same helper the
+    /// upcoming-set card uses) so the new weight is pushed to the Voltra
+    /// IMMEDIATELY through WriterRouter \u2014 no drop-cascade, no rest-tile
+    /// dance. The nudger writes pendingPlannedWeightLb, which is the
+    /// concentric-base value; effective per-rep total updates on the next
+    /// re-render.
+    private func resistanceNudgerTile(perRepTotalLb: Double, subline: String?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("RESISTANCE")
+                .font(.system(size: 10, weight: .bold))
+                .kerning(1.5)
+                .foregroundColor(VoltraColor.textDim)
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .lastTextBaseline, spacing: 4) {
+                        Text(formatLbCompact(perRepTotalLb))
+                            .font(.system(size: 28, weight: .bold, design: .monospaced))
+                            .foregroundColor(VoltraColor.text)
+                            .minimumScaleFactor(0.5)
+                            .lineLimit(1)
+                        Text("lb")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(VoltraColor.textDim)
+                    }
+                    if let sub = subline {
+                        Text(sub)
+                            .font(.system(size: 9))
+                            .foregroundColor(VoltraColor.textFaint)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 4)
+                // 2\u00d72 grid of nudgers. \u00b15 on top, \u00b11 on bottom.
+                // Compact buttons (28\u00d722) so the row stays under the
+                // 88pt min tile height.
+                VStack(spacing: 4) {
+                    HStack(spacing: 4) {
+                        compactNudger(label: "\u{2212}5") { adjustWeight(-5) }
+                        compactNudger(label: "+5")        { adjustWeight(+5) }
+                    }
+                    HStack(spacing: 4) {
+                        compactNudger(label: "\u{2212}1") { adjustWeight(-1) }
+                        compactNudger(label: "+1")        { adjustWeight(+1) }
+                    }
+                }
+            }
+        }
+        .padding(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
+        .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
+        .background(VoltraColor.bgElev)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(VoltraColor.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// Compact \u00b1n nudger button used inside the RESISTANCE tile.
+    /// Smaller than `nudgeButton(small:)` because it has to fit four buttons
+    /// in the corner of an 88pt tile next to the headline number.
+    private func compactNudger(label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .frame(width: 36, height: 24)
+                .background(VoltraColor.bgElev2)
+                .foregroundColor(VoltraColor.text)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(VoltraColor.border, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// b46: state-aware single LOAD/UNLOAD button.
+    ///
+    /// The Voltra protocol does not broadcast load-state in telemetry \u2014
+    /// LOAD and UNLOAD are commands only. So we track "last command sent"
+    /// locally in `deviceLoaded`. Default per-session = false (LOAD is shown,
+    /// because most users boot the app before clipping the cable on).
+    /// Tap LOAD \u2192 send load command, flip label to UNLOAD. Tap UNLOAD \u2192
+    /// send unload command, flip back to LOAD.
+    ///
+    /// If the user manually pulls the cable without using the app button,
+    /// the local flag goes stale. That's acceptable for now \u2014 next firmware
+    /// rev should expose load-state in telemetry; until then this is a
+    /// best-effort UI.
     private var loadUnloadTile: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let isLoaded = deviceLoaded
+        let label = isLoaded ? "UNLOAD" : "LOAD"
+        let bgColor = isLoaded ? VoltraColor.textDim.opacity(0.18) : VoltraColor.accent.opacity(0.18)
+        let fgColor = isLoaded ? VoltraColor.textDim : VoltraColor.accent
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text("DEVICE")
                     .font(.system(size: 10, weight: .bold))
@@ -377,34 +528,26 @@ struct LiveCaptureView: View {
                     .foregroundColor(VoltraColor.textDim)
                 Spacer(minLength: 0)
             }
-            HStack(spacing: 8) {
-                Button {
-                    sendLoad()
-                } label: {
-                    Text("LOAD")
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(VoltraColor.accent.opacity(0.18))
-                        .foregroundColor(VoltraColor.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-                Button {
+            Button {
+                if isLoaded {
                     sendUnload()
-                } label: {
-                    Text("UNLOAD")
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(VoltraColor.textDim.opacity(0.18))
-                        .foregroundColor(VoltraColor.textDim)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    deviceLoaded = false
+                } else {
+                    sendLoad()
+                    deviceLoaded = true
                 }
-                .buttonStyle(.plain)
+            } label: {
+                Text(label)
+                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(bgColor)
+                    .foregroundColor(fgColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
+            .buttonStyle(.plain)
         }
-        .padding(EdgeInsets(top: 14, leading: 14, bottom: 14, trailing: 14))
+        .padding(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
         .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
         .background(VoltraColor.bgElev)
         .overlay(

@@ -810,3 +810,40 @@ Files changed: VoltraLive/BLE/Dual/DualMode.swift, VoltraLive/BLE/Dual/MultiDevi
 8. Watch RSSI in dual-pair sheet — dBm number should drift smoothly, not jitter.
 9. Confirm HR/KCAL merged tile renders and pulse-dot stays green when Watch is streaming.
 10. Tap LOAD / UNLOAD buttons in the live grid; verify Combined splits per-side (50% each).
+
+---
+
+## b46 — v0.4.24 (build 46) — "Resistance + HK"
+
+**Date:** 2026-04-28
+**Goal:** Fix the main HK workflow blocker, then add resistance nudgers + tile reorder + state-aware LOAD button + parity HR/KCAL. User feedback after b45 testing: HR/kcal had been intermittent (then "randomly started working"), and the iOS Settings page for VOLTRA Live had no Health row at all (only Bluetooth/Siri/Search/Cellular Data). Per user: "Hold off on iteration until you fix the main workflow." Fix HK first.
+
+**Fixes & features:**
+
+- **A — HealthKit entitlement, root cause of intermittent HR/kcal.** The `VoltraLive.entitlements` file declared `com.apple.developer.healthkit.access` with an empty `<array/>` value. That key is for clinical health-records access (HKClinicalTypeIdentifier.* — allergies, lab results, etc.), not for the HKQuantityType samples we actually use (heart rate, active energy). When present-but-empty, iOS treats the app as declaring the capability without exercising any of its features, which (a) prevents the Health row from appearing in the app's iOS Settings page and (b) appears to contribute to intermittent HKAnchoredObjectQuery delivery for our HR / active-energy queries.
+  - **Fix:** removed the empty `healthkit.access` key entirely. Standard HR / active-energy reads only require `com.apple.developer.healthkit = true` + the two `NSHealth*UsageDescription` Info.plist strings, all of which are already in place. Added a long inline XML comment on the entitlements file documenting the diagnosis so this isn't re-added by mistake. **Caveat:** if the App Store provisioning profile in the Apple Developer portal also has `healthkit.access` baked into it, the IPA may still carry it through profile injection — the dry-run "Verify embedded entitlements" step will surface this. If so, the user will need to regenerate the App Store profile in the portal so the next build picks up the corrected entitlements.
+
+- **B — RESISTANCE tile gains inline nudgers (mid-set weight changes).** User wanted the ability to add/subtract weight live during a set without leaving the live grid.
+  - **Fix:** new `resistanceNudgerTile` replaces the passive RESISTANCE readout. Big monospaced headline still shows current weight in lb, with the per-rep/total-volume subline preserved (`{perRep} × {reps} reps`). Below that, a 2×2 grid of compact buttons: `−5 / +5` on top row, `−1 / +1` on bottom. Each button calls the existing `adjustWeight(±n)` helper which already does `pendingPlannedWeightLb = next; reanchorCascadeIfActive(toLb:); pushUpcomingStateToDevice()` — so writes route through `WriterRouter` (Combined/Independent/single all handled) and re-anchor any in-flight drop-cascade. No new code path, just inline UI on a previously-passive tile.
+
+- **C — Tile grid reordered left-to-right per user spec.** b45 had RESISTANCE / FORCE / LOAD-UNLOAD top, REPS / REST / DROPSET middle, HR-KCAL / TOTAL-VOL bottom. User wanted reading order to flow left-to-right starting from RESISTANCE.
+  - **Fix:** rewrote `tileGrid` body into 4 rows of 2: Row 1 = RESISTANCE±  +  LOAD/UNLOAD; Row 2 = REPS  +  DROP SET; Row 3 = FORCE  +  REST; Row 4 = HR/KCAL  +  TOTAL VOL. Same VStack/HStack structure, just shuffled.
+
+- **D — LOAD/UNLOAD is now one state-aware toggle, not two buttons.** User: "It shouldnt say load and unload on the tile, it should say load when the wieght is unloaded and change to unload when the wieght it loaded."
+  - **Fix:** new `loadUnloadTile` reads a new `@State deviceLoaded: Bool` flag (default `false` → "LOAD" shown at session start). Tap "LOAD" → calls `sendLoad()` and flips flag to `true` (label → "UNLOAD"). Tap "UNLOAD" → calls `sendUnload()` and flips back. Color shifts: accent when LOAD is shown (action available), textDim when UNLOAD is shown (already-loaded state). **Limitation:** the Voltra protocol does not broadcast load-state in telemetry (`Telemetry` struct in `TelemetryExtractor.swift` has no load field), so the flag tracks local belief only. If the user manually disconnects the cable or yanks the weight, the flag goes stale until the next tap. Acceptable until firmware exposes load-state.
+
+- **E — HR/KCAL parity sizing per user feedback.** b45 merged HR + kcal into a single tile but kcal was rendered as a small subline; user said "kcal number is too small in the picture it should be similar in side and have it's own blinking indicator" and "i think hr and kcal text can be smaller with the acutal bpm and kcal numbers being the most proinate."
+  - **Fix:** replaced `healthMergedTile` with new `healthDualTile` — one tile, HStack with a thin vertical separator. Left half: small "HR" label + own pulse-dot reading `health.lastHRSampleAt` + 28pt monospaced number (BPM) + small "bpm" unit. Right half: same structure for KCAL — small "KCAL" label + own pulse-dot reading `health.lastKcalSampleAt` + 28pt monospaced number + small "kcal" unit. Labels deliberately small, numbers prominent.
+
+**Files changed:**
+- VoltraLive/VoltraLive.entitlements (removed empty healthkit.access; added explanatory XML comment)
+- VoltraLive/Logging/Views/LiveCaptureView.swift (tile reorder, resistanceNudgerTile, compactNudger, healthDualTile, state-aware loadUnloadTile, @State deviceLoaded)
+- VoltraLive/Info.plist + project.yml (bumped to 0.4.24/46, label "Resistance + HK")
+
+**Test plan after TestFlight install:**
+1. Settings → VOLTRA Live → confirm a Health row now appears (alongside Bluetooth/Siri/Search/Cellular Data). Tap it → expect HR + Active Energy toggles, both green.
+2. Run a 5-minute logged session with Watch on wrist actively streaming → HR + kcal numbers should update steadily with their pulse-dots both green.
+3. Mid-set, tap RESISTANCE −5 / +5 / −1 / +1 nudgers → weight number on RESISTANCE tile should change immediately, both Voltras (or single, depending on pair mode) should reflect. If a drop-cascade is mid-flight, it should re-anchor to the new value.
+4. Verify left-to-right tile order: Row 1 RES + LOAD, Row 2 REPS + DROP, Row 3 FORCE + REST, Row 4 HR/KCAL + TOTAL VOL.
+5. Tap LOAD → label flips to UNLOAD, weight loads. Tap UNLOAD → label flips back to LOAD, weight unloads.
+6. HR/KCAL tile: both numbers should be the same large (28pt) size, each with its own blinking pulse-dot, with "HR" / "KCAL" / "bpm" / "kcal" rendered as small caption text.

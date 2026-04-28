@@ -19,7 +19,19 @@
     <string>$(TeamIdentifierPrefix)com.voltralive.app</string>
     <key>com.apple.developer.healthkit</key>
     <true/>
-    <key>com.apple.developer.healthkit.access</key>
-    <array/>
+    <!--
+        b46: removed empty <key>com.apple.developer.healthkit.access</key>
+        with <array/> value. That key is for clinical health-records access
+        (e.g. HKClinicalTypeIdentifier.* like allergies, lab results) and
+        when present-but-empty iOS treats the app as declaring the
+        capability without exercising any of its features, which prevents
+        the Health row from appearing in the app's iOS Settings page and
+        appears to contribute to intermittent HKAnchoredObjectQuery
+        delivery for HR / active-energy samples. Standard read access to
+        HKQuantityType samples (heart rate, active energy) only requires
+        com.apple.developer.healthkit = true and the
+        NSHealthShareUsageDescription / NSHealthUpdateUsageDescription
+        Info.plist strings, both of which we already have.
+    -->
 </dict>
 </plist>
