@@ -291,8 +291,13 @@ final class LoggingStore: ObservableObject {
         // ForceChartView can render two distinct labeled traces during a
         // superset chain (one per exercise). Refreshed each time a set on
         // this exercise finalizes, so the trace is always the most recent.
-        if let exName = instance.exercise?.name, !telemetry.samples.isEmpty {
-            sessionStore?.lastFinalizedByExercise[exName] = telemetry.samples
+        // CompletedSet doesn't carry samples; pull them from
+        // SessionStore.lastFinalizedSamples which the SessionStore stashes
+        // at the same finalize boundary.
+        if let exName = instance.exercise?.name,
+           let stash = sessionStore?.lastFinalizedSamples,
+           !stash.isEmpty {
+            sessionStore?.lastFinalizedByExercise[exName] = stash
         }
         try? ctx.save()
     }
