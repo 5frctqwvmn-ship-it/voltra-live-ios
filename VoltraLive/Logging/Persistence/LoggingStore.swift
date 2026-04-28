@@ -322,8 +322,23 @@ final class LoggingStore: ObservableObject {
 
     /// Cancel an in-flight drop cascade WITHOUT finalizing the set. The
     /// currently in-flight set keeps accumulating but as a normal set.
+    ///
+    /// b44 (v0.4.22): restore the device weight to the chain ANCHOR before
+    /// tearing down. Without this, the device stays parked at whatever the
+    /// last cascade step pushed (often the 5 lb floor), forcing the user to
+    /// manually re-enter their working weight. By pushing the anchor back
+    /// over BLE here, the cancel feels like "undo": you're back to your
+    /// starting weight ready to keep lifting.
     func cancelDropSet() {
         stopCascadeTimers()
+        // b44: capture the BLE writer + anchor BEFORE clearing state, then
+        // push the anchor back to the device. We do this AFTER stopping the
+        // cascade timer (so no stray tick races us) but BEFORE clearing
+        // chainAnchorLb / dropPushWeight (which are cleared below).
+        if let push = dropPushWeight, chainAnchorLb > 0 {
+            push(chainAnchorLb)
+            pendingPlannedWeightLb = chainAnchorLb
+        }
         dropSetActive = false
         dropChainPlannedLb = []
         currentDropIndex = 1
@@ -555,11 +570,25 @@ final class LoggingStore: ObservableObject {
     }
 
     /// Cleanly end the cascade and finalize the parent set.
+    ///
+    /// b44 (v0.4.22): when the rest-timer watchdog finalizes a drop chain,
+    /// restore the device weight to the chain ANCHOR before handing off to
+    /// SessionStore. Without this, the device stays parked at the floor
+    /// (5 lb) once the chain bottoms out — the user comes back from rest
+    /// to a Voltra still pinned at 5 lb and has to crank back up by hand.
+    /// Pushing the anchor here means the device is ready for the NEXT set
+    /// at the user's working weight by the time the rest timer starts.
     private func finalizeCascade() {
         // Stop our own timers FIRST so we don't re-enter.
         stopCascadeTimers()
         nextDropFiresAt = nil
         dropFinalizeAt = nil
+        // b44: restore device to chain anchor. Capture the writer locally
+        // because autoLogDropChain (triggered by forceFinalizeCurrentSet)
+        // will clear dropPushWeight as part of its tear-down.
+        if let push = dropPushWeight, chainAnchorLb > 0 {
+            push(chainAnchorLb)
+        }
         // Tell SessionStore to drop boundary mode (so the next idle goes
         // through the normal finalize path) then trigger finalize via the
         // public path. SessionStore's onDropBoundary is wired to .advance,

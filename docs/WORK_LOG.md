@@ -731,3 +731,19 @@ Files changed: VoltraLive/BLE/Dual/DualMode.swift, VoltraLive/BLE/Dual/MultiDevi
 - VoltraLive/Info.plist + project.yml (bumped to 0.4.21/43, label "Drop floor")
 
 **Note for b44:** restore-anchor-on-finalize/cancel is queued next. When the rest timer kicks in or hold-to-cancel fires, the device should be pushed back to `chainAnchorLb` so it doesn't stay at 5 lb floor.
+
+## 2026-04-27 — b44 "Drop reset"
+**Problem:** When a drop-set chain finished (rest timer fired) or was cancelled (hold-to-cancel), the Voltra stayed parked at whatever weight the last cascade step pushed — often the 5 lb floor after b43. The user came back from rest to a device still set to 5 lb and had to manually crank it back up to their working weight.
+
+**Root cause:**
+- `finalizeCascade` only stopped timers and forwarded to SessionStore — it never sent a final BLE write to restore the anchor weight.
+- `cancelDropSet` cleared internal state including `chainAnchorLb` and `dropPushWeight` but never used them to push the anchor back first.
+
+**Fix:**
+- `finalizeCascade`: capture `dropPushWeight` and `chainAnchorLb` BEFORE handing off to SessionStore (which will trigger autoLogDropChain → tear-down). If both are valid, push the anchor over BLE so the device is at the working weight by the time rest starts.
+- `cancelDropSet`: same pattern — push anchor BEFORE clearing state, and also reset `pendingPlannedWeightLb` so the UI weight tile reflects the restore.
+- Both paths leave the existing tear-down sequence intact; the new push happens in the narrow window between `stopCascadeTimers()` and state clearing.
+
+**Files changed:**
+- VoltraLive/Logging/Persistence/LoggingStore.swift (cancelDropSet + finalizeCascade)
+- VoltraLive/Info.plist + project.yml (bumped to 0.4.22/44, label "Drop reset")
