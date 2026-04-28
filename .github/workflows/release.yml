@@ -663,8 +663,10 @@ jobs:
           PY
           # Strip the leading 10 spaces of YAML indentation that the heredoc
           # picked up; the YAML run: scalar indents lines uniformly so we
-          # can dedent cleanly with sed.
-          sed -i 's/^          //' /tmp/verify_entitlements.py
+          # can dedent cleanly with sed. Use a Python one-liner instead of
+          # `sed -i` since the runner is macOS (BSD sed needs `-i ''`,
+          # GNU sed accepts `-i`; Python is identical on both).
+          python3 -c "import sys; p='/tmp/verify_entitlements.py'; open(p,'w').write(''.join(l[10:] if l.startswith(' '*10) else l for l in open(p)))"
           python3 /tmp/verify_entitlements.py
 
           cd - >/dev/null
