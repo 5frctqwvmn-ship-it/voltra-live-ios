@@ -55,6 +55,10 @@ struct LiveCaptureView: View {
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var logging: LoggingStore
     @EnvironmentObject var health: HealthKitStore
+    // b45: route writes through MDM when dual is paired (otherwise weights
+    // never reach the device because the legacy single-Voltra manager isn't
+    // connected when MDM owns both peripherals).
+    @EnvironmentObject var mdm: MultiDeviceManager
     /// Build 31: needed so the back-button confirmation can offer a
     /// "Just go back" option that pops the nav stack without ending
     /// the active session. User asked for this third path because
@@ -81,7 +85,11 @@ struct LiveCaptureView: View {
     /// fires through this writer so the device updates immediately during
     /// rest. Held in an ObservableObject so the BLE manager can be attached
     /// in onAppear (env objects aren't available in init).
-    @StateObject private var writerHolder = LiveWriterHolder()
+    // b45: WriterRouter replaces LiveWriterHolder — dispatches to MDM's
+    // per-side writers when dual is paired, falls back to the legacy
+    // single-device writer otherwise. LiveWriterHolder kept below as the
+    // legacy seam for the single-only path.
+    @StateObject private var writerRouter = WriterRouter()
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -157,7 +165,7 @@ struct LiveCaptureView: View {
         }
         .onAppear {
             // Attach BLE to the writer once env is available. Idempotent.
-            writerHolder.attach(ble: ble)
+            writerRouter.attach(ble: ble)
             // v0.4.6: Begin polling HealthKit for HR + active energy from
             // the user's Apple Watch workout. Lazy-prompts for permission.
             health.start()
@@ -189,7 +197,7 @@ struct LiveCaptureView: View {
                 damperLevel: 0
             )
         )
-        writerHolder.writer?.apply(state)
+        writerRouter.apply(state, mdm: mdm)
     }
 
     // MARK: - Header
@@ -315,20 +323,112 @@ struct LiveCaptureView: View {
             .buttonStyle(.plain)
             // v0.4.6: HealthKit tiles. Em-dash empty state when nil/zero so
             // the user knows the data isn't flowing yet vs reading 0.
-            tile(
-                label: "HEART RATE",
-                value: health.currentHR.map { String($0) } ?? "\u{2014}",
-                unit: health.currentHR != nil ? "BPM" : nil,
-                color: VoltraColor.danger,
-                freshnessIndicator: .some(health.lastHRSampleAt)
-            )
-            tile(
-                label: "KCAL",
-                value: health.sessionKcal > 0 ? String(Int(health.sessionKcal.rounded())) : "\u{2014}",
-                unit: health.sessionKcal > 0 ? "kcal" : nil,
-                color: VoltraColor.accent,
-                freshnessIndicator: .some(health.lastKcalSampleAt)
-            )
+            //
+            // b45 (I): merged HR + KCAL into a single tile so the freed slot
+            // can host LOAD / UNLOAD controls. The user can still see both
+            // values at a glance (HR is the headline number; kcal sits in the
+            // subline). Pulse-dot uses the most-recent of the two HK sample
+            // timestamps so it stays green whenever ANY HK data is flowing.
+            healthMergedTile
+            loadUnloadTile
+        }
+    }
+
+    /// b45 (I): combined Heart Rate + Calories tile. HR headline, kcal subline.
+    /// Pulse-dot reflects whichever HK source is freshest.
+    private var healthMergedTile: some View {
+        let hrText = health.currentHR.map { String($0) } ?? "\u{2014}"
+        let kcalText: String = {
+            if health.sessionKcal > 0 {
+                return "\(Int(health.sessionKcal.rounded())) kcal"
+            }
+            return "\u{2014} kcal"
+        }()
+        // Pick the more recent of the two timestamps for the freshness dot,
+        // falling back gracefully when only one stream has fired.
+        let freshest: Date? = {
+            switch (health.lastHRSampleAt, health.lastKcalSampleAt) {
+            case let (h?, k?): return max(h, k)
+            case let (h?, nil): return h
+            case let (nil, k?): return k
+            default: return nil
+            }
+        }()
+        return tile(
+            label: "HR \u{2022} KCAL",
+            value: hrText,
+            unit: health.currentHR != nil ? "BPM" : nil,
+            color: VoltraColor.danger,
+            subline: kcalText,
+            freshnessIndicator: .some(freshest)
+        )
+    }
+
+    /// b45 (I): LOAD / UNLOAD control tile. Routes through MDM when dual is
+    /// paired (so Combined-mode splits the command per-side, Independent mirrors
+    /// to both, single-slot fires only the connected side); falls back to the
+    /// legacy single-Voltra writer when no dual slots are paired.
+    private var loadUnloadTile: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("DEVICE")
+                    .font(.system(size: 10, weight: .bold))
+                    .kerning(1.5)
+                    .foregroundColor(VoltraColor.textDim)
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
+                Button {
+                    sendLoad()
+                } label: {
+                    Text("LOAD")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(VoltraColor.accent.opacity(0.18))
+                        .foregroundColor(VoltraColor.accent)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                Button {
+                    sendUnload()
+                } label: {
+                    Text("UNLOAD")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(VoltraColor.textDim.opacity(0.18))
+                        .foregroundColor(VoltraColor.textDim)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(EdgeInsets(top: 14, leading: 14, bottom: 14, trailing: 14))
+        .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
+        .background(VoltraColor.bgElev)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(VoltraColor.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// LOAD command. Prefers MDM when any slot is paired; otherwise legacy ble.
+    private func sendLoad() {
+        if mdm.state != .idle {
+            mdm.load()
+        } else {
+            ble.sendLoad()
+        }
+    }
+
+    /// UNLOAD command. Same routing as sendLoad().
+    private func sendUnload() {
+        if mdm.state != .idle {
+            mdm.unload()
+        } else {
+            ble.sendUnload()
         }
     }
 
@@ -570,16 +670,37 @@ struct LiveCaptureView: View {
                 .font(.system(size: 8, weight: .semibold))
                 .kerning(0.8)
                 .foregroundColor(VoltraColor.textFaint.opacity(0.7))
-            Text(formatLbCompact(current))
-                .font(.system(size: 24, weight: .bold, design: .monospaced))
-                .foregroundColor(VoltraColor.transition)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
+            // b45 (E): once the chain hits the 5 lb hardware floor and
+            // can\u2019t step any lower, replace the weight number with the
+            // word \u201cBOTTOM\u201d. Sitting on a static \u201c5\u201d looked
+            // identical to a regular set and made it impossible to tell at
+            // a glance that the chain had ended. The number itself is still
+            // present \u2014 we just lead with the state.
+            if logging.cascadeAtFloor {
+                Text("BOTTOM")
+                    .font(.system(size: 24, weight: .bold, design: .monospaced))
+                    .foregroundColor(VoltraColor.danger)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            } else {
+                Text(formatLbCompact(current))
+                    .font(.system(size: 24, weight: .bold, design: .monospaced))
+                    .foregroundColor(VoltraColor.transition)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
             if !preview.isEmpty {
                 Text("\u{2192} \(preview.map { formatLbCompact($0) }.joined(separator: " \u{2192} "))")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(VoltraColor.textFaint)
                     .lineLimit(1)
+            } else if logging.cascadeAtFloor {
+                // Confirm the floor in the subline so the user knows the
+                // chain will finalize on the next idle window (no further
+                // drops possible).
+                Text("5 lb floor \u2014 finalizing")
+                    .font(.system(size: 9))
+                    .foregroundColor(VoltraColor.danger.opacity(0.85))
             } else {
                 Text("bottomed out")
                     .font(.system(size: 9))
@@ -1073,7 +1194,7 @@ struct LiveCaptureView: View {
                 damperLevel: 0
             )
         )
-        writerHolder.writer?.apply(state)
+        writerRouter.apply(state, mdm: mdm)
     }
 
     // MARK: - Logged sets section

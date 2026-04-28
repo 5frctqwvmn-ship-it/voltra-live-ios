@@ -37,10 +37,15 @@ struct ExerciseDetailView: View {
     @EnvironmentObject var logging: LoggingStore
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var ble: VoltraBLEManager
+    // b45: needed by WriterRouter so writes route through MDM when dual
+    // is paired. Without this the legacy single-device manager is used
+    // even when both peripherals are owned by MDM — weights never load.
+    @EnvironmentObject var mdm: MultiDeviceManager
 
     /// Captured per-view so the writer's debounce/diff state is scoped to one
     /// detail-screen visit. On dismiss it deinits along with the view.
-    @StateObject private var writerHolder: WriterHolder
+    // b45: WriterRouter replaces WriterHolder for dual-aware routing.
+    @StateObject private var writerRouter: WriterRouter
 
     // Mode + modifier state — drives both the device and the UI
     @State private var mode: VoltraMode = .weight
@@ -64,7 +69,7 @@ struct ExerciseDetailView: View {
         // Build the writer eagerly so the first apply() has a live target.
         // We can't reference @EnvironmentObject in init, so the writer's BLE
         // reference is wired in .onAppear via WriterHolder.attach.
-        _writerHolder = StateObject(wrappedValue: WriterHolder())
+        _writerRouter = StateObject(wrappedValue: WriterRouter())
     }
 
     var body: some View {
@@ -90,7 +95,7 @@ struct ExerciseDetailView: View {
             LiveCaptureView()
         }
         .onAppear {
-            writerHolder.attach(ble: ble)
+            writerRouter.attach(ble: ble)
             if !didInitialize {
                 seedFromHistory()
                 didInitialize = true
@@ -598,7 +603,7 @@ struct ExerciseDetailView: View {
                 damperLevel: damperLevel
             )
         )
-        writerHolder.writer?.apply(state)
+        writerRouter.apply(state, mdm: mdm)
     }
 
     private func formatLb(_ d: Double) -> String {

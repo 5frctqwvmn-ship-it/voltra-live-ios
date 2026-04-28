@@ -747,3 +747,66 @@ Files changed: VoltraLive/BLE/Dual/DualMode.swift, VoltraLive/BLE/Dual/MultiDevi
 **Files changed:**
 - VoltraLive/Logging/Persistence/LoggingStore.swift (cancelDropSet + finalizeCascade)
 - VoltraLive/Info.plist + project.yml (bumped to 0.4.22/44, label "Drop reset")
+
+## 2026-04-27 — b45 "Mega fix" (batched fixes A–I)
+
+**Context:** User explicitly asked: *"batch everything to use the least amount of tokens and just do one build"* — overrides the one-feature-per-build cadence for this build.
+
+**Bugs addressed (batch of 9, mapped to feedback letters A–I):**
+
+- **A — Dual-Voltra workout doesn't apply weight / no telemetry.** Single-Voltra worked because LiveCaptureView writes through `LiveWriterHolder.attach(ble:)` which addresses the legacy single-device manager directly. With both slots paired, weight changes hit `ble` (which has no peripheral) and never reached either Voltra.
+  - **Fix:** new `VoltraLive/BLE/WriterRouter.swift` ObservableObject. `apply(_:mdm:)` inspects `mdm.workoutMode` + slot connection state and routes:
+    - Combined → `mdm.applyCombined(state)` (CombinedMath split per-side)
+    - singleLeft / singleRight → that slot's writer only
+    - Independent → both slot writers (mirror)
+    - One slot paired → that slot only
+    - Neither slot paired → fall back to legacy single `ble` writer (preserves single-Voltra path).
+  - LiveCaptureView and ExerciseDetailView now use `WriterRouter` instead of `LiveWriterHolder`. Both views gained `@EnvironmentObject var mdm: MultiDeviceManager`.
+
+- **B — HealthKit prompt missing on launch / "re-authorize" unclear.** Several users land in `.notDetermined` and Apple won't let an app re-prompt once dismissed; the only path is iOS Settings → Privacy → Health.
+  - **Fix:** DebugView now has an "Open Settings (Privacy → Health)" button using `UIApplication.openSettingsURLString` deep-link, plus an explanatory line above the existing "Re-authorize" row.
+
+- **C — Demo Mode missing from first screen.** ConnectView lost its DemoModeButton in the dual-pair UI rework.
+  - **Fix:** restored `DemoModeButton(source: .prePair)` wired through `DemoTelemetryBridge.shared.handler`.
+
+- **D — RSSI bouncing in discovery list.** `VoltraDiscoveryScanner.didDiscover` re-sorted the discovered list strongest-first on every advertisement, and instantaneous RSSI swings ±10 dBm at rest. Order flipped continuously and the dBm number jittered.
+  - **Fix:** EMA smoothing in `VoltraDiscoveryScanner`. New field `rawRssi` preserves the latest advertisement; `rssi` is now `0.25*raw + 0.75*previous` (seeded with raw on first sight). UI reads `.rssi` so all callers (UnifiedConnectSheet, dual pair view) get smoothed values for free with no caller changes.
+
+- **E — Cascade interval too long + no "BOTTOM" indicator.** `cascadeIntervalSec` was 4 s, which the user found too slow once they were in the rhythm. Also, after the b43 floor clamp the chain would sit on a static "5" with no visual cue that it was at the floor.
+  - **Fix 1:** `cascadeIntervalSec: 4.0 → 2.0`.
+  - **Fix 2:** new `@Published var cascadeAtFloor: Bool` set inside `nextCascadeWeight()` when no further progress is possible. LiveCaptureView's drop-set tile shows "BOTTOM" (in danger color) instead of the "5" digit when this flag is set, with subline "5 lb floor — finalizing".
+
+- **F — Drop-set reset still broken after b44.** b44 pushed the anchor back over BLE on finalize but left `pendingPlannedWeightLb` parked at the floor, so the next set's weight tile read 5 lb. Root cause: `forceFinalizeCurrentSet` triggers `autoLogDropChain` which clears `chainAnchorLb` BEFORE the new restore line could read it.
+  - **Fix:** `finalizeCascade` now captures `chainAnchorLb` into a local *before* invoking `forceFinalizeCurrentSet`, then assigns `pendingPlannedWeightLb = anchor` after. UI now correctly shows the anchor weight on the next set.
+
+- **G — Tier-bump math wrong (30 → 25 → 10 → 5).** When `bumpCascadeTier` fired, `cascadeStepIndex` carried over, so the next `nextCascadeWeight()` call computed step 2 of tier 2 from the original anchor: 30 − 10×2 = 10. Skipped 20.
+  - **Fix:** `bumpCascadeTier()` now re-anchors `chainAnchorLb = lastDropped` and resets `cascadeStepIndex = 0`. Ladder now produces clean monotonic descents (e.g. 30 → 25 → 15 → 5). Will gather user feedback after testing.
+
+- **H — Pulse-dots not blinking.** PulseDot's `freshWindow` was 8 s, but HealthKit background delivery is bursty (sometimes 10–14 s between samples even when actively streaming). Dots rarely got the chance to display "fresh".
+  - **Fix:** `freshWindow: 8.0 → 15.0` seconds. Tracks HK's actual cadence.
+
+- **I — Want HR + kcal merged + Load/Unload tile freed.** The 2×3 metrics grid had separate HR and KCAL tiles; user wanted one slot reclaimed for device controls.
+  - **Fix:** new `healthMergedTile` (HR headline + kcal subline, pulse-dot tracks the freshest of the two HK timestamps) replaces both. New `loadUnloadTile` with two equal-width buttons routes through MDM when any dual slot is paired (so Combined splits per-side, Independent mirrors, single-slot fires only that side); falls back to the legacy `ble.sendLoad/sendUnload` when no MDM slots are paired.
+
+**Files changed:**
+- VoltraLive/BLE/WriterRouter.swift (NEW)
+- VoltraLive/BLE/Dual/VoltraDiscoveryScanner.swift (RSSI EMA smoothing)
+- VoltraLive/Logging/Persistence/LoggingStore.swift (E + F + G + cascadeAtFloor flag)
+- VoltraLive/Logging/Views/LiveCaptureView.swift (mdm env, WriterRouter, healthMergedTile, loadUnloadTile, BOTTOM indicator)
+- VoltraLive/Logging/Views/ExerciseDetailView.swift (mdm env, WriterRouter)
+- VoltraLive/Logging/Views/PulseDot.swift (freshWindow 8 → 15 s)
+- VoltraLive/Logging/Views/DebugView.swift (Settings deep-link)
+- VoltraLive/Views/ConnectView.swift (restored DemoModeButton)
+- VoltraLive/Info.plist + project.yml (bumped to 0.4.23/45, label "Mega fix")
+
+**Test plan after TestFlight install:**
+1. Pair only one Voltra (left slot) → run a workout, confirm weight changes apply and telemetry streams (regression check for A's fallback path).
+2. Pair both Voltras in Combined → confirm weight splits per-side and both Voltras receive load updates.
+3. Pair both in Independent → confirm both mirror.
+4. Trigger a drop-set chain from 30 lb, let it cascade naturally → expect 30 → 25 → 20 → 15 → 10 → 5 → BOTTOM, then on next set the weight tile shows 30 (not 5).
+5. Cascade interval should now feel snappy (~2 s between auto-drops).
+6. Open DebugView, verify "Open Settings" deep-link lands on iOS Privacy → Health.
+7. Confirm DemoModeButton visible on first ConnectView screen.
+8. Watch RSSI in dual-pair sheet — dBm number should drift smoothly, not jitter.
+9. Confirm HR/KCAL merged tile renders and pulse-dot stays green when Watch is streaming.
+10. Tap LOAD / UNLOAD buttons in the live grid; verify Combined splits per-side (50% each).

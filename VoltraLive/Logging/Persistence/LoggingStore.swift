@@ -85,9 +85,10 @@ final class LoggingStore: ObservableObject {
     @Published var dropChainPlannedLb: [Double] = []
     /// 1-based current drop within the active chain.
     @Published var currentDropIndex: Int = 1
-    /// Cascade tick interval — every 4s we push the next drop using the
-    /// current step tier.
-    private let cascadeIntervalSec: Double = 4.0
+    /// Cascade tick interval. b45: tightened from 4s to 2s per user request
+    /// — 4s felt sluggish and cost mid-cascade tempo; 2s matches the rate
+    /// at which the user is physically able to swap mental weight targets.
+    private let cascadeIntervalSec: Double = 2.0
     /// No-movement watchdog — set finalizes after this many seconds with
     /// no rep increment.
     private let cascadeIdleFinalizeSec: Double = 10.0
@@ -115,6 +116,11 @@ final class LoggingStore: ObservableObject {
     /// Current step tier. Starts at 1 (= 5 lb / 5%) on first tap; bumped
     /// by 1 every additional tap while a cascade is active.
     @Published var cascadeTier: Int = 1
+    /// b45: published flag so UI can show "BOTTOM" instead of letting the
+    /// user think the cascade is broken when it sits at the floor weight.
+    /// Set true the moment `nextCascadeWeight()` reports a no-progress step
+    /// (we've hit the 5 lb device floor); cleared on cancel/finalize/start.
+    @Published var cascadeAtFloor: Bool = false
     /// Human-readable label for the current step ("5 lb / 5%").
     var cascadeStepLabel: String {
         let lb = Double(cascadeTier) * cascadeTierStepLb
@@ -290,6 +296,7 @@ final class LoggingStore: ObservableObject {
         // equivalent) NEVER compounding off the previously-dropped value.
         chainAnchorLb = startingLb
         cascadeStepIndex = 0
+        cascadeAtFloor = false  // b45: clear floor flag from any prior chain
 
         // Drop #1 = the starting weight (what the user was just lifting).
         // We seed the chain with it so history rendering stays consistent.
@@ -339,6 +346,7 @@ final class LoggingStore: ObservableObject {
             push(chainAnchorLb)
             pendingPlannedWeightLb = chainAnchorLb
         }
+        cascadeAtFloor = false
         dropSetActive = false
         dropChainPlannedLb = []
         currentDropIndex = 1
@@ -376,7 +384,20 @@ final class LoggingStore: ObservableObject {
         guard dropSetActive else { return }
         // Roll 1 → 2 → 3 → 1… (5/10/15 lb steps).
         cascadeTier = (cascadeTier % 3) + 1
-        // Reset the 4s fuse so the user has a full window after each bump
+        // b45 (issue G): re-anchor on bump so the new tier walks cleanly
+        // off the user's CURRENT weight, not the original chain anchor.
+        // Pre-b45 behavior: anchor=30, tap-1 fires step 1 tier 1 → 25.
+        // Tap-2 bumped to tier 2 but kept stepIndex=1, so the next fuse
+        // fired step 2 tier 2 = 30 − 10×2 = 10. User expected the bump
+        // to mean "now drop in tier-2 sized steps starting from here":
+        // 25 → 15 → 5. Re-anchoring to the most recent dropped weight and
+        // resetting stepIndex to 0 produces exactly that ladder.
+        if let lastDropped = dropChainPlannedLb.last, lastDropped > 0 {
+            chainAnchorLb = lastDropped
+        }
+        cascadeStepIndex = 0
+        cascadeAtFloor = false
+        // Reset the fuse so the user has a full window after each bump
         // to keep tapping. Do NOT fire a step here.
         cascadeTimer?.cancel(); cascadeTimer = nil
         scheduleCascadeTimer()
@@ -473,7 +494,12 @@ final class LoggingStore: ObservableObject {
         // a no-op. Floor is 5 lb device (= 5 lb single, 10 lb effective
         // under pulley) — the Voltra hardware minimum.
         let prev = dropChainPlannedLb.last ?? chainAnchorLb
-        if next <= 0 || next >= prev { return nil }
+        if next <= 0 || next >= prev {
+            // b45: surface the floor state to UI so the cascade tile shows
+            // "BOTTOM" instead of looking idle/timed-out.
+            cascadeAtFloor = true
+            return nil
+        }
         return next
     }
 
@@ -571,23 +597,26 @@ final class LoggingStore: ObservableObject {
 
     /// Cleanly end the cascade and finalize the parent set.
     ///
-    /// b44 (v0.4.22): when the rest-timer watchdog finalizes a drop chain,
-    /// restore the device weight to the chain ANCHOR before handing off to
-    /// SessionStore. Without this, the device stays parked at the floor
-    /// (5 lb) once the chain bottoms out — the user comes back from rest
-    /// to a Voltra still pinned at 5 lb and has to crank back up by hand.
-    /// Pushing the anchor here means the device is ready for the NEXT set
-    /// at the user's working weight by the time the rest timer starts.
+    /// b44/b45: when the rest-timer watchdog finalizes a drop chain, restore
+    /// BOTH the device weight AND `pendingPlannedWeightLb` to the original
+    /// chain anchor. b44 only pushed BLE, but `pendingPlannedWeightLb` was
+    /// still pointing at the most-recently-dropped weight — so the NEXT
+    /// drop set started from the floor (5 lb) instead of the user's true
+    /// working weight. b45 fixes the UI-side leak too. We also capture the
+    /// anchor BEFORE invoking `forceFinalizeCurrentSet` because that path
+    /// triggers `autoLogDropChain` which clears `chainAnchorLb`.
     private func finalizeCascade() {
         // Stop our own timers FIRST so we don't re-enter.
         stopCascadeTimers()
         nextDropFiresAt = nil
         dropFinalizeAt = nil
-        // b44: restore device to chain anchor. Capture the writer locally
-        // because autoLogDropChain (triggered by forceFinalizeCurrentSet)
-        // will clear dropPushWeight as part of its tear-down.
-        if let push = dropPushWeight, chainAnchorLb > 0 {
-            push(chainAnchorLb)
+        cascadeAtFloor = false
+        // b44/b45: capture the writer + anchor locally because
+        // forceFinalizeCurrentSet → autoLogDropChain will null both out.
+        let anchor = chainAnchorLb
+        let push   = dropPushWeight
+        if let push = push, anchor > 0 {
+            push(anchor)
         }
         // Tell SessionStore to drop boundary mode (so the next idle goes
         // through the normal finalize path) then trigger finalize via the
@@ -595,8 +624,15 @@ final class LoggingStore: ObservableObject {
         // so we have to clear it before letting normal finalize fire.
         sessionStore?.endDropChainModeOnly()
         sessionStore?.forceFinalizeCurrentSet()
-        // Drop UI state cleared in autoLogDropChain when handleCompletedSetsUpdate
-        // routes the just-finalized parent telemetry through us.
+        // b45: AFTER autoLogDropChain has run and cleared internal state,
+        // restore the user-facing planned weight to the original anchor
+        // so the next drop-set starts from the working weight, not the
+        // last-dropped floor value. autoLogDropChain leaves
+        // pendingPlannedWeightLb at whatever it was last set to during
+        // the cascade (often 5 lb floor); we re-write the anchor here.
+        if anchor > 0 {
+            pendingPlannedWeightLb = anchor
+        }
     }
 
     /// Cancel all timers but leave dropSetActive untouched (caller decides).

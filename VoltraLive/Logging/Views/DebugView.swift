@@ -139,7 +139,25 @@ struct DebugView: View {
                             ) {
                                 health.requestAuthIfNeeded()
                             }
-                            Text("If the system permission sheet didn't appear on first launch, tap the button above. iOS may also require you to enable HealthKit access in Settings -> Privacy & Security -> Health -> VOLTRA Live.")
+                            // b45: Apple's privacy model returns ok=true on
+                            // requestAuthorization even when read access was
+                            // previously denied — so the in-app re-request
+                            // button is a no-op once iOS has cached a denial.
+                            // This Settings deep-link is the only reliable
+                            // escape hatch for users whose dialog never
+                            // showed or who hit Don't Allow.
+                            actionButton(
+                                title: "Open Settings (Privacy → Health)",
+                                systemImage: "gear",
+                                tint: VoltraColor.text
+                            ) {
+                                #if canImport(UIKit)
+                                if let url = URL(string: UIApplication.openSettingsURLString) {
+                                    UIApplication.shared.open(url)
+                                }
+                                #endif
+                            }
+                            Text("If heart-rate or calories aren't showing during a workout, the in-app button can't always re-prompt iOS. Use the Settings button above to flip access on under Privacy & Security → Health → VOLTRA Live, then return to the app.")
                                 .font(.system(size: 12))
                                 .foregroundColor(VoltraColor.textDim)
                         }

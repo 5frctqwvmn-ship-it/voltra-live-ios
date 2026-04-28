@@ -154,11 +154,29 @@ struct ConnectView: View {
                         .multilineTextAlignment(.center)
                 }
 
-                // Build 40: removed "Skip - Try Demo" and "Pair 2 Voltras"
-                // buttons from this screen. Demo mode lives in the Debug
-                // sheet (gear icon on the home screen) per user direction;
-                // dual-Voltra pairing is folded into the unified Connect
-                // sheet above (multi-select to pair two at once).
+                // Build 40: removed "Pair 2 Voltras" — dual is folded into
+                // the unified Connect sheet above (multi-select to pair two).
+                //
+                // Build 45: restored Demo mode entry on this screen. Removing
+                // it in b40 made it impossible to demo the app without a
+                // physical Voltra in BLE range (TestFlight reviewers, sales).
+                // The button uses the standard DemoModeButton component which
+                // boots the synthetic telemetry bridge.
+                Divider()
+                    .background(VoltraColor.border)
+                    .padding(.vertical, 4)
+
+                if !demo.isActive {
+                    HStack {
+                        Spacer()
+                        DemoModeButton(source: .prePair) {
+                            guard let handler = DemoTelemetryBridge.shared.handler else { return }
+                            demo.note(.buttonTap(label: "Demo Mode (pre-pair)", screen: "Connect"))
+                            demo.enter(source: .prePair, onTelemetry: handler)
+                        }
+                        Spacer()
+                    }
+                }
             }
             .padding(40)
             .background(VoltraColor.bgElev)

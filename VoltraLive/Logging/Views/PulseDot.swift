@@ -32,7 +32,12 @@ struct PulseDot: View {
     /// Diameter in points.
     var size: CGFloat = 8
     /// How long after the last sample the dot is still considered fresh.
-    var freshWindow: TimeInterval = 8.0
+    /// b45: bumped 8 → 15 seconds. HealthKit delivery during a Watch
+    /// workout is bursty: a heart-rate sample every 5 s typical but with
+    /// gaps to 12+ s when the wrist motion sensor is quiet. The 8 s window
+    /// kept flipping the dot to grey between samples even when streaming
+    /// was healthy, so users assumed it was broken.
+    var freshWindow: TimeInterval = 15.0
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.25)) { ctx in

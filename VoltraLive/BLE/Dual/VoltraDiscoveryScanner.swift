@@ -42,7 +42,15 @@ final class VoltraDiscoveryScanner: NSObject, ObservableObject {
     struct Discovered: Identifiable, Equatable {
         let id: UUID                // CBPeripheral.identifier
         var name: String            // best-effort label
-        var rssi: Int               // dBm; updated on each advertisement
+        // b45 (D): displayed RSSI is now smoothed via an exponential moving
+        // average so the discovery list doesn't bounce. CoreBluetooth fires
+        // adverts at ~100\u20131000 ms cadence and instantaneous RSSI swings
+        // \u00b110 dBm even when the device is stationary, which made the sort
+        // order flip every few hundred ms and the dBm number jitter wildly.
+        // We keep both: `rssi` is the smoothed value used for display + sort,
+        // and `rawRssi` is the latest raw advertisement (for debugging only).
+        var rssi: Int               // dBm, EMA-smoothed; what UI shows
+        var rawRssi: Int            // dBm, last raw advertisement
         var lastSeen: Date
         // Held weakly through CB; the live peripheral used at connect-time.
         // CoreBluetooth retains it via the central, so a strong handle here is
@@ -87,6 +95,13 @@ final class VoltraDiscoveryScanner: NSObject, ObservableObject {
     /// Stale window. iOS re-advertises every ~100\u20131000ms when nearby; 10s of
     /// silence is a strong signal the device walked away.
     private let staleAfter: TimeInterval = 10
+
+    /// b45 (D): EMA smoothing factor for RSSI.
+    /// new = alpha*raw + (1-alpha)*previous. Lower = smoother but slower to
+    /// react when the user actually moves. 0.25 is a good middle ground:
+    /// after ~10 adverts (~2\u20133 s) the smoothed value tracks reality, but
+    /// single-frame noise spikes barely move the bar.
+    private let rssiEmaAlpha: Double = 0.25
 
     // MARK: - Init
 
@@ -226,10 +241,21 @@ extension VoltraDiscoveryScanner: CBCentralManagerDelegate {
         let rssi = RSSI.intValue
         let id = peripheral.identifier
         Task { @MainActor in
+            // b45 (D): blend new raw RSSI into the existing smoothed value
+            // when we've seen this peripheral before; otherwise seed with raw.
+            let smoothed: Int
+            if let prev = self.byId[id] {
+                let blended = self.rssiEmaAlpha * Double(rssi)
+                            + (1.0 - self.rssiEmaAlpha) * Double(prev.rssi)
+                smoothed = Int(blended.rounded())
+            } else {
+                smoothed = rssi
+            }
             let rec = Discovered(
                 id: id,
                 name: name,
-                rssi: rssi,
+                rssi: smoothed,
+                rawRssi: rssi,
                 lastSeen: Date(),
                 peripheral: peripheral
             )

@@ -17,15 +17,15 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.4.22</string>
+    <string>0.4.23</string>
     <key>CFBundleVersion</key>
-    <string>44</string>
+    <string>45</string>
     <!-- Build 31: short label for the single feature this build is testing.
          Shown next to the build badge in every screen so the user knows
          exactly what to focus on. Update this each build to match the one
          feature being tested. Empty string disables the label. -->
     <key>VOLTRAFeatureLabel</key>
-    <string>Drop reset</string>
+    <string>Mega fix</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <!-- v0.4.6.3: Demo Mode trace upload. release.yml replaces these
