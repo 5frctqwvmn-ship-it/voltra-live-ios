@@ -323,7 +323,7 @@ struct LiveCaptureViewV2: View {
         // Mirror V1: a set is loggable once we have at least 1 rep in
         // the in-flight set OR a finalized telemetry packet pending.
         if let cs = session.currentSet, cs.reps > 0 { return true }
-        if session.pendingTelemetrySet != nil { return true }
+        if logging.pendingTelemetrySet != nil { return true }
         return false
     }
 
@@ -348,7 +348,7 @@ struct LiveCaptureViewV2: View {
         // = pending plan, ecc/chains = nil, reps/peak from telemetry.
         // Anything more nuanced (custom labels, notes, mode) belongs in
         // V1's SetLogView \u2014 V2's CTA is a one-tap log.
-        let pending: CompletedSet? = session.pendingTelemetrySet ?? session.currentSet.map { cs in
+        let pending: CompletedSet? = logging.pendingTelemetrySet ?? session.currentSet.map { cs in
             CompletedSet(
                 reps: cs.reps,
                 peakLb: cs.peakLb,
