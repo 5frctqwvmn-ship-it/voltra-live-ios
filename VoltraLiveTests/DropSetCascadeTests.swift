@@ -148,25 +148,30 @@ final class DropSetCascadeTests: XCTestCase {
     }
 
     /// When the 4s fuse fires (simulated via `testFireCascadeStep`), the
-    /// drop committed must use whatever tier is current at fire time, and
-    /// must remain anchor-relative — never compounding off prior drops.
-    /// After bumping to tier 3, the fuse should fire 85, then 70 (= 100
-    /// minus 15 × stepIndex), anchored to the original 100.
+    /// drop committed must use whatever tier is current at fire time.
+    ///
+    /// b45 (G) update: a tier bump now RE-ANCHORS the cascade to the most
+    /// recently dropped weight and resets `cascadeStepIndex` to 0, so a
+    /// fresh tier-3 step-1 drop is `lastDropped - 15`. This replaces the
+    /// pre-b45 anchor-from-original behavior, which produced bad ladders
+    /// like 30→25→10→5 when the user hit \"DROP\" mid-chain.
+    ///
+    /// Setup: startingLb=100. After start, chain=[100, 95]; lastDropped=95.
+    ///   bumpCascadeTier()  // tier 2, re-anchor=95, stepIndex=0
+    ///   bumpCascadeTier()  // tier 3, re-anchor=95, stepIndex=0
+    ///   testFireCascadeStep() // tier 3, step 1 from anchor 95 → 95 - 15 = 80
     func testLiveCascade_FuseFiresAtCurrentTier_AnchorRelative() {
         let (store, session) = LoggingStore.makeForTestingWithSession()
         _ = session
         store.startDropSet(startingLb: 100.0) { _ in }
-        // Chain after start: [100, 95]. cascadeStepIndex = 1, tier = 1.
-        store.bumpCascadeTier() // tier 2 (no fire)
-        store.bumpCascadeTier() // tier 3 (no fire)
-        store.testFireCascadeStep() // fuse: tier 3, step 2 → 100 - 15*2 = 70
-        // Hmm — stepIndex went from 1→2, so the fired weight is anchored
-        // at step 2 of tier 3: 100 - max(15, 100*0.15*2) = 100 - 30 = 70.
+        store.bumpCascadeTier() // tier 2 (re-anchor to 95)
+        store.bumpCascadeTier() // tier 3 (re-anchor to 95)
+        store.testFireCascadeStep() // tier 3, step 1 from 95 → 80
 
-        XCTAssertEqual(store.dropChainPlannedLb.last, 70.0,
-                       "fuse-fired drop at tier 3, step 2 must be 70 (anchor-relative)")
+        XCTAssertEqual(store.dropChainPlannedLb.last, 80.0,
+                       "b45: tier-bump re-anchors to last-dropped (95). Tier 3 step 1 → 95 - 15 = 80.")
         XCTAssertFalse(store.dropChainPlannedLb.contains(64.0),
-                       "64 lb (100 × 0.8 × 0.8) is the compounding artifact and must never appear")
+                       "64 lb (100 \u{00D7} 0.8 \u{00D7} 0.8) is the compounding artifact and must never appear")
     }
 
     /// The 20%-per-drop ladder the user described in plain language
