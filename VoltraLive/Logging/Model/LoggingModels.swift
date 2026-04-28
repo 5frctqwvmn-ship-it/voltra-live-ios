@@ -264,6 +264,16 @@ final class ExerciseInstance {
     /// Equipment override for this instance (defaults to Exercise.equipment).
     var equipment: String = ""
 
+    /// b52: Average heart rate during this exercise window (BPM), captured
+    /// from HealthKit when the instance is finalized. Optional — nil if HK
+    /// auth was denied, no samples covered the window, or the instance was
+    /// imported. Additive SwiftData migration: existing rows decode with nil.
+    var avgHRDuringInstance: Double? = nil
+    /// b52: Active energy burned during this exercise window (kcal), captured
+    /// from HealthKit when the instance is finalized. Same nil-safety as
+    /// `avgHRDuringInstance`.
+    var kcalDuringInstance: Double? = nil
+
     // Owning relationships — both optional for CloudKit compatibility.
     var session: WorkoutSession? = nil
     var exercise: Exercise? = nil
@@ -277,6 +287,8 @@ final class ExerciseInstance {
         endedAt: Date? = nil,
         orderIndex: Int = 0,
         equipment: String = "",
+        avgHRDuringInstance: Double? = nil,
+        kcalDuringInstance: Double? = nil,
         session: WorkoutSession? = nil,
         exercise: Exercise? = nil
     ) {
@@ -285,12 +297,49 @@ final class ExerciseInstance {
         self.endedAt = endedAt
         self.orderIndex = orderIndex
         self.equipment = equipment
+        self.avgHRDuringInstance = avgHRDuringInstance
+        self.kcalDuringInstance = kcalDuringInstance
         self.session = session
         self.exercise = exercise
     }
 
     var orderedSets: [LoggedSet] {
         (sets ?? []).sorted { $0.completedAt < $1.completedAt }
+    }
+
+    // MARK: - b52 rollup helpers
+
+    /// Sum of reps across all sets in this instance.
+    var totalReps: Int {
+        orderedSets.reduce(0) { $0 + $1.reps }
+    }
+
+    /// Total volume = sum of (weightLb + addedLoadLb||chainsLb) × reps across
+    /// all sets. Drop sets are counted using the parent's weight/reps only —
+    /// per-drop volume rollup is a future enhancement.
+    var totalVolumeLb: Double {
+        orderedSets.reduce(0.0) { acc, s in
+            let added = s.addedLoadLb ?? s.chainsLb ?? 0
+            return acc + (s.weightLb + added) * Double(s.reps)
+        }
+    }
+
+    /// Max peakForceLb across all sets (lb).
+    var peakForceLb: Double {
+        orderedSets.map(\.peakForceLb).max() ?? 0
+    }
+
+    /// Mean of per-set peakForceLb across all sets that had a non-zero peak
+    /// (lb). Returns 0 if no set had a measured peak.
+    var avgPeakForceLb: Double {
+        let peaks = orderedSets.map(\.peakForceLb).filter { $0 > 0 }
+        guard !peaks.isEmpty else { return 0 }
+        return peaks.reduce(0, +) / Double(peaks.count)
+    }
+
+    /// Wall-clock duration from startedAt → endedAt (or now if still open).
+    var duration: TimeInterval {
+        (endedAt ?? Date()).timeIntervalSince(startedAt)
     }
 }
 

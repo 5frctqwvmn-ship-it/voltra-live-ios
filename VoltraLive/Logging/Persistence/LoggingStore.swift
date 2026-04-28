@@ -205,6 +205,12 @@ final class LoggingStore: ObservableObject {
 
     var modelContext: ModelContext?
     private weak var sessionStore: SessionStore?
+    /// b52: optional HealthKitStore reference. Captured at wire time so
+    /// `finalizeActiveInstance` can fire a windowed HK snapshot (avg HR +
+    /// kcal) when an instance ends. Weak to avoid retain cycles \u2014 the
+    /// store is owned by the App scene and outlives LoggingStore. Optional
+    /// + nil-safe so unit tests / previews that don't wire HK still work.
+    private weak var healthStore: HealthKitStore?
     private var observers: Set<AnyCancellable> = []
     /// Number of completedSets we've already consumed from SessionStore so
     /// duplicates aren't re-prompted.
@@ -212,9 +218,10 @@ final class LoggingStore: ObservableObject {
 
     // MARK: - Lifecycle
 
-    func wire(context: ModelContext, sessionStore: SessionStore) {
+    func wire(context: ModelContext, sessionStore: SessionStore, healthStore: HealthKitStore? = nil) {
         self.modelContext = context
         self.sessionStore = sessionStore
+        self.healthStore = healthStore
 
         // Observe SessionStore.completedSets — when a new entry appears,
         // surface it as the pending set.
@@ -1054,12 +1061,25 @@ final class LoggingStore: ObservableObject {
     @discardableResult
     func switchActiveInstanceByExerciseName(_ name: String) -> Bool {
         guard let session = activeSession else { return false }
-        guard let match = (session.instances ?? []).first(where: {
-            $0.exercise?.name == name && $0.endedAt == nil
-        }) else { return false }
-        // Don't double-finalize the current instance \u2014 chain swap is
-        // a back-and-forth flip, not a permanent transition. We want
-        // both instances to stay open across the chain.
+        // b52: Match by name regardless of endedAt. Chain navigation
+        // (entering LiveCapture from ExerciseStartView with chain count
+        // \u2265 2, or SWAP) needs to reopen instance A even if pickExercise(B)
+        // already stamped its endedAt. Sets logged after switching back
+        // belong to A, not B \u2014 so we re-open the instance by clearing
+        // its endedAt. The final endedAt is stamped at endSession().
+        // Pick the most recent matching instance (latest startedAt).
+        let matches = (session.instances ?? []).filter { $0.exercise?.name == name }
+        guard let match = matches.sorted(by: { $0.startedAt > $1.startedAt }).first else {
+            return false
+        }
+        if match.endedAt != nil {
+            // b52: re-opening a paused chain entry. Clear endedAt so the
+            // HK snapshot on the next finalize covers the FULL window
+            // including this resumed segment, and so the rollup helpers
+            // (duration etc.) report a sensible value while the user is
+            // actively logging into it.
+            match.endedAt = nil
+        }
         activeInstance = match
         setNumberForCurrentInstance = (match.sets?.count ?? 0) + 1
         // v0.4.0: sync the consumed-set marker so the next telemetry
@@ -1127,8 +1147,25 @@ final class LoggingStore: ObservableObject {
     }
 
     private func finalizeActiveInstance() {
-        if let inst = activeInstance, inst.endedAt == nil {
-            inst.endedAt = Date()
+        guard let inst = activeInstance, inst.endedAt == nil else { return }
+        let end = Date()
+        let start = inst.startedAt
+        inst.endedAt = end
+        // b52: fire async HealthKit snapshot for HR + kcal across the
+        // instance window. Captures values onto the instance and saves
+        // the context. Failure (HK unavailable, denied auth, no samples)
+        // leaves the fields nil \u2014 the summary view tolerates missing
+        // values. We capture the instance reference (NOT activeInstance)
+        // because by the time the await resumes, activeInstance may have
+        // been swapped to the next exercise.
+        if let hk = healthStore {
+            let target = inst
+            Task { @MainActor [weak self] in
+                let snap = await hk.snapshotInstance(start: start, end: end)
+                target.avgHRDuringInstance = snap.avgHR
+                target.kcalDuringInstance = snap.kcal
+                try? self?.modelContext?.save()
+            }
         }
     }
 
@@ -1376,11 +1413,14 @@ final class LoggingStore: ObservableObject {
         out += "Duration: \(durStr)\n\n"
 
         for inst in (session.instances ?? []).sorted(by: { $0.orderIndex < $1.orderIndex }) {
+            let exerciseName = inst.exercise?.name ?? "Exercise"
             let title = inst.equipment.isEmpty
-                ? (inst.exercise?.name ?? "Exercise")
-                : "\(inst.exercise?.name ?? "Exercise") (\(inst.equipment))"
-            out += "\(title)\n\n"
-            out += "Set    Label      Weight     Eccentric    Reps    Notes\n"
+                ? exerciseName
+                : "\(exerciseName) (\(inst.equipment))"
+            // b52: Per-exercise header with order index so chain ordering
+            // is unambiguous in the export.
+            out += "\(inst.orderIndex). \(title)\n\n"
+            out += "Set    Label      Weight     Eccentric    Reps    Peak lb    Notes\n"
             for s in inst.orderedSets {
                 let w = s.weightLb > 0 ? "\(formatLb(s.weightLb)) lbs" : "—"
                 let e = (s.eccentricLb ?? 0) > 0 ? "+\(formatLb(s.eccentricLb!)) ecc" : "—"
@@ -1393,7 +1433,10 @@ final class LoggingStore: ObservableObject {
                     return baseLabel
                 }()
                 let notes = s.notes ?? ""
-                out += "\(s.orderIndex)      \(label.padded(8))  \(w.padded(10))  \(e.padded(11))  \(s.reps)     \(notes)\n"
+                // b52: include peakForceLb on each row — needed for chain
+                // summary review per b51 user feedback.
+                let peakStr = s.peakForceLb > 0 ? formatLb(s.peakForceLb) : "—"
+                out += "\(s.orderIndex)      \(label.padded(8))  \(w.padded(10))  \(e.padded(11))  \(s.reps)       \(peakStr.padded(8))   \(notes)\n"
 
                 // v0.4.5: Drop-set chain. Render an indented arrow line
                 // listing each drop's weight×reps, plus a per-drop peak
@@ -1407,6 +1450,31 @@ final class LoggingStore: ObservableObject {
                         .map { "\(formatLb($0.peakForceLb))" }
                         .joined(separator: " / ")
                     out += "         peak lb: \(peaks)\n"
+                }
+            }
+            // b52: per-exercise rollup line — totals, peak, avg peak,
+            // duration, plus HR / kcal if HealthKit captured them.
+            let totalReps = inst.totalReps
+            let totalVol = inst.totalVolumeLb
+            let peakInst = inst.peakForceLb
+            let avgPeak = inst.avgPeakForceLb
+            let durStr = formatDuration(inst.duration)
+            let setsCount = inst.orderedSets.count
+            out += "  Totals: \(setsCount) set\(setsCount == 1 ? "" : "s"), \(totalReps) reps, "
+            out += "vol \(formatLb(totalVol)) lb, peak \(formatLb(peakInst)) lb, avg peak \(formatLb(avgPeak)) lb, \(durStr)\n"
+            // HR + kcal optional — omit the line entirely if both are nil so
+            // older imported sessions / HK-denied installs don't see a stub.
+            if inst.avgHRDuringInstance != nil || inst.kcalDuringInstance != nil {
+                var hrLine = "  Vitals:"
+                if let hr = inst.avgHRDuringInstance, hr > 0 {
+                    hrLine += " avg HR \(Int(hr.rounded())) bpm"
+                }
+                if let kcal = inst.kcalDuringInstance, kcal > 0 {
+                    if hrLine != "  Vitals:" { hrLine += "," }
+                    hrLine += " \(Int(kcal.rounded())) kcal"
+                }
+                if hrLine != "  Vitals:" {
+                    out += "\(hrLine)\n"
                 }
             }
             out += "\n"

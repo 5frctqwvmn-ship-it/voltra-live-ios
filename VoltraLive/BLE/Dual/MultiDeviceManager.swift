@@ -193,6 +193,20 @@ final class MultiDeviceManager: ObservableObject {
             && right.connectionState.isConnected
     }
 
+    /// b52: True iff the chain has ANY entry (count >= 1) AND both Voltras
+    /// are connected. Looser than `hasActiveSupersetChain` (which requires
+    /// a 2+ exercise chain). Used by `WriterRouter` to gate active-slot-only
+    /// routing as soon as the user picks their FIRST exercise on a paired
+    /// slot: prior to b52 the router fell through to .independent broadcast
+    /// when chain.count == 1, clobbering the inactive side. The chain
+    /// traversal UI continues to read `hasActiveSupersetChain` so the
+    /// banner / SWAP / chain-tag affordances only appear with 2+ entries.
+    var hasAnySupersetChainEntry: Bool {
+        !supersetChain.isEmpty
+            && left.connectionState.isConnected
+            && right.connectionState.isConnected
+    }
+
     /// b49: True iff exactly one Voltra is paired (used by the exercise
     /// screen to skip the L/R picker and auto-bind to the connected side).
     var soloVoltraConnected: DeviceSlot? {

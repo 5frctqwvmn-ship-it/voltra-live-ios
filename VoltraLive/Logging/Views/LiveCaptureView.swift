@@ -207,6 +207,30 @@ struct LiveCaptureView: View {
             // pendingPlannedWeightLb if entering Combined from an odd value.
             logging.applyWorkoutMode(mdm.workoutMode)
             enforceCombinedParityOnEntry()
+            // b52 (Issue D): if we entered LiveCapture and the chain
+            // already has 2+ entries (the user just added a second
+            // exercise via the Add-Another flow), `appendSupersetEntry`
+            // already snapped the active slot back to chain[0] = A.
+            // But `pendingPlannedWeightLb` and `activeInstance` were
+            // last set during B's pre-start screen and still point at
+            // B. Restore A's context here so the live screen opens on
+            // exercise A with A's planned weight \u2014 not B's.
+            //
+            // Why this lives here and not in appendSupersetEntry: MDM
+            // does not know about LoggingStore (separate module), and
+            // the user is briefly on the home screen / picker between
+            // appendSupersetEntry and LiveCaptureView, so an onAppear
+            // restore is the closest canonical "about to start lifting"
+            // hook. SWAP's restore path (swapSupersetSide) keeps doing
+            // the same work for in-flight chain advances; this onAppear
+            // path is idempotent with it.
+            if let entry = mdm.activeSupersetEntry,
+               mdm.supersetChain.count >= 2 {
+                logging.switchActiveInstanceByExerciseName(entry.exerciseName)
+                logging.pendingPlannedWeightLb = entry.plannedWeightLb
+                logging.reanchorCascadeIfActive(toLb: entry.plannedWeightLb)
+                pushUpcomingStateToDevice()
+            }
         }
         .onChange(of: mdm.workoutMode) { _, newMode in
             // b47: live-update the cascade params if the user switches mode
@@ -225,6 +249,26 @@ struct LiveCaptureView: View {
         .onChange(of: session.currentSet != nil) { _, started in
             if started && mdm.supersetTag {
                 mdm.lockSupersetTag()
+            }
+        }
+        // b52 (Issues A + E1): keep LoggingStore.activeInstance in sync
+        // with the active chain slot. Pre-b52 the only resync path was
+        // the SWAP button's call to switchActiveInstanceByExerciseName,
+        // so any other route that flipped supersetActiveSlot (chain
+        // advance, navigation back into a chain entry, etc.) left
+        // activeInstance pointing at the wrong exercise \u2014 sets
+        // committed against the wrong instance. Resyncing here on every
+        // slot change closes that gap.
+        //
+        // Guard: only run while no set is in flight. If a slot flip
+        // races a live set boundary, SWAP itself force-finalizes the
+        // current set BEFORE flipping (see swapSupersetSide), so this
+        // observer is a NO-OP during that window. The guard catches any
+        // future code path that flips the slot without finalizing.
+        .onChange(of: mdm.supersetActiveSlot) { _, _ in
+            guard session.currentSet == nil else { return }
+            if let entry = mdm.activeSupersetEntry {
+                logging.switchActiveInstanceByExerciseName(entry.exerciseName)
             }
         }
         .onDisappear {

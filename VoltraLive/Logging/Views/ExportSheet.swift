@@ -27,6 +27,13 @@ struct ExportSheet: View {
                     VStack(alignment: .leading, spacing: 14) {
                         timingCard
                         countsRow
+                        // b52: per-exercise summary cards — each chain entry
+                        // gets its own card with set list + rollups (totals,
+                        // peak, avg peak, HR, kcal) so the user can review
+                        // progression without parsing the markdown blob.
+                        ForEach(orderedInstances, id: \.id) { inst in
+                            instanceCard(inst)
+                        }
                         Text(markdown.isEmpty ? "Generating…" : markdown)
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundColor(VoltraColor.text)
@@ -242,5 +249,136 @@ struct ExportSheet: View {
         let all = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
         let earlierOrSame = all.filter { $0.startedAt <= session.startedAt }.count
         return max(earlierOrSame, 1)
+    }
+
+    // MARK: - b52 per-exercise cards
+
+    private var orderedInstances: [ExerciseInstance] {
+        (session.instances ?? []).sorted { $0.orderIndex < $1.orderIndex }
+    }
+
+    /// Per-exercise card: header (order + name + equipment), set list with
+    /// per-set weight × reps + peak force, totals + HR/kcal rollups.
+    private func instanceCard(_ inst: ExerciseInstance) -> some View {
+        let exerciseName = inst.exercise?.name ?? "Exercise"
+        let sets = inst.orderedSets
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\(inst.orderIndex). \(exerciseName.uppercased())")
+                    .font(.system(size: 11, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundColor(VoltraColor.accent)
+                Spacer()
+                if !inst.equipment.isEmpty {
+                    Text(inst.equipment)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(VoltraColor.textDim)
+                }
+            }
+            if sets.isEmpty {
+                Text("No sets logged")
+                    .font(.system(size: 13))
+                    .foregroundColor(VoltraColor.textFaint)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(sets, id: \.id) { s in
+                        instanceSetRow(s, exerciseName: exerciseName)
+                    }
+                }
+            }
+            Divider().overlay(VoltraColor.border)
+            instanceRollups(inst)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(VoltraColor.bgElev)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(VoltraColor.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// One set row inside an instance card. b52: each row carries the
+    /// exercise name as a leading mini-tag so when the user reviews the
+    /// summary later the attribution is unambiguous (Issue E2).
+    private func instanceSetRow(_ s: LoggedSet, exerciseName: String) -> some View {
+        HStack(spacing: 10) {
+            Text("Set \(s.orderIndex)")
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundColor(VoltraColor.textDim)
+                .frame(width: 50, alignment: .leading)
+            Text("\(formatLbInt(s.weightLb)) \u00d7 \(s.reps)")
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .foregroundColor(VoltraColor.text)
+            if s.peakForceLb > 0 {
+                Text("peak \(formatLbInt(s.peakForceLb)) lb")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(VoltraColor.accent)
+            }
+            Spacer()
+            // Compact label tag so chain summary scanning is fast.
+            Text(exerciseName)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(VoltraColor.textFaint)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    /// Rollups row: total reps + volume + peak + avg peak + duration
+    /// (top), HR + kcal (bottom, if HK captured them).
+    private func instanceRollups(_ inst: ExerciseInstance) -> some View {
+        let totalReps = inst.totalReps
+        let totalVol = inst.totalVolumeLb
+        let peak = inst.peakForceLb
+        let avgPeak = inst.avgPeakForceLb
+        let dur = inst.duration
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 12) {
+                rollupCell(label: "REPS", value: "\(totalReps)")
+                rollupCell(label: "VOL", value: "\(formatLbInt(totalVol)) lb")
+                rollupCell(label: "PEAK", value: "\(formatLbInt(peak)) lb",
+                           color: VoltraColor.accent)
+                rollupCell(label: "AVG PK", value: "\(formatLbInt(avgPeak)) lb")
+                rollupCell(label: "DUR", value: Self.formatDuration(dur))
+            }
+            if inst.avgHRDuringInstance != nil || inst.kcalDuringInstance != nil {
+                HStack(spacing: 12) {
+                    if let hr = inst.avgHRDuringInstance, hr > 0 {
+                        rollupCell(label: "AVG HR",
+                                   value: "\(Int(hr.rounded())) bpm",
+                                   color: VoltraColor.pull)
+                    }
+                    if let kcal = inst.kcalDuringInstance, kcal > 0 {
+                        rollupCell(label: "KCAL",
+                                   value: "\(Int(kcal.rounded()))",
+                                   color: VoltraColor.returnPhase)
+                    }
+                    Spacer()
+                }
+            }
+        }
+    }
+
+    private func rollupCell(label: String, value: String,
+                            color: Color = VoltraColor.text) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 9, weight: .bold))
+                .kerning(1.2)
+                .foregroundColor(VoltraColor.textDim)
+            Text(value)
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .foregroundColor(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+
+    private func formatLbInt(_ d: Double) -> String {
+        if d == 0 { return "0" }
+        if d == d.rounded() { return String(Int(d)) }
+        return String(format: "%.1f", d)
     }
 }

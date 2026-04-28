@@ -1409,3 +1409,156 @@ including UI redesigns and one root-cause fix.
    IDLE.
 9. **Home connected pill.** 1 Voltra paired → just `Left •` or
    `Right •`. Both paired → `Left • Right •`. Neither → `Not paired`.
+
+---
+
+## b52 — Chain logging + summary (v0.4.30 / build 52)
+
+**Tag:** v0.4.30-build52
+**Feature label:** Chain logging + summary
+
+**The five b51 hands-on issues this build fixes**
+
+After b51 install the user reported, while running a 2-Voltra chain
+session:
+
+- **A.** During supersets, sets are logging under the wrong exercise.
+- **B.** With both Voltras paired, opening exercise A on the LEFT
+  Voltra also loads A onto the RIGHT, even though only LEFT is
+  supposed to be active. Same when adding a second exercise B —
+  both flip to B even though A is supposed to stay parked on
+  the other side.
+- **C.** Summary screen lacks per-exercise heart rate, calories,
+  total volume, peak/avg force.
+- **D.** When chaining, the pre-start screen still defaults to the
+  most recently picked exercise (B). It should land on the chain
+  HEAD (A) since that's what the user lifts first.
+- **E.** Chain summary only shows sets from the LAST exercise (the
+  rest disappear), and rows aren't labeled with which exercise
+  they belong to.
+
+User picks for the open product questions: peak force per set + average
+peak across sets; all five issues + summary telemetry land in one
+medium-cost build (b52); HK snapshot at instance end (no live polling).
+
+**Root cause analysis, in one paragraph**
+
+`LoggingStore.activeInstance` is a single pointer that only flips when
+the SWAP button explicitly calls `switchActiveInstanceByExerciseName`.
+But `mdm.supersetActiveSlot` (which routes BLE writes and, since b51,
+attributes telemetry to a side) can change without SWAP being tapped —
+e.g. on chain entry-2 add, or via the slot indicator. So
+`activeInstance` (the SwiftData side) and `supersetActiveSlot` (the BLE
+side) drift out of sync, and telemetry-detected sets end up under
+whichever instance was active at session-start instead of the one the
+user is actually lifting (Issue A → reproducible 100% of the time when
+the user adds a second chain entry without tapping SWAP). `WriterRouter`
+broadcasts to BOTH Voltras unless `mdm.hasActiveSupersetChain` is true,
+which requires `supersetChain.count >= 2` — so a 1-entry chain (the
+state right after picking A but before adding B) routes via the
+`.independent` fall-through which writes to both connected devices
+(Issue B). And the chain HEAD-snap restore that b51 wired into
+ExerciseStartView doesn't propagate down to LoggingStore — the user
+sees "Set 1 — A" labeling but `activeInstance` still points at B
+(Issue D, the LoggingStore mirror of A).
+
+The summary regression (Issues C+E) is a separate gap: there's no
+per-instance HR/kcal/volume/peak rollup, and `markdownExport` was
+already grouping by instance — so E "only records last activity" is
+actually a downstream effect of A (sets attributed to the wrong
+instance => only the last instance has any sets), not its own bug.
+With A fixed, E1 ("only last activity recorded") falls out for free.
+E2 ("sets unlabeled") is a presentation gap fixed by adding a per-row
+exercise tag in the rebuilt cards.
+
+**Code changes (5 files modified, 1 new doc)**
+
+1. **`MultiDeviceManager.hasAnySupersetChainEntry: Bool`** — new
+   predicate (count ≥ 1, both connected). Distinct from the
+   pre-existing `hasActiveSupersetChain` (count ≥ 2, both
+   connected) which gates SWAP-style routing. The 1-entry case
+   needs to route to the active slot only, not broadcast.
+2. **`WriterRouter.apply`** — replace the `if hasActiveSupersetChain`
+   guard with `if hasAnySupersetChainEntry`. Result: a chain with one
+   entry now writes to the active slot only, not both Voltras
+   (Issue B).
+3. **`LiveCaptureView`** — `.onChange(of: mdm.supersetActiveSlot)`
+   now calls `switchActiveInstanceByExerciseName(entry.exerciseName)`
+   when no set is currently mid-rep, so the SwiftData
+   activeInstance follows BLE side flips (Issues A + E1). And in
+   `.onAppear`, when `mdm.supersetChain.count >= 2`, we restore
+   activeInstance + pendingPlannedWeightLb + cascade re-anchor +
+   push the chain HEAD's planned state to the device (Issue D).
+4. **`HealthKitStore.snapshotInstance(start:end:) async`** — new
+   windowed snapshot returning `InstanceSnapshot(avgHR, kcal)`.
+   Uses `HKStatisticsQuery.discreteAverage` for HR and
+   `.cumulativeSum` for active energy. `#if !canImport(HealthKit)`
+   fallback returns nil so the `WITH_HEALTHKIT=0` build path
+   compiles.
+5. **`ExerciseInstance` schema** — additive fields
+   `avgHRDuringInstance: Double? = nil`,
+   `kcalDuringInstance: Double? = nil`. SwiftData migration is
+   safe (defaults present, optional types). Plus computed
+   rollups: `totalReps`, `totalVolumeLb`, `peakForceLb`,
+   `avgPeakForceLb`, `duration`.
+6. **`LoggingStore`** — `wire()` now takes an optional
+   `healthStore: HealthKitStore?`. `finalizeActiveInstance`
+   captures the instance reference, then fires an async
+   `Task { @MainActor }` that awaits `snapshotInstance` and
+   writes avg HR + kcal onto the instance and saves the context.
+   Failure (HK denied / unavailable / no samples in the window)
+   leaves the fields nil — the summary view tolerates missing
+   values. **Side effect**:
+   `switchActiveInstanceByExerciseName` now matches by name
+   regardless of `endedAt` and *re-opens* a paused chain entry
+   (clears `endedAt`) so chain navigation back to A after going
+   to B keeps logging into A correctly. The final `endedAt` is
+   stamped at `endSession()`.
+7. **`ExportSheet`** — new `instanceCard(_:)` rendered in a
+   `ForEach` above the markdown blob. Each card shows the
+   instance ordinal + exercise name + equipment, a list of set
+   rows (`Set N — w × reps — peak`), and a rollups row
+   (`REPS / VOL / PEAK / AVG PK / DUR`) with an optional
+   `AVG HR / KCAL` row beneath when HK captured them. Each set
+   row carries the exercise name as a trailing dim tag so
+   chain-summary scanning is unambiguous (Issue E2).
+8. **`markdownExport`** — adds `Peak lb` column to the per-set
+   table, a `Totals:` line per exercise (sets, reps, vol, peak,
+   avg peak, duration), and a `Vitals:` line when HR/kcal are
+   present. Section headers now include the order index
+   (`1. Belt Squat (Voltra)`).
+9. **`docs/handoff/B52_DIAGNOSIS.md`** — new 274-line root-cause
+   doc keeping the multi-source mental model in one place for
+   the next session.
+
+**Sacred files untouched.** No changes to `VoltraProtocol.swift`,
+`TelemetryExtractor.swift`, `PacketParser.swift`,
+`FrameAssembler.swift`.
+
+**SwiftData migration**: additive only. New fields default to nil,
+existing rows decode unchanged.
+
+**Cost callout for this build:** medium. 5 source files changed +
+1 new HK API + an additive SwiftData migration + a partial export
+view rewrite. No protocol or BLE state-machine churn.
+
+**Test plan after install**
+
+1. **Pair both Voltras → pick A on LEFT → Start.** Banner says
+   `ACTIVE • LEFT`, only the LEFT Voltra applies the load (Issue B).
+2. **Add Another Exercise → pick B on RIGHT → Start.** Pre-start
+   screen says SET 1 with A's name (chain HEAD), only the RIGHT
+   Voltra applies B's load (Issues B + D).
+3. **Run a few sets on A, SWAP, run sets on B, SWAP back, more sets
+   on A.** All sets attribute correctly — no orphaned sets in B's
+   instance, no sets misfiled (Issue A).
+4. **End Session.** Summary now shows two cards, one per chain
+   entry. Each card lists its sets, with weight × reps + peak,
+   plus the rollup row (REPS / VOL / PEAK / AVG PK / DUR). Avg HR
+   + kcal show below the rollups if Apple Watch was paired
+   (Issue C). Each set row tagged with its exercise name so chain
+   attribution is unambiguous (Issue E2). The markdown blob
+   beneath includes the `Totals:` + `Vitals:` lines per exercise
+   for share-link export.
+5. **No regression**: solo (non-chain) sessions still work — single
+   instance card, no chain banner, telemetry attributes correctly.

@@ -118,7 +118,10 @@ struct VoltraLiveApp: App {
 
                     // Wire SwiftData context into both stores.
                     sessionStore.modelContext = ctx
-                    loggingStore.wire(context: ctx, sessionStore: sessionStore)
+                    // b52: also pass healthStore so finalizeActiveInstance
+                    // can fire a windowed HK snapshot (avg HR + kcal) when
+                    // an instance ends.
+                    loggingStore.wire(context: ctx, sessionStore: sessionStore, healthStore: healthStore)
 
                     // Build 35: prompt for HealthKit at app launch. Until
                     // build 34 the only requestAuthorization call site was

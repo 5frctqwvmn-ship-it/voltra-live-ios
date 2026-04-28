@@ -61,7 +61,18 @@ final class WriterRouter: ObservableObject {
             // does would clobber the inactive side's standing weight.
             // Active-slot-only routing is the correct behavior whenever
             // a chain exists, regardless of WorkoutMode.
-            if mdm.hasActiveSupersetChain {
+            //
+            // b52: this also fires for a 1-entry chain (the user picked
+            // exercise A on slot Left, hasn't added B yet). Prior behavior
+            // required count >= 2 (`hasActiveSupersetChain`) and fell
+            // through to the `.independent` broadcast below for 1-entry
+            // chains, which loaded BOTH Voltras with A's weight even
+            // though A was bound to a single slot. The new predicate
+            // `hasAnySupersetChainEntry` (count >= 1) routes to the
+            // active slot the moment the chain has any entry, matching
+            // user expectation that picking exercise A for slot Left
+            // does not move the right Voltra.
+            if mdm.hasAnySupersetChainEntry {
                 switch mdm.supersetActiveSlot {
                 case .left:  mdm.leftWriter.apply(state)
                 case .right: mdm.rightWriter.apply(state)

@@ -277,5 +277,88 @@ final class HealthKitStore: ObservableObject {
             if let a = newAnchor { self.kcalAnchor = a }
         }
     }
+
+    // MARK: - b52: Windowed snapshots for per-exercise summary
+
+    /// Snapshot of HR + active-energy across a single exercise instance's
+    /// time window. All fields nil-safe so absence of data is preserved
+    /// (the summary renders \u201c\u2014\u201d for nil rather than 0).
+    struct InstanceSnapshot {
+        let avgHR: Double?
+        let kcal: Double?
+    }
+
+    /// Query HealthKit for HR + active-energy samples between
+    /// `[startedAt, endedAt]` and return the average HR and total kcal
+    /// burned over that window. Called from `LoggingStore.finalizeActiveInstance`
+    /// so each `ExerciseInstance` carries its own slice of the user's
+    /// physiological data \u2014 surfaced on the post-session summary.
+    ///
+    /// Why a one-shot query (vs. accumulating during the live set):
+    /// HealthKit samples may arrive after the instance has ended (Watch
+    /// batches HR samples ~5 s; active-energy is summed over short
+    /// intervals). Snapshotting at finalize lets late samples land first
+    /// before we close the books.
+    func snapshotInstance(start: Date, end: Date) async -> InstanceSnapshot {
+        guard isAvailable else { return InstanceSnapshot(avgHR: nil, kcal: nil) }
+        async let hr = averageHRInWindow(start: start, end: end)
+        async let kcal = sumKcalInWindow(start: start, end: end)
+        let (h, k) = await (hr, kcal)
+        return InstanceSnapshot(avgHR: h, kcal: k)
+    }
+
+    private func averageHRInWindow(start: Date, end: Date) async -> Double? {
+        guard let type = HKObjectType.quantityType(forIdentifier: .heartRate) else { return nil }
+        let predicate = HKQuery.predicateForSamples(
+            withStart: start,
+            end: end,
+            options: .strictStartDate
+        )
+        return await withCheckedContinuation { (cont: CheckedContinuation<Double?, Never>) in
+            let q = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .discreteAverage
+            ) { _, stats, _ in
+                let unit = HKUnit.count().unitDivided(by: .minute())
+                let avg = stats?.averageQuantity()?.doubleValue(for: unit)
+                cont.resume(returning: avg)
+            }
+            store.execute(q)
+        }
+    }
+
+    private func sumKcalInWindow(start: Date, end: Date) async -> Double? {
+        guard let type = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) else { return nil }
+        let predicate = HKQuery.predicateForSamples(
+            withStart: start,
+            end: end,
+            options: .strictStartDate
+        )
+        return await withCheckedContinuation { (cont: CheckedContinuation<Double?, Never>) in
+            let q = HKStatisticsQuery(
+                quantityType: type,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, stats, _ in
+                let unit = HKUnit.kilocalorie()
+                let total = stats?.sumQuantity()?.doubleValue(for: unit)
+                cont.resume(returning: total)
+            }
+            store.execute(q)
+        }
+    }
     #endif
 }
+
+#if !canImport(HealthKit)
+extension HealthKitStore {
+    struct InstanceSnapshot {
+        let avgHR: Double?
+        let kcal: Double?
+    }
+    func snapshotInstance(start: Date, end: Date) async -> InstanceSnapshot {
+        InstanceSnapshot(avgHR: nil, kcal: nil)
+    }
+}
+#endif
