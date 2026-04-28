@@ -104,7 +104,12 @@ struct LiveCaptureView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     header
-                    if mdm.workoutMode == .superset {
+                    // b50: banner now gates on chain length, not WorkoutMode.
+                    // b49 unified flow auto-derives workoutMode = .independent
+                    // when 2 Voltras are paired, so the old `== .superset`
+                    // gate hid the banner + SWAP entirely. The chain itself
+                    // is the source of truth: 2+ entries = chain UI active.
+                    if mdm.hasActiveSupersetChain {
                         supersetBanner
                     }
                     tileGrid
@@ -182,6 +187,17 @@ struct LiveCaptureView: View {
         .onAppear {
             // Attach BLE to the writer once env is available. Idempotent.
             writerRouter.attach(ble: ble)
+            // b50: wipe the writer's applied-state cache on every entry to
+            // the live screen. The writer skips weight pushes when its
+            // cached `applied.weights.baseLb` equals the new target. If the
+            // device was reset between sessions (powered off, app force-
+            // quit) the cache lies and the first LOAD silently no-ops,
+            // leaving the user with the previous session's weight on the
+            // device. Clearing here forces a full re-send of base + ecc on
+            // the first apply this session, regardless of routing path.
+            writerRouter.resetAppliedState()
+            mdm.leftWriter.resetAppliedState()
+            mdm.rightWriter.resetAppliedState()
             // v0.4.6: Begin polling HealthKit for HR + active energy from
             // the user's Apple Watch workout. Lazy-prompts for permission.
             health.start()

@@ -53,7 +53,25 @@ final class WriterRouter: ObservableObject {
 
         switch (leftOn, rightOn) {
         case (true, true):
-            // Both paired — honor the user's chosen workoutMode.
+            // b50: chain length is the FIRST source of truth. The b49
+            // unified flow auto-derives workoutMode = .independent when
+            // 2 Voltras are paired, but if the user added a second
+            // exercise (chain count >= 2), each side is targeting its
+            // OWN exercise's weight — broadcasting both like .independent
+            // does would clobber the inactive side's standing weight.
+            // Active-slot-only routing is the correct behavior whenever
+            // a chain exists, regardless of WorkoutMode.
+            if mdm.hasActiveSupersetChain {
+                switch mdm.supersetActiveSlot {
+                case .left:  mdm.leftWriter.apply(state)
+                case .right: mdm.rightWriter.apply(state)
+                }
+                break
+            }
+            // No chain — fall back to honoring workoutMode. This covers
+            // the single-exercise-with-2-Voltras-paired case (.independent
+            // means "same weight to both" since the user hasn't added a
+            // second exercise) and the explicit Combined / single modes.
             switch mdm.workoutMode {
             case .combined:
                 mdm.applyCombined(state)
@@ -62,16 +80,13 @@ final class WriterRouter: ObservableObject {
             case .singleRight:
                 mdm.rightWriter.apply(state)
             case .independent:
-                // Independent: each side is the same target weight; user
-                // is doing the same exercise on both unilaterally.
+                // Independent without a chain: same target on both sides
+                // (user doing the same exercise unilaterally).
                 mdm.leftWriter.apply(state)
                 mdm.rightWriter.apply(state)
             case .superset:
-                // b48 Superset: route writes to the ACTIVE side only.
-                // The active side flips on every set finalize. The view
-                // owns the flip and reads `mdm.supersetActiveSlot` to
-                // decide which writer to drive. State writes to the
-                // inactive side would clobber its standing weight.
+                // Legacy path — b49 unified flow no longer routes here
+                // since workoutMode is auto-derived. Kept for safety.
                 switch mdm.supersetActiveSlot {
                 case .left:  mdm.leftWriter.apply(state)
                 case .right: mdm.rightWriter.apply(state)

@@ -117,6 +117,15 @@ struct ExerciseDetailView: View {
         }
         .onAppear {
             writerRouter.attach(ble: ble)
+            // b50: wipe the writer's applied-state cache on first entry
+            // so a stale device (powered off between sessions) gets the
+            // full re-send of base + ecc on the first pushToVoltra. See
+            // LiveCaptureView .onAppear for the full reasoning.
+            if !didInitialize {
+                writerRouter.resetAppliedState()
+                mdm.leftWriter.resetAppliedState()
+                mdm.rightWriter.resetAppliedState()
+            }
             if !didInitialize {
                 seedFromHistory()
                 didInitialize = true

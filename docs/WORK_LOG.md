@@ -1196,3 +1196,85 @@ subagents, single dry-run + ship cycle.
 13. Tap SWAP mid-set → set auto-ends, app loads other exercise's screen, new side auto-LOADs.
 14. Set 2 logs under correct exercise name.
 15. End session → SwiftData WorkoutSession.supersetTag = true; post-workout shows the tag.
+
+## 2026-04-28 16:21 UTC — b50 (v0.4.28/50) — Chain routing fix
+
+User reported on b49 hands-on: with two Voltras paired and a 2-exercise
+chain, (a) the SWAP/active-side banner was missing entirely at the top
+of LiveCapture, (b) LOAD wrote the same weight to both Voltras instead
+of just the active one, (c) reps/force never displayed once a chain
+was active, and (d) with a single Voltra paired, LOAD pushed the wrong
+resistance — the device kept the previous session's value rather than
+resetting to the exercise's starting weight. Diagnosis: the b49
+unified-flow auto-derives `workoutMode = .independent` for any
+2-Voltra session, and several routing paths still switched on
+`workoutMode` instead of the chain. Cache reset on session entry was
+also absent. Fixes:
+
+1. **Chain-first routing principle.** Whenever `mdm.hasActiveSupersetChain`
+   (chain.count ≥ 2), both writer fan-out and LOAD/UNLOAD fan-out
+   target `mdm.supersetActiveSlot` only, bypassing `workoutMode`
+   entirely. Implemented in `WriterRouter.apply` and in
+   `MultiDeviceManager.slotsForWorkoutMode()` (now chain-first
+   short-circuit at the top of both).
+2. **Banner gate fix.** `LiveCaptureView` previously gated the
+   SWAP/active-side banner on `mdm.workoutMode == .superset`, which
+   the b49 unified flow never sets. Now gated on
+   `mdm.hasActiveSupersetChain`.
+3. **`appendSupersetEntry` realignment.** Previously only set
+   `supersetActiveSlot` for the FIRST entry in a chain, so subsequent
+   appends left the active slot stale and reps/force never displayed
+   on the newly-added exercise. Now always sets
+   `supersetChainIndex = chain.count - 1` and
+   `supersetActiveSlot = slot` whenever an entry is appended.
+4. **Writer cache reset on session entry.** `VoltraWriter.applied`
+   cache persisted across sessions, so a 1-Voltra LOAD found "no
+   delta" and the device kept its previous value. Now
+   `writerRouter.resetAppliedState()` plus
+   `mdm.leftWriter.resetAppliedState()` and
+   `mdm.rightWriter.resetAppliedState()` are called on
+   `LiveCaptureView.onAppear` (every time) and on
+   `ExerciseDetailView.onAppear` (first-init only via a
+   `@State didReset` guard).
+
+**Files changed:**
+
+- VoltraLive/BLE/WriterRouter.swift (chain-first routing)
+- VoltraLive/BLE/Dual/MultiDeviceManager.swift (chain-first
+  slotsForWorkoutMode + appendSupersetEntry always realigns active slot)
+- VoltraLive/Logging/Views/LiveCaptureView.swift (banner gate on
+  hasActiveSupersetChain; onAppear writer-cache reset)
+- VoltraLive/Logging/Views/ExerciseDetailView.swift (first-init
+  writer-cache reset)
+- VoltraLive/Info.plist + project.yml (bumped to 0.4.28/50, label
+  "Chain routing fix")
+
+**Verification:** code review only; awaiting TestFlight install.
+
+**Risks:** chain-first short-circuit changes the behavior of
+`slotsForWorkoutMode()` for any future caller that explicitly wanted
+fan-out while a chain was active; none today, but flag in code review.
+
+**Cost callout for this build:** lite. Five-file targeted fix, no
+subagents, no migrations.
+
+**Not a bug (avoid chasing in next session):** App showing 95 lb total
+when device shows 70 base + 25 ecc is correct — app shows total,
+device shows components separately.
+
+**Test plan after TestFlight install:**
+
+1. Pair 2 Voltras, start a session, add a 2nd exercise (auto-assigns
+   to the unused side, chain length = 2).
+2. Banner with SWAP/Merge/Superset tag dot appears at the top of the
+   exercise screen — the b49 regression where it was missing entirely
+   should be gone.
+3. Tap LOAD on set 1 of the active exercise — only the active-side
+   Voltra's resistance changes; the other Voltra's weight is
+   untouched.
+4. Force/reps display live on the active side only.
+5. Tap SWAP — banner highlights the other side, that exercise's set
+   begins, LOAD now writes only to the newly active Voltra.
+6. End session and start a fresh single-Voltra session — first LOAD
+   writes the correct exercise starting weight to the device, not the
+   stale value from the previous session.

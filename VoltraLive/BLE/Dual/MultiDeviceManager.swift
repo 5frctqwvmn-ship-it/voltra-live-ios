@@ -243,13 +243,23 @@ final class MultiDeviceManager: ObservableObject {
             supersetRightExercise = name
             supersetRightWeightLb = weightLb
         }
-        // The active slot tracks whichever entry is at
-        // supersetChainIndex. If the new entry is the first one, point
-        // the index at it so the user opens at THIS exercise.
-        if supersetChain.count == 1 {
+        // b50: Whenever appendSupersetEntry is called, point the active
+        // slot at the entry the user is starting RIGHT NOW. Tapping Start
+        // on an exercise screen always means "I am about to lift this
+        // one" — so writer + telemetry routing must follow.
+        //
+        // Pre-b50: only the FIRST entry set supersetActiveSlot, so when
+        // the user added a second exercise and tapped Start on its
+        // screen, the active slot stayed pointed at the first entry's
+        // slot. Result: telemetry from the side they were physically
+        // lifting on got dropped, and the writer broadcast to both
+        // sides instead of the active one. Fix: always realign.
+        if let idx = supersetChain.firstIndex(where: { $0.slot == slot && $0.exerciseName == name }) {
+            supersetChainIndex = idx
+        } else if supersetChain.count == 1 {
             supersetChainIndex = 0
-            supersetActiveSlot = slot
         }
+        supersetActiveSlot = slot
     }
 
     /// Reset the chain. Called when the user exits a session or picks a
@@ -424,6 +434,15 @@ final class MultiDeviceManager: ObservableObject {
         let rightOn = right.connectionState.isConnected
         switch (leftOn, rightOn) {
         case (true, true):
+            // b50: chain-first routing — mirrors WriterRouter. When the
+            // user has 2+ exercises in the chain, LOAD/UNLOAD must target
+            // the ACTIVE side only, regardless of WorkoutMode. The b49
+            // unified flow auto-derives workoutMode = .independent which
+            // pre-b50 fanned LOAD/UNLOAD to both sides and stomped the
+            // inactive side's standing weight.
+            if hasActiveSupersetChain {
+                return [supersetActiveSlot]
+            }
             switch workoutMode {
             case .combined, .independent:
                 return [.left, .right]
@@ -432,13 +451,6 @@ final class MultiDeviceManager: ObservableObject {
             case .singleRight:
                 return [.right]
             case .superset:
-                // b48: LOAD/UNLOAD targets the ACTIVE Voltra only (the one
-                // hosting the exercise the user is doing right now).
-                // Sending to both unloaded the inactive side mid-rest,
-                // which broke the chain. Per user (b48 feedback):
-                // "Unload Tonsion isn't tied to whatever exercise A or B
-                // it's on, it unloads both of them, which is not the
-                // intended behavior."
                 return [supersetActiveSlot]
             }
         case (true, false):  return [.left]
