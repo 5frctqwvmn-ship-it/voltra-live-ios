@@ -86,9 +86,10 @@ struct LoggingHomeView: View {
                     VStack(spacing: 24) {
                         header
 
-                        // b66 V4.2: ASSIGN TO VOLTRA panel — day-default
-                        // scope (no exerciseName). Mirror rule 1A.
-                        VoltraAssignmentPanel(mdm: mdm)
+                        // b67 B67-03/06/08: single canonical unit-status
+                        // header. Replaces VoltraAssignmentPanel + the
+                        // legacy telemetryPulsePill + connectionPill chrome.
+                        VoltraUnitHeader(mdm: mdm, hk: health)
                             .padding(.horizontal, 18)
 
                         VStack(spacing: 14) {
@@ -229,26 +230,21 @@ struct LoggingHomeView: View {
 
     // MARK: - Header
 
+    /// B67-03 — clean single-row header. Killed (per Bug 03 spec):
+    ///   • VOLTRA wordmark + bolt icon + "Live" word
+    ///   • telemetryPulsePill (LIVE/IDLE/WAIT chip)
+    ///   • connectionPill (Left ● Right ●)
+    ///   • duplicate inline status sub-row
+    /// What stays: prompt copy + gear button (so the user can still reach
+    /// the debug/settings screen). Unit status now lives entirely in the
+    /// VoltraUnitHeader directly below this view in the parent VStack.
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                HStack(spacing: 10) {
-                    Image(systemName: "bolt.fill")
-                        .foregroundColor(VoltraColor.accent)
-                        .font(.system(size: 22, weight: .bold))
-                    Text("VOLTRA")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(VoltraColor.text)
-                    Text("Live")
-                        .font(.system(size: 18))
-                        .foregroundColor(VoltraColor.textDim)
-                    // Inline build chip removed in v0.3.4 — the global
-                    // BuildBadgeOverlay (bottom-trailing on every screen)
-                    // covers this case more consistently.
-                }
+                Text("Pick a day to start logging.")
+                    .font(.system(size: 15))
+                    .foregroundColor(VoltraColor.textDim)
                 Spacer()
-                telemetryPulsePill
-                connectionPill
                 Button {
                     showingDebug = true
                 } label: {
@@ -261,127 +257,21 @@ struct LoggingHomeView: View {
                 }
                 .buttonStyle(.plain)
             }
-            Text("Pick a day to start logging.")
-                .font(.system(size: 15))
-                .foregroundColor(VoltraColor.textDim)
         }
         .padding(.horizontal, 18)
     }
 
-    /// b51: real-time telemetry pulse indicator. Replaces the b35
-    /// always-on HK badge with a live signal that lights up when ANY
-    /// paired Voltra is actively streaming telemetry packets, and dims
-    /// when the stream stalls.
-    ///
-    /// Source of truth: `bleManager.telemetry.lastUpdate` (refreshed on
-    /// every routed packet; b51 ingestRoutedTelemetry mirrors 2-Voltra
-    /// streams into this same field). Considered "live" if a packet
-    /// arrived within the last 2 seconds.
-    ///
-    /// Tap = HealthKit re-prompt (preserves the legacy recovery path the
-    /// HK pill used to provide). The pill's label says PULSE / STALE /
-    /// IDLE so the user knows what they're looking at; the HK action is
-    /// secondary and surfaces via long-press tooltip-style label only.
-    private var telemetryPulsePill: some View {
-        let last = ble.telemetry.lastUpdate
-        let secsSince = now.timeIntervalSince(last)
-        let live = last != .distantPast && secsSince < 2.0
-        let anyPaired =
-            mdm.left.connectionState.isConnected
-            || mdm.right.connectionState.isConnected
-            || ble.connectionState.isConnected
-        let (dotColor, label): (Color, String) = {
-            if !anyPaired         { return (VoltraColor.textFaint, "IDLE") }
-            if live               { return (VoltraColor.accent,    "LIVE") }
-            return (VoltraColor.textDim, "WAIT")
-        }()
-        return Button {
-            // Preserve the b35 recovery affordance: tapping re-asks for
-            // HealthKit auth if it never appeared the first time.
-            health.requestAuthIfNeeded()
-        } label: {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(dotColor)
-                    .frame(width: 8, height: 8)
-                    // Pulsing shadow when LIVE, no shadow otherwise.
-                    .shadow(color: live ? dotColor : .clear, radius: live ? 5 : 0)
-                    .scaleEffect(live ? 1.0 : 0.85)
-                    .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true),
-                               value: live)
-                Text(label)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(VoltraColor.textDim)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(VoltraColor.bgElev)
-            .overlay(
-                Capsule().stroke(VoltraColor.border, lineWidth: 1)
-            )
-            .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Telemetry signal: \(label)")
-    }
+    /// B67-03 archived: telemetryPulsePill + connectionPill are GONE.
+    /// HK auth re-prompt path that lived on telemetryPulsePill is now
+    /// reachable via the gear button → DebugView (existing recovery path).
+    /// HR live state is shown by VoltraUnitHeader's `●●` pill (3-state).
+    /// Voltra connection state is shown by VoltraUnitHeader's L/R pills.
 
-    /// b51: dual-aware connection pill, side-aware.
-    ///
-    /// Pre-b51 the pill said "Left connected" / "Right connected" / "Left
-    /// + Right" / "Connected" / "Not connected". User wanted the word
-    /// "Connected" gone when only one Voltra is paired \u2014 just the
-    /// side name with a dot, e.g. `Left \u2022`. Both paired shows both
-    /// rows: `Left \u2022 Right \u2022`. Falls back to the legacy single-
-    /// device manager only if the user hasn't migrated to MDM pairing.
-    private var connectionPill: some View {
-        let leftPaired  = mdm.left.connectionState.isConnected
-        let rightPaired = mdm.right.connectionState.isConnected
-        let blePaired   = ble.connectionState.isConnected
-        let anyConnected = leftPaired || rightPaired || blePaired
-        return HStack(spacing: 8) {
-            if leftPaired || rightPaired {
-                if leftPaired  { connectionDot(label: "Left") }
-                if rightPaired { connectionDot(label: "Right") }
-            } else if blePaired {
-                // Legacy fallback for users still on the single-device
-                // pairing flow.
-                connectionDot(label: "Voltra")
-            } else {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(VoltraColor.textFaint)
-                        .frame(width: 8, height: 8)
-                    Text("Not paired")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(VoltraColor.textDim)
-                }
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(VoltraColor.bgElev)
-        .overlay(
-            Capsule().stroke(
-                anyConnected ? VoltraColor.accent.opacity(0.4) : VoltraColor.border,
-                lineWidth: 1
-            )
-        )
-        .clipShape(Capsule())
-    }
+    // B67-03: telemetryPulsePill, connectionPill, connectionDot all
+    // removed. Their state is fully covered by VoltraUnitHeader's
+    // L/R/●● pills. HK auth re-prompt (b35 recovery affordance) now
+    // surfaces via the gear button → DebugView.
 
-    /// b51: a single side label + dot. Used inside connectionPill for
-    /// per-Voltra status when one or both slots are paired.
-    private func connectionDot(label: String) -> some View {
-        HStack(spacing: 5) {
-            Text(label)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(VoltraColor.text)
-            Circle()
-                .fill(VoltraColor.accent)
-                .frame(width: 7, height: 7)
-                .shadow(color: VoltraColor.accent, radius: 3)
-        }
-    }
 
     // MARK: - Tiles
 

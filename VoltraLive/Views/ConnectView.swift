@@ -82,16 +82,10 @@ struct ConnectView: View {
 
             // Connect card
             VStack(spacing: 24) {
-                // Logo
+                // b67 V4.3 (Bug 03): VOLTRA wordmark + bolt logo
+                // removed; tagline kept. Single canonical chrome
+                // policy — only VoltraUnitHeader carries identity.
                 VStack(spacing: 8) {
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 56, weight: .bold))
-                        .foregroundColor(VoltraColor.accent)
-
-                    Text("VOLTRA Live")
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundColor(VoltraColor.text)
-
                     Text("Real-time workout telemetry for your VOLTRA device.\nProp your iPad on the rack and start lifting.")
                         .font(.system(size: 15))
                         .foregroundColor(VoltraColor.textDim)

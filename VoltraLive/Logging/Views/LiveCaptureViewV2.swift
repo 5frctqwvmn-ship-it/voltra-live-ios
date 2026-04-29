@@ -142,11 +142,14 @@ struct LiveCaptureViewV2: View {
 
             ScrollView {
                 VStack(spacing: 0) {
-                    // b66 V4.2: ASSIGN TO VOLTRA panel — per-exercise
+                    // b67 V4.3 (Bug 03/08): single canonical chrome —
+                    // VoltraUnitHeader on the live screen. Per-exercise
                     // override scope (exerciseName) + live-set lock
-                    // (isReadOnly). Mirror rules 1A + 2A.
-                    VoltraAssignmentPanel(
+                    // (isReadOnly locks every pill mid-set). Mirror
+                    // rules 1A + 2A.
+                    VoltraUnitHeader(
                         mdm: mdm,
+                        hk: health,
                         exerciseName: logging.activeInstance?.exercise?.name,
                         isReadOnly: isLiveSetInProgress
                     )

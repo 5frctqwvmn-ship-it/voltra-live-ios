@@ -37,6 +37,7 @@ struct ExerciseDetailView: View {
     @EnvironmentObject var logging: LoggingStore
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var ble: VoltraBLEManager
+    @EnvironmentObject var health: HealthKitStore
     // b45: needed by WriterRouter so writes route through MDM when dual
     // is paired. Without this the legacy single-device manager is used
     // even when both peripherals are owned by MDM — weights never load.
@@ -92,13 +93,13 @@ struct ExerciseDetailView: View {
             VoltraColor.bg.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    // b66 V4.2: ASSIGN TO VOLTRA panel — per-exercise
-                    // override scope. Mirror rule 1A: the day-screen
-                    // mount writes the default; this mount writes the
-                    // per-exercise override into
-                    // `mdm.exerciseAssignmentOverride[name]`.
-                    VoltraAssignmentPanel(
+                    // b67 V4.3 (Bug 03/08): single canonical chrome —
+                    // VoltraUnitHeader. Per-exercise override scope
+                    // (writes mdm.exerciseAssignmentOverride[name]).
+                    // Mirror rule 1A applies via exerciseName.
+                    VoltraUnitHeader(
                         mdm: mdm,
+                        hk: health,
                         exerciseName: logging.activeInstance?.exercise?.name
                     )
 
