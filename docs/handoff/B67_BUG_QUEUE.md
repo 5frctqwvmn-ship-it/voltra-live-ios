@@ -26,7 +26,11 @@ These interlock and should be resolved together when user says **done**:
 
 6. **`LOAD` / `UNLOAD` buttons relocate.** Currently they live on `DualCaptureView` as a screen-level pair of buttons. New spec: load state is bound to the **weight-number tap on `LiveWorkoutScreen`** (per existing V3 behavior). Need to verify V3 actually still has this binding intact and document it explicitly.
 
-7. **Bug 06 not yet received.** User teased it as: "When two Voltras are paired, the app renders the old (V2/V3-dual) UI instead of the single V3 live screen."
+7. **Bug 06 cross-cut:** All live workouts (single, merged, superset) route through ONE live screen — mode is a prop, not a separate view. `DualCaptureView` deletion is already covered in Bug 04+05; Bug 06 adds the single-screen rule + extracts `VoltraUnitHeader` as a shared component used on `WorkoutSelectionScreen` AND `LiveWorkoutScreen`.
+
+8. **Sine-wave FORCE trace is live.** The b66 V3 live screen (target image) already renders the proper sine-wave force curve in the `FORCE · 30 S` card. Validates F1 telemetry-rule skip from b66 — no additional work needed here.
+
+9. **Footer Bug 02 confirmed on multiple screens.** The verbose b58-era watermark `v0.4.39 (66) · b66: V4.2 ASSIGN TO VOLTRA panel + superset switcher (HARDWARE-QA-PENDING)` plus `ContentView` page-badge bleed-through appears on BOTH `WorkoutSelectionScreen` (Bug 02) AND `LiveWorkoutScreen` (visible at bottom of Bug 06 target image). Single fix to `buildBadgeOverlay` removal + `pageBadge` two-sided footer covers all screens.
 
 ---
 
@@ -269,11 +273,131 @@ Swipe-down on the bottom sheet cancels.
 
 ---
 
-## Bug 06 — (PLACEHOLDER, awaiting screenshot)
+## Bug 06 — One live screen for all modes; extract `VoltraUnitHeader` as shared component
 
-**User tease:** "When two Voltras are paired, the app renders the old (V2/V3-dual) UI instead of the single V3 live screen."
+**One-sentence summary:** All live workouts (single, merged, superset) must render through ONE `LiveWorkoutScreen`. Mode is a prop, not a separate view. The cluttered `VL1 ⌘ | L R | SS` reference row + duplicate active row at the top of the live screen must be replaced with the same `VoltraUnitHeader` component used on `WorkoutSelectionScreen` (Bug 03).
 
-**Action:** User to send screenshot of live workout screen with two Voltras connected (merged or not) showing the wrong UI state. One-sentence description of what's wrong → I'll produce the Bug 06 entry.
+### Evidence
+
+| File | Page-badge | What it shows |
+|------|------------|---------------|
+| `bugs/04-dual-capture-view.jpeg` (IMG_2422 — reused from Bug 04+05) | `DualCaptureView` | Legacy two-unit live screen with `Independent`/`Combined` toggle + `LOAD`/`UNLOAD` standalone buttons — the WRONG state |
+| `targets/06-live-workout-screen-target.jpeg` (image.jpeg) | (cut off; bottom shows `ContentView` bleed) | The TARGET V3-style live screen — canonical UI for ALL modes |
+| `targets/03-header-row-target.jpeg` (IMG_2423 — reused from Bug 03) | n/a (crop) | The shared pill-row header that must replace the current cluttered top of `LiveWorkoutScreen` |
+
+**Note on missing IMG_2425:** The user's paste block referenced `IMG_2425.jpeg` as the WRONG state but it didn't attach. Reusing `bugs/04-dual-capture-view.jpeg` (IMG_2422) since it's the same legacy `DualCaptureView` already captured in Bug 04+05.
+
+### What the V3 target image shows (deconstruction of `targets/06-live-workout-screen-target.jpeg`)
+
+From top to bottom:
+1. **DEMO MODE banner** — system feedback, kept regardless
+2. **Cluttered top row (TO BE REPLACED with `VoltraUnitHeader`)** — `VL1 ⌘ | L R | SS` reference row + duplicate active row showing `L` mint-filled, `R` dim, `SS` dim. Same pattern Bug 03 kills on `WorkoutSelectionScreen`.
+3. **`< End` button + green `V3` badge** — keep
+4. **HR row:** red dot + `— bpm` pill + `— kcal` pill — keep (live telemetry from HR pill binding)
+5. **Exercise name:** `Back Extension · Set 1` — keep
+6. **`RETURN` label + amber progress bar + `SET 1`** — keep
+7. **`WEIGHT` card:** `25 lb` + `UNLOADED` pill + `−5 −1 +1 +5` increment row — keep; tap weight number toggles LOAD/UNLOAD (this is where load/unload binding lives, per Bug 04+05 cross-cut)
+8. **ECC sub-card:** `ECC 38` value + `+52% on lower` annotation — keep
+9. **Nested-row tabs:** `ECC` (active green outline) `│ CHAIN │ INV CHAIN │ DROP` — keep
+10. **ECC value row:** `ECC 13 lb` + `−5 −1 +1 +5` increment row — keep
+11. **`REPS` card:** `8` — keep
+12. **`TOTAL VOLUME` card:** `0 lb` — keep
+13. **`⊕ Added plates` button + `○ Pulley` button** — keep
+14. **`FORCE · 30 S` card:** `52 lb` + **sine-wave force trace already rendering** — keep (validates F1 telemetry skip)
+15. **Footer (TO BE FIXED per Bug 02):** verbose b58-era watermark + `ContentView` page-badge bleed-through
+
+### What's right (required behavior)
+
+- **Single `LiveWorkoutScreen` file. One code path for all modes.**
+- **Mode is a prop, not a separate screen:**
+  - **Single:** the screen as shown in the target image
+  - **Merged:** same screen + `TWIN` badge next to weight number + summed weight total + pulley greyed. No top strip. (Restates Rule Two from foolproof doc.)
+  - **Superset:** same screen + V1-style horizontal exercise-switcher strip injected ABOVE the V3 chrome, BELOW the `VoltraUnitHeader`. Tapping inactive segment slides to other unit's state. Per-unit rest/idle runs in background on inactive segment.
+- **`VoltraUnitHeader`** at the top:
+  - Same shared component used on `WorkoutSelectionScreen` (Bug 03)
+  - Pills: `L`, `R`, `⋏`/MERGE, `●●`/HR
+  - **No `SS` pill on `LiveWorkoutScreen`** — SS toggle lives only in `ASSIGN TO VOLTRA` panel on `WorkoutSelectionScreen`; on the live screen, superset is already active and the V1 switcher strip is the affordance
+  - `HR ●●` pill is a **connection toggle**; the existing `— bpm` + `— kcal` row below stays as live telemetry pills (different role, both bound to same HK source)
+- **Footer per Bug 02:** left = `LiveWorkoutScreen`, right = `vX.Y.Z (build)`. Nothing else.
+
+### Interaction invariants on `LiveWorkoutScreen`
+
+- Tap `L` or `R` in header pill row → switches active unit, OR pairs new Voltra mid-session via silent-scan + `PairVoltraSheet` (Bug 04+05 flow)
+- Tap `⋏` with both L+R paired → toggles MERGE (mutually exclusive with superset)
+- Tap `●●` HR pill → opens HK source settings (same as `WorkoutSelectionScreen`)
+- Tap weight number on WEIGHT card → toggles UNLOADED/LOADED (this is the `LOAD/UNLOAD` binding that Bug 04+05 said must exist; **this image confirms it does** — see `UNLOADED` pill next to `25 lb`)
+- No navigation to a separate `DualCaptureView` or pairing screen from any live workflow
+
+### Files / components to DELETE (mostly already in Bug 04+05)
+
+- `DualCaptureView.swift` — already in Bug 04+05
+- The `VL1 ⌘ | L R | SS` compact status strip + duplicate active row currently at top of `LiveWorkoutScreen` — replace with `VoltraUnitHeader`
+- Any `Independent`/`Combined` toggle on live screens — already in Bug 04+05
+- Any `LOAD`/`UNLOAD` standalone buttons (outside weight-number tap binding) — already in Bug 04+05
+
+### Files to CREATE / EXTRACT
+
+- `VoltraLive/Views/Components/VoltraUnitHeader.swift` — single shared header component. Props: `activeUnitState`, `mergeState`, `hrConnectionState`, `pillSet: HeaderPillSet` enum to control whether `SS` is included (yes on `WorkoutSelectionScreen`, no on `LiveWorkoutScreen`). No SUPERSET toggle exposed on the live-screen variant.
+- Possibly rename existing live-screen file to `LiveWorkoutScreen.swift` if it isn't already named that. Verify at fix time.
+
+### Files likely to touch (search needed at fix time)
+
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — likely the current live screen; may need rename
+- `VoltraLive/Views/LoggingHomeView.swift` — currently ships the cluttered top row
+- Any `MergedView` / `DualWorkoutView` / `CombinedView` if they exist as separate files — delete and route through `LiveWorkoutScreen` with mode prop
+- `VoltraLive/Views/VoltraAssignmentPanel.swift` — may be the source of the `VL1 ⌘ | L R | SS` reference row that needs replacement
+- New `VoltraLive/Views/Components/VoltraUnitHeader.swift`
+
+### Doc updates (Karpathy rule, same commit as code)
+
+- `docs/handoff/06_KNOWN_ISSUES.md` — add B67-06 with the three referenced screenshots
+- `docs/handoff/03_CURRENT_FEATURE_SPEC.md`:
+  - Remove any reference to `DualCaptureView` or any two-unit-specific live screen
+  - Add: "All live workouts render through `LiveWorkoutScreen`. Mode (single / merged / superset) is a prop on the screen, not a separate view."
+  - Add: "`VoltraUnitHeader` is the shared top-of-screen component used on any screen showing Voltra unit state. `pillSet` prop controls whether `SS` is included."
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` — append:
+  - **D-B67-5:** `DualCaptureView` is deprecated across all versions. (Already implied by Bug 04+05; restated for completeness.)
+  - **D-B67-6:** One live screen. No unit-count branching. Mode is a prop, not a screen.
+  - **D-B67-7:** `VoltraUnitHeader` is a shared component; never duplicate inline. Used on `WorkoutSelectionScreen` (with `SS`) and `LiveWorkoutScreen` (without `SS`).
+- `docs/handoff/entities/live_workout_screen.md` — **NEW** (or update if present) — single-path live screen + merge-mode diff + superset-mode strip + shared header
+- `docs/handoff/entities/voltra_unit_header.md` — **NEW** — shared header spec, pill set prop, three-state HR pill, pairing-tap behavior
+- `docs/handoff/07_FILE_MAP.md` — remove `DualCaptureView`; add `VoltraUnitHeader`, `LiveWorkoutScreen` (if renamed)
+- `docs/WORK_LOG.md` — append b67 entry on commit
+
+### Verification
+
+1. Cold launch → `LEG DAY` with one Voltra paired → lands on V3 live screen with `VoltraUnitHeader` at top. Screen recording.
+2. Both L+R paired + MERGE active → same V3 live screen + `TWIN` badge next to weight + summed weight + pulley greyed. NO Independent/Combined toggle. NO LOAD/UNLOAD standalone buttons. Screen recording.
+3. Both L+R paired + SUPERSET active → same V3 live screen + V1 switcher strip injected above V3 chrome. Tap inactive segment → slides to other unit. Screen recording.
+4. `git log -- DualCaptureView.swift` shows file deleted.
+5. `grep -rni "DualCaptureView\|Independent\|Combined" VoltraLive/Views/` returns zero matches (outside design-doc references).
+6. `grep -rn "VoltraUnitHeader" VoltraLive/Views/` shows component used on both `WorkoutSelectionScreen` and `LiveWorkoutScreen` (single shared component, not inline-duplicated).
+7. Live screen footer shows `LiveWorkoutScreen` (left) + `v0.4.40 (67)` (right) per Bug 02, no verbose watermark.
+
+### Open questions for batch (re-ask when queue closes)
+
+- **Q6.1 (HR pill vs HR telemetry row):** The `VoltraUnitHeader` has a `●●` HR connection-toggle pill. The live screen ALSO shows a separate `● — bpm — kcal` telemetry row beneath it. Is that intentional dual surfacing (toggle in header, live values in chrome), or should one collapse into the other?
+  - (a) **Keep both — toggle in header, live values in chrome** (recommended; they have different roles)
+  - (b) Drop telemetry row; show `bpm`/`kcal` inside the `●●` pill expanded (e.g., `120 bpm`)
+  - (c) Drop `●●` pill from `VoltraUnitHeader` on `LiveWorkoutScreen`; let the existing telemetry row carry connection state
+- **Q6.2 (`pillSet` API):** Should `VoltraUnitHeader` take a typed `pillSet` enum or just individual booleans (`showSS: Bool`)?
+  - (a) **Enum** `case workoutSelection // L,R,⋏,●●,SS` / `case liveWorkout // L,R,⋏,●●` (recommended; declares intent)
+  - (b) Booleans — more flexible if future screens need other combos
+- **Q6.3 (mode-as-prop API):** How is mode passed to `LiveWorkoutScreen`?
+  - (a) **Single enum `WorkoutMode { case single, merged, superset(strip: SupersetStripState) }`** (recommended; exhaustive and type-safe)
+  - (b) Three booleans (`isMerged`, `isSuperset`, `mergedTwin`)
+  - (c) Read directly from `MultiDeviceManager.workoutMode` on every render (no prop)
+- **Q6.4 (existing live-screen file naming):** Current file is likely `LiveCaptureViewV2.swift`. Rename to `LiveWorkoutScreen.swift` to match the new naming, or keep filename and just refactor contents?
+  - (a) **Rename** to `LiveWorkoutScreen.swift` for clarity (recommended; matches doc updates)
+  - (b) Keep current filename; only refactor contents (lower-risk diff)
+
+---
+
+## Bug 07 — (PLACEHOLDER, awaiting screenshot)
+
+**User tease:** "Pairing a second Voltra mid-workout only blinks the light but doesn't actually connect."
+
+**Action:** User to send screenshot or screen-recording description of the live workout screen where they tapped an unpaired `R` (or `L`) from inside an active session and it failed to pair (Voltra in range, blinking, but no connection). One-sentence description of what happened → I'll produce the Bug 07 entry.
 
 ---
 
