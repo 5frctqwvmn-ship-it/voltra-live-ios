@@ -229,3 +229,53 @@ append-only history.
 **Do not run audits from a chat interface without filesystem access.**
 The prompts require reading dozens of repo files directly. Use
 Claude Code, Cursor, Antigravity, or Codex CLI.
+
+## Post-build QA checklist (added b58 — sticky for all builds)
+
+Sticky user requirement: after every TestFlight build ships, the
+agent must run a **post-build verification checklist** in the
+same message as the ship confirmation. No exceptions.
+
+**Format:**
+
+1. List every feature, fix, or addressable item shipped in this
+   build (sourced from the build's spec or `WORK_LOG.md` entry).
+2. Ask the user a 2-option multiple-choice question for each
+   item, using `ask_user_question`:
+   - "Working as intended"
+   - "Not working as intended"
+   ("Other" is auto-included by the tool — no need to add it.)
+3. Up to 4 items per `ask_user_question` call (tool limit).
+   For builds with > 4 items, send sequential calls.
+4. For each item the user marks **"Not working as intended"**,
+   follow up with **another** `ask_user_question` containing
+   targeted multiple-choice options about what specifically is
+   wrong (e.g. "the gradient renders in the wrong direction",
+   "the label overlaps the polyline", "the toggle does nothing").
+   Always leave room for "Other" (auto-included) so the user can
+   describe in free text.
+
+**Persistence:**
+
+- Append every QA pass to `docs/handoff/QA_LOG.md` (append-only),
+  one section per build. Format:
+  ```
+  ## bNN — vX.Y.Z-buildNN — YYYY-MM-DD
+  ### Items shipped
+  - <feature/fix 1>
+  ### User responses
+  - Item 1: Working as intended
+  - Item 2: Not working as intended → <follow-up answer>
+  ### Actions taken
+  - <linked KI-N entry, fix commit, or deferred>
+  ```
+- Confirmed regressions (items marked "Not working as intended"
+  that we cannot fix in the same session) **must** be added to
+  `docs/handoff/06_KNOWN_ISSUES.md` as a new `KI-N` entry, with
+  the user's follow-up details captured verbatim.
+
+**Why this exists:**
+
+The user is the only one running the app on real hardware. CI
+green + altool 5-gate verification proves the build *uploaded*,
+not that the *features work*. This checklist closes that gap.
