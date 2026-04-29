@@ -86,53 +86,6 @@ re-uploaded into the repo before the b58 build kicked off.
 this file. Until then, the ASCII description in
 `03_CURRENT_FEATURE_SPEC.md` §P1 is the canonical reference.
 
-### KI-7 (b58 → b59 QA) — Dropset cascade timer is 4 s, user wants 2 s
-
-**Surfaced:** b58 post-build QA wave 1.
-**File(s):** `VoltraLive/Logging/Persistence/LoggingStore.swift` —
-search for the cascade fire interval (`nextDropFiresAt`,
-`dropFinalizeAt`).
-**What:** Currently each cascade tier fires ≈ 4 s after the lift
-enters idle. User wants the interval set to **2 s**.
-**Severity:** P1 — dropset feels sluggish; reduces the "snap" the
-feature is supposed to convey.
-**Owner:** Next session.
-
-### KI-8 (b58 → b59 QA) — Idle bar should morph into dropset progress bar, then rest timer
-
-**Surfaced:** b58 post-build QA wave 1.
-**File(s):** `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
-(idle/rest bar component) + `LoggingStore` (state machine driving
-the cascade).
-**What:** While DROP is armed, the existing idle bar should morph
-into a **dropset progress bar** showing the 2 s countdown to the
-next cascade tier. Once cascade reaches floor, that same bar
-morphs into the **rest timer**. Right now the idle bar stays
-generic and the dropset progress isn't surfaced visually.
-Must be a single bar across all three states (idle / dropset
-progress / rest), not three separate components.
-**Severity:** P1 — dropsets work mechanically but the user can't
-*see* the cascade timing.
-**Owner:** Next session. Pairs with KI-7 (the new bar must reflect
-the correct 2 s interval).
-
-### KI-9 (b58 → b59 QA) — DROP tap pre-lowers weight; should arm-only
-
-**Surfaced:** b58 post-build QA wave 1.
-**File(s):** `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
-`tapDropTile()` + `LoggingStore.startDropSet(...)`.
-**What:** Tapping DROP currently calls into the cascade and the
-weight drops immediately. User wants tap-to-arm only: weight
-should stay at the working number until the lift goes idle AND
-the (KI-7) 2 s timer elapses, then the cascade fires the next
-tier. This matches how dropsets actually work in a gym — you
-finish the rep, *then* the weight drops.
-**Severity:** P0 — changes the felt behavior of the feature; users
-will think the DROP tile is a regular weight stepper.
-**Owner:** Next session. Refactors `startDropSet` into
-`armDropSet` (no-op weight) + a separate `fireNextCascade` driven
-by the idle-detector + KI-8 progress bar.
-
 ### KI-10 (b58 → b59 QA) — Phantom -5 lb weight drop during reps
 
 **Surfaced:** b58 post-build QA wave 1.
@@ -146,9 +99,22 @@ briefly went idle between reps; possibly an unrelated writer
 race. Needs telemetry repro.
 **Severity:** P0 — breaks every set where the user is paused
 between reps.
-**Owner:** Next session. Add a temporary debug log on every
-resistance-write call site, ship as a debug build, capture a
-real session, then patch.
+**Status (b60-prep):** The b60 KI-9 arm-only refactor is the
+most likely fix. Pre-b60 the only public path into the cascade
+was `startDropSet`, which fired drop #2 immediately on tap. If
+the user had the V2 manualDropSequence path armed
+simultaneously (b56-era `tapDropTile` did NOT route through
+the time-cascade — it sat on `manualDropSequence` and waited
+for SessionStore's idle finalize), the very first idle between
+reps could finalize the set as a "drop" and step the weight
+down by 5 lb. Post-b60, `armDropSet` does NOT touch
+`manualDropSequence` and does NOT call `beginDropChain`, so the
+SessionStore drop boundary path can never engage without
+explicit user arm + 2 s sub-floor gate. Re-test on hardware
+after b60 ships before closing this entry.
+**Owner:** User QA on b60 hardware install. If repro persists,
+add debug logging on every resistance-write call site and ship
+a debug-only follow-up build.
 
 ### KI-11 (b58 → b59 QA) — Force-curve full spec not yet implemented
 
@@ -176,6 +142,56 @@ the §3e/§3f/§3g rendering passes across builds unless explicitly
 asked. `force_curve.md` is the source of truth.
 
 ## Recently fixed (move to WORK_LOG before deleting)
+
+### KI-F7 (b60-prep, fixed) — Cascade interval was already 2 s
+
+**Was.** b58 QA reported the dropset cascade fire interval as 4 s
+and asked for 2 s. **Was already 2 s in code** since b45
+(`cascadeIntervalSec: Double = 2.0` at LoggingStore.swift:113);
+the KI doc was stale. The user-perceived sluggishness in b58 may
+have been the b58 4 s arm-to-first-fire (which DID exist per the
+b58 architecture) bleeding into the perception of the inter-tier
+cadence.
+
+**Fix.** None needed in the cascade path itself. Documented the
+inter-tier interval = 2 s explicitly in
+`docs/handoff/entities/dropset_state_machine.md`. The arm-to-
+first-fire interval (KI-9 fallout) is also set to 2 s as
+`cascadeArmIdleSec`.
+
+### KI-F8 (b60-prep, fixed) — Unified bar across idle / dropset / rest
+
+**Was.** b58 had three separate bar concepts: phase strip
+(active set), RestTimerBarV2 (post-finalize). Dropset progress
+had no visual surface — the user could see weight changes but
+not the timing of the next change.
+
+**Fix.** `LiveCaptureViewV2.phaseOrRestBar` now branches across
+**rest > dropset > phase** in priority order. New
+`dropProgressBar` private view renders one of four labels
+(`DROP · ARM` / `· IN` / `· NEXT` / `· BOTTOM`) with a 2 s sweep
+tied to `nextDropFiresAt` or `dropArmedFiresAt`. Reuses the
+ambient `blinkOn` 2 Hz republish so no new timer source is
+needed. See
+`docs/handoff/entities/dropset_state_machine.md` for the state
+diagram.
+
+### KI-F9 (b60-prep, fixed) — DROP tap pre-lowered weight; now arm-only
+
+**Was.** b58 `tapDropTile()` called `LoggingStore.startDropSet`
+which fired drop #2 immediately. User mental-model violation —
+tapping DROP mid-rep yanked the cable.
+
+**Fix.** Split the engine into `armDropSet` (captures anchor +
+writer; sets `dropSetArmed = true`; cable untouched) and
+`engageArmedDropSet` (private; called from
+`noteTelemetryActivity` once 2 s of sub-floor force have passed
+since the LAST above-floor sample). Tap-to-arm is now the only
+public entry from the V2 view; the cascade engages on the first
+qualifying lift-idle boundary. State diagram, transitions, timer
+constants, and hardware test plan in
+`docs/handoff/entities/dropset_state_machine.md`. See V4-D10 in
+`04_DECISIONS_AND_CONSTRAINTS.md`.
 
 ### KI-F3 (b58, fixed) — DROP tile never actually dropped the cable
 

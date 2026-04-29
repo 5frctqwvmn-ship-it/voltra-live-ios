@@ -106,12 +106,37 @@ Existing council prompts in this repo:
 | `01_PROJECT_OVERVIEW.md` | What the app is, who it's for, hardware. |
 | `02_CURRENT_STATE.md` | What's shipped, known bugs, build numbers. |
 | `03_ROADMAP.md` | Build 30 plan, deferred work, ordering rationale. |
+| `03_CURRENT_FEATURE_SPEC.md` | Authoritative description of the live-capture screen behavior at the latest ship. |
 | `04_ARCHITECTURE.md` | Module map, data flow, key types. |
+| `04_DECISIONS_AND_CONSTRAINTS.md` | Append-only decision log. |
 | `05_BLE_AND_PROTOCOL.md` | Wire format, control writes (incl. LOAD/UNLOAD). |
 | `06_HEALTHKIT.md` | HR + active calories streaming, current bugs. |
+| `06_KNOWN_ISSUES.md` | Active KI tracker. Resolved entries move to WORK_LOG before deletion. |
 | `07_DUAL_VOLTRA.md` | Dual-device spec (3-button connect, Independent/Combined). |
 | `08_SUPERSET.md` | Superset spec (deferred to build 31). |
 | `09_RELEASE_AND_SIGNING.md` | Version bumps, tags, CI, secrets (names only). |
+| `09_NEXT_AGENT_PROMPT.md` | UI Layout V4 handoff prompt for fresh-context agents (Karpathy LLM Wiki method). |
 | `10_OPEN_QUESTIONS.md` | What's blocked on user input right now. |
+| `QA_LOG.md` | Append-only post-build QA pass log. |
+| `design/force_curve.md` | Force-curve design reference (Tonal-style, P0). |
+| `entities/dropset_state_machine.md` | Atomic concept doc for the DROP tile cascade (b60). |
 
 `docs/WORK_LOG.md` lives one level up — append-only journal of every change.
+
+## Wiki-name mapping (Karpathy targets vs. actual filenames)
+
+The b59 pre-flight in `09_NEXT_AGENT_PROMPT.md` flagged a drift
+between the canonical Karpathy wiki names the prompt expects and
+the actual filenames in this copy. **Do not rename existing
+files** — use this mapping to resolve roles:
+
+| Karpathy role | Actual file(s) in this repo | Notes |
+|---|---|---|
+| `01_PROJECT_STATE` | `01_PROJECT_OVERVIEW.md` + `02_CURRENT_STATE.md` | Overview owns "what the app is"; CurrentState owns the post-ship snapshot. Both should be read. |
+| `02_ARCHITECTURE` | `04_ARCHITECTURE.md` | Single file, just numbered differently. |
+| `05_BUILD_TEST_DEPLOY` | `09_RELEASE_AND_SIGNING.md` | Contains the real `xcodebuild` / `xcodegen` / tag-based release commands. |
+| `07_FILE_MAP` | (not yet authored) | Closest existing equivalent is the `## Project layout` block in `AGENTS.md`. Author when next significant feature lands. |
+| `08_GIT_HISTORY_SUMMARY` | (not yet authored) | Use `git log --oneline` until authored. |
+| `entities/` | `docs/handoff/entities/` | Seeded b60 with `dropset_state_machine.md`. Add per atomic concept as needed. |
+| `screenshots/` | (not yet seeded) | KI-6 tracks the missing `weight-overlap-v3.jpeg`. Drop screenshots here as the user supplies them. |
+| `raw/` (immutable sources) | (not yet seeded) | `docs/research/` and `docs/handoff/B52_DIAGNOSIS.md` are the closest existing raw-style archives. |

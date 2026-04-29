@@ -206,3 +206,69 @@ instead of dead-stopping on `…`. Steppers get a hard-min
 **Rejected.** Two-line wrap (kills vertical rhythm of the WEIGHT
 card). Unbounded shrink (3-digit + TWIN at scaleFactor 0.4 is
 unreadable in a glance).
+
+### V4-D10 (b60-prep, KI-9) — DROP tap is arm-only; engine engages on lift-idle
+
+**Q.** When the user taps the DROP tile, should the cable
+weight drop immediately or wait until they finish the rep?
+
+**Decided.** Wait. Tap captures the anchor + writer bridge and
+sets `dropSetArmed = true`. The cable holds the working weight
+until `noteTelemetryActivity` observes 2 s of sub-floor force
+(`forceLb ≤ 3 lb`) since the LAST above-floor sample, then
+`engageArmedDropSet` re-delegates to `startDropSet` and the
+cascade engages. The `armDropSet` / `engageArmedDropSet` split
+keeps the existing snapshot / parity / floor logic in one
+place (still `startDropSet`) while changing the public surface
+the V2 view talks to.
+
+**Why.** Pre-b60 the DROP tile was effectively a "drop weight
+NOW" button — tapping it mid-rep yanked the cable on the user.
+Mirroring the gym mental model ("finish the rep, then the
+weight drops") restores the dropset metaphor and removes the
+incentive to tap DROP only after the lift is already idle. Side
+benefit: the only path that engages the cascade now requires
+explicit arm + 2 s sub-floor gate, which closes the most
+plausible cause of KI-10 (phantom −5 lb mid-rep drop).
+
+**Rejected.**
+- Keep tap-fires-immediately + add a "delay arm" toggle. Two
+  failure modes for one feature; user must remember to arm
+  the toggle.
+- Tap = arm + IMMEDIATELY drop on the FIRST sub-floor sample
+  (no 2 s gate). Machine jitter and rest periods between reps
+  would fire spuriously. The 2 s gate matches `cascadeIntervalSec`
+  so arm-to-fire and tier-to-tier feel like the same beat.
+
+### V4-D11 (b60-prep, KI-8) — Single bar across idle / dropset / rest
+
+**Q.** Should the dropset progress timing get its own bar
+component, or share the existing rest-timer bar?
+
+**Decided.** Share. `LiveCaptureViewV2.phaseOrRestBar` is now
+the single sub-header bar slot, with a 3-state morph (priority:
+rest > dropset > phase). The dropset state renders a new
+private `dropProgressBar` view that mirrors the rest bar's
+geometry (4 pt capsule, kerned 9 pt label + monospaced
+countdown) but uses `VoltraColor.accent` instead of the HSL
+sweep. The new view drives off `nextDropFiresAt` (active) or
+`dropArmedFiresAt` (armed); the ambient 2 Hz `blinkOn`
+republish provides the redraw cadence.
+
+**Why.** Bar contention is impossible because the three states
+are mutually exclusive (you can only be in rest after a
+finalize, only in dropset after arming, only in phase
+otherwise). Sharing the slot keeps the screen's vertical
+rhythm constant — pre-b60 the dropset state had no visual
+surface and the user had to infer timing from weight changes
+alone.
+
+**Rejected.**
+- Standalone `DropProgressBarV2.swift` file. Adds a file just
+  to render a Capsule + GeometryReader; the b60 dropProgressBar
+  computed-var approach inlines into the V2 view without
+  cross-file plumbing.
+- HSL sweep matching the rest bar. The rest bar's color carries
+  semantic meaning (green = early, red = late); the dropset
+  bar doesn't have an analogous "late" state, so a flat accent
+  fill is more honest about what the bar communicates.

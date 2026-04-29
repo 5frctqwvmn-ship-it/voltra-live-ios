@@ -2659,3 +2659,177 @@ session). They run Step 0 of `09_NEXT_AGENT_PROMPT.md` cold, summarize
 state back to the user, and only then begin V4 implementation —
 starting with the wiki-naming reconciliation called out in the
 pre-flight table.
+
+---
+
+## 2026-04-29 (later) — feat: dropset arm-only refactor + unified progress bar (b60-prep)
+
+### Goal
+
+Address the b58 post-build QA wave-1 P0 regressions on the V4
+DROP tile. Specifically:
+
+- **KI-9 (P0):** DROP tap currently pre-lowers the cable weight;
+  user wants tap = arm only, with the actual drop firing after
+  the lift goes idle for 2 s. Mirrors gym mental model.
+- **KI-8 (P1):** make the dropset countdown visible — surface a
+  unified bar that morphs across idle / dropset progress / rest.
+- **KI-7 (P1):** confirm cascade interval is 2 s (already shipped
+  by b45; doc was stale).
+- **KI-10 (P0, partial):** the arm-only refactor likely closes
+  the phantom −5 lb mid-rep drop because the only cascade-fire
+  path now requires explicit `armDropSet` AND a 2 s sub-floor
+  gate. Pre-b60 the engage path could fire on any
+  SessionStore-detected idle while a manualDropSequence was in
+  flight. Verify on hardware before closing KI-10.
+
+This change ships ONLY the dropset state-machine work and the
+unified progress bar. Force curve epic (KI-11) is intentionally
+deferred — see "What was NOT touched" below.
+
+### Files changed
+
+- `VoltraLive/Logging/Persistence/LoggingStore.swift`
+  - +`dropSetArmed: Bool`, `dropArmedFiresAt: Date?` `@Published`
+    fields.
+  - +`armDropSet(startingLb:pushWeight:)` — captures anchor +
+    writer bridge, sets `dropSetArmed = true`. Does NOT touch
+    the cable, does NOT call `beginDropChain`, does NOT start
+    timers. Refuses while in arm-cooldown.
+  - +`engageArmedDropSet()` (private) — called from
+    `noteTelemetryActivity` once the 2 s arm-idle gate clears.
+    Re-delegates to `startDropSet` with the captured anchor +
+    writer.
+  - +`cancelArmedDropSet()` — clears arm flags + 1.5 s cooldown.
+    Distinct from `cancelDropSet` because no SessionStore drop
+    mode was ever entered.
+  - +`cascadeArmIdleSec: Double = 2.0` constant +
+    `cascadeArmIdleSecondsForUI` mirror.
+  - `noteTelemetryActivity(forceLb:)` now drives the arm gate
+    BEFORE the `dropSetActive` guard. Above-floor force resets
+    `dropArmedFiresAt`; sub-floor force starts/keeps the
+    countdown; once the deadline passes, `engageArmedDropSet`
+    fires.
+  - `reanchorCascadeIfActive(toLb:)` guard relaxed to
+    `dropSetActive || dropSetArmed` so user weight nudges
+    between tap-DROP and the first cascade drop are honored.
+  - Defensive resets of `dropSetArmed` / `dropArmedFiresAt` in
+    `cancelDropSet`, `autoLogDropChain` defensive branch, and
+    the autoLogDropChain success path.
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
+  - `tapDropTile()` rewritten — now calls `armDropSet` (was
+    `startDropSet`). Tap-while-armed disarms.
+  - `cancelArmedDrop()` (long-press) branches on active vs.
+    armed.
+  - `dropArmed` computed property = `dropSetActive ||
+    dropSetArmed` so the nested DROP row + 4-up tile render
+    armed visuals without distinguishing sub-state.
+  - `phaseOrRestBar` now morphs **rest > dropset > phase**.
+    New `dropProgressBar` private view renders one of four
+    labels (`DROP · ARM` / `· IN` / `· NEXT` / `· BOTTOM`)
+    with a 2 s sweep tied to `nextDropFiresAt` or
+    `dropArmedFiresAt`. Reuses the ambient `blinkOn` 2 Hz
+    republish so we don't spin a second timer.
+- `docs/handoff/entities/dropset_state_machine.md` — NEW.
+  Entities-layer doc per the V4 prompt (Karpathy wiki). State
+  table, transition diagram, engine method index, timer
+  constants, telemetry contract, UI binding contract, hardware
+  test plan.
+- `docs/handoff/06_KNOWN_ISSUES.md` — KI-7 marked resolved
+  (already 2 s in code since b45). KI-8 marked resolved (unified
+  bar shipped this commit). KI-9 marked resolved (arm-only
+  refactor shipped this commit). KI-10 promoted to "needs
+  hardware repro post-b60" — the most likely cause is closed
+  but verify before deleting.
+- `docs/handoff/03_CURRENT_FEATURE_SPEC.md` — §3 DROP tile
+  rewritten to describe the b60 arm-only state machine. §1a
+  Phase strip OR Rest Timer Bar updated to mention the new
+  third state (dropset progress).
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` — V4-D10
+  appended (arm-only state machine), V4-D11 appended (unified
+  bar across three states).
+- `docs/handoff/00_START_HERE.md` — added the wiki-name
+  mapping table the b59 pre-flight asked the next agent to
+  produce. No file renames.
+- `docs/handoff/QA_LOG.md` — b59 entry placeholder added so
+  hardware QA after this branch ships can fill in the wave-1
+  follow-ups.
+
+### What was NOT touched
+
+- **KI-11 (force curve epic).** Out of scope for this branch
+  per the user's billing convention "keep features separate
+  bills." Force curve full spec stays as documented in
+  `docs/handoff/design/force_curve.md` and `06_KNOWN_ISSUES.md`
+  KI-11 — next branch.
+- **`startDropSet`.** Not deleted — it's now invoked only from
+  `engageArmedDropSet`. Keeps the existing snapshot / parity /
+  floor logic in one place. Public surface is unchanged so
+  V1's `LiveCaptureView` (which still calls `startDropSet`
+  directly at line 1118) continues to work.
+- **Sacred files.** `VoltraProtocol.swift`,
+  `TelemetryExtractor.swift`, `PacketParser.swift`,
+  `FrameAssembler.swift` unchanged.
+- **`project.yml` / `Info.plist`.** No version bump in this
+  branch — version bump + tag happen at ship time, after a
+  user sign-off on the PR.
+
+### Verification
+
+- Static review only — no Mac in this environment, so
+  `xcodebuild` / `xcodegen` were not run. CI will compile + run
+  `VoltraLiveTests/ProtocolGoldenTests.swift` on push (sacred
+  files unchanged so the protocol golden tests are guaranteed
+  to pass).
+- Diff statics:
+  - `dropSetArmed`/`dropArmedFiresAt` declared as `@Published`
+    so SwiftUI observers refresh.
+  - Arm-gate path runs BEFORE the `dropSetActive` guard in
+    `noteTelemetryActivity` (verified by re-reading the diff).
+  - `engageArmedDropSet` returns immediately after delegating
+    to `startDropSet` to avoid double-resetting the timers
+    that `startDropSet` itself sets up.
+  - `reanchorCascadeIfActive` extension is gated by
+    `dropSetArmed` OR `dropSetActive` so callsites in
+    `LiveCaptureView.swift` (V1) are unaffected when nothing
+    is armed.
+  - V1's `LiveCaptureView.swift` calls `startDropSet` directly
+    at line 1118 — left intact. V1 behavior is unchanged.
+
+### Risks at ship
+
+- **First-engage edge case:** if the lift goes idle BEFORE
+  `noteTelemetryActivity` has been called once after arming,
+  `dropArmedFiresAt` won't be set and the engage will wait
+  for the first sub-floor packet. In practice every BLE
+  session has continuous telemetry so this is moot, but if
+  the BLE connection drops mid-arm the cascade silently
+  won't engage. Consider a safety fallback if QA reports it.
+- **Bar contention:** if the rest timer fires WHILE armed
+  (theoretically possible if SessionStore finalizes the set
+  via the existing rep+force heuristic before the user has
+  a chance to cancel arm), rest takes priority and arm
+  silently clears via the `cancelDropSet` path inside the
+  finalize branches. Verify on hardware.
+- **Twin Mode:** DROP tile is hidden in Twin per V4-D6. The
+  arm path never runs in Twin so no Twin-specific code is
+  needed. If Twin DROP is later spec'd, we'll need to plumb
+  the engage path through `mdm.applyCombined`.
+
+### Cost
+
+**Medium.** ~50 lines changed in LoggingStore (3 new methods +
+4 sites of defensive resets), ~110 lines changed in
+LiveCaptureViewV2 (rewrote one var + one method, added one new
+private view), 1 new entity doc, 5 wiki updates. No CI run
+yet — single push + PR open.
+
+### Next step
+
+Open a PR against `main` of the GPT-5.5 repo. User reviews,
+signs off, then we tag b60 and ship via the existing release
+workflow (see `09_RELEASE_AND_SIGNING.md`). On TestFlight
+install, run the b58 QA wave-1 follow-up checklist (KI-7 / 8 /
+9 / 10) on hardware. If the phantom −5 lb drop (KI-10) recurs,
+we have repro context and can add debug logging on the
+resistance-write call sites in a follow-up build.

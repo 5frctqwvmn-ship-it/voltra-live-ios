@@ -46,11 +46,25 @@
   unit-selector strip. See §8.
 - **No top dial.** The V2 dial is removed entirely.
 
-### §1a. Phase strip OR Rest Timer Bar
+### §1a. Phase strip OR Dropset Progress Bar OR Rest Timer Bar
 
-Same swap behavior as V2: phase strip while a set is active, rest
-bar after End Set is tapped. Rest bar HSL sweeps green → amber →
-red over the rest preset, blinks 1Hz once over preset.
+> **b60 change vs b58:** the phase strip slot now morphs across
+> **three** states (was two). Priority order on conflict: rest >
+> dropset > phase.
+
+- **Active set, no DROP arm/engage:** compact phase strip with
+  PUSH/PULL/IDLE color band.
+- **DROP armed or active (b60, KI-8):** unified
+  `dropProgressBar`. Labels: `DROP · ARM` (armed, lift active,
+  no countdown yet) → `DROP · IN` (armed, lift idle, 2 s
+  countdown to first drop) → `DROP · NEXT` (active cascade,
+  2 s tier-to-tier countdown) → `DROP · BOTTOM` (cascade hit
+  the 5 lb floor, full bar, no further drops). Sweep tied to
+  `nextDropFiresAt` / `dropArmedFiresAt`; reuses the ambient
+  2 Hz blink republish.
+- **Post-finalize rest:** `RestTimerBarV2` HSL sweep green →
+  amber → red over the rest preset, blinks 1 Hz once over
+  preset.
 
 ### §2. WEIGHT card (the big number)
 
@@ -70,14 +84,29 @@ row per armed mod.
 **Increment grid (all four):** `−5 / −1 / +1 / +5`. ECC range
 5–400, CHAIN/INV CHAIN range 0–300.
 
-**DROP tile (b58 V4 §2 — time-driven cascade, port of b22 / aff322f):**
+**DROP tile (b60 V4 §2 — arm-only, port of b22 / aff322f, KI-9 refactor):**
 
-- **First tap (inactive):** arms the cascade. Immediately fires
-  drop #2 at tier 1 (−5 lb) via
-  `LoggingStore.startDropSet(startingLb:pushWeight:)`. The
-  pushWeight callback re-targets the device with the new
-  device-frame weight; ECC / CHAIN / INV CHAIN flags from the
-  parent set are inherited automatically.
+> **b60 change vs b58:** tap is now arm-only. The cable holds
+> the working weight until the lift goes idle for 2 s, then the
+> first cascade drop fires automatically. See
+> [entities/dropset_state_machine.md](entities/dropset_state_machine.md)
+> for the full state diagram.
+
+- **First tap (inactive):** arms the cascade via
+  `LoggingStore.armDropSet(startingLb:pushWeight:)`. Captures
+  the anchor + writer bridge but DOES NOT touch the cable.
+  `dropSetArmed = true`; the unified progress bar shows
+  `DROP · ARM`.
+- **Lift goes idle (force ≤ 3 lb for ≥ 2 s):** engine engages
+  the cascade. `engageArmedDropSet` re-delegates to
+  `startDropSet` which fires drop #2 at the current tier and
+  starts the recurring 2 s `cascadeTimer` + 10 s no-movement
+  watchdog. `dropSetArmed` clears, `dropSetActive` flips on.
+  ECC / CHAIN / INV CHAIN flags from the parent set are
+  inherited automatically.
+- **Tap while armed (not yet engaged):** `cancelArmedDropSet`
+  clears arm state with a 1.5 s cooldown. The cable was never
+  moved so no device write is needed.
 - **Tap while active:** `bumpCascadeTier` rolls 1 → 2 → 3 → 1
   (5 / 10 / 15 lb step). Fires an immediate drop at the new tier
   AND resets the 4-second next-fire fuse.
