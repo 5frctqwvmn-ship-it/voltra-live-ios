@@ -206,6 +206,48 @@ unloaded screens. 1.5 s ease on rescale.
   segment, in phase color at 70% opacity.
 - Suppressed if the rep doesn't contain both phases.
 
+**NEW b60-prep (KI-11): force-curve full spec.**
+
+Implementation closed the §3b/§3c/§3d/§3e/§3g gaps that
+`force_curve.md` had tracked as a single epic. Detailed deltas
+live in `force_curve.md` §9 and `06_KNOWN_ISSUES.md` KI-F11;
+visible behavior on the active chart now is:
+
+- **80% dashed reference line** (§3e). Horizontal dashed line at
+  80% of the running set peak. Hidden when peak < 10 lb so the
+  empty / pre-pull state stays uncluttered. "80%" mono caption
+  flush right.
+- **Per-rep peak dot + lb label** (§3e). Each visible rep in
+  the overlay gets a small dot at its peak sample with a kerned
+  mono lb value. Newest rep's dot is 6 px and label is opaque;
+  older reps fade with the same logarithmic curve as the polyline
+  (suppressed below opacity 0.30 to avoid label noise).
+- **Compact mode-aware legend chip** (§3g). Top-left of the
+  canvas. Renders only when at least one of ECC / CHAIN /
+  INV CHAIN is armed. Color-coded entries match phase colors.
+  Working-only sets stay clean (no chip).
+- **Time-based label fade** (§3c). The ECC / CON inline labels
+  on the most-recent rep fade with elapsed rep time: full
+  opacity for the first 3 s, linear ease 1 → 0 across 3..4 s,
+  fully suppressed beyond. The "OR rep 2, whichever first" half
+  of the spec is enforced upstream by the existing `repsAgo == 0`
+  gate.
+- **3-stop ROM-band gradient** (§3d). The fill gradient now uses
+  three stops (0.0 / 0.55 / 1.0) instead of two so the heavy
+  region reads as a band rather than a uniform ramp. Combined
+  with the existing CHAIN start/end-point flip: ECC = hot band
+  low, CHAIN = hot band high.
+- **Phase-blend boundary dot** (§3b). A 5 px alpha-reduced dot
+  in the closing segment's color sits at every CON↔ECC boundary
+  to soften the hard color cut. Stroke-side only — fill stays
+  segmented (see V4-D12 in `04_DECISIONS_AND_CONSTRAINTS.md`).
+
+INV CHAIN now surfaces a legend-chip entry but does NOT change
+the fill direction. The polyline shape continues to represent
+its mid-ROM offset. Re-litigating this requires per-sample ROM
+phase metadata that `ForceSample` doesn't carry today; deferred
+to a dedicated RFC.
+
 ### §6. Rest timer (b57 V3 §6)
 
 First-engage miss is fixed (b57). Idle detector now accepts

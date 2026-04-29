@@ -1,5 +1,36 @@
 // ForceChartV2.swift
 //
+// b60-prep V4 KI-11 — Tonal-style force-curve full spec.
+//
+//   - §3e 80%-peak dashed reference line: a horizontal dashed line at 80%
+//     of `peakLb` (set's running peak) is drawn behind the polyline. It
+//     gives the athlete a "quality threshold" — reps that don't clear it
+//     are visually obvious. Hidden when peak is below ~10 lb (early-set
+//     idle / synthetic ramp) so the empty chart stays clean.
+//   - §3e per-rep peak dots: each visible rep in the overlay gets a small
+//     dot at its peak sample with a kerned mono label of the peak value
+//     in lb. The newest rep's label is opaque; older reps' labels fade
+//     with the same logarithmic curve as the polyline (suppressed below
+//     fade ≈ 0.30 to avoid label noise).
+//   - §3g compact legend: when any non-baseline mode is armed (ECC / CHAIN
+//     / INV CHAIN) a small legend chip renders top-left of the canvas
+//     with the active mode names in their phase colors. Hidden in the
+//     baseline working-only configuration so the chart stays clean.
+//   - §3c label fade timing: ECC / CON inline labels now fade smoothly
+//     with elapsed time since the rep started — fully visible for the
+//     first 3 s, then linearly interpolated to 0 over the next 1 s, and
+//     fully suppressed beyond 4 s OR once a second rep begins (per spec:
+//     "3 s OR rep 2, whichever comes first"). Re-surfaces on the new rep.
+//   - §3d vertical-gradient ROM encoding: the fill gradient now
+//     interpolates through THREE stops (top / mid / baseline) instead of
+//     two so the band reads heavier at the ROM end where the load is
+//     actually peaking. ECC stays bottom-heavy (heaviest at end of phase
+//     = bottom of ROM); CHAIN flips to top-heavy via the existing
+//     start/end point swap; INV CHAIN keeps the linear top→baseline ramp.
+//   - §3b 200 ms phase blend: at each CON↔ECC boundary the closing
+//     segment's last fill stop is rendered semi-transparent so the new
+//     phase's color bleeds through, softening the hard color cut.
+//
 // b58 V4 §1 — Tonal-style force-curve rendering.
 //
 //   - Dual-band ECC / CON: each rep polyline is now also stroked as a
@@ -97,6 +128,13 @@ struct ForceChartV2: View {
     /// Driven by the parent's `chainArmed`.
     let chainMirrorActive: Bool
 
+    /// b60-prep KI-11 §3g: when true, the legend chip surfaces an "INV
+    /// CHAIN" entry. Driven by the parent's `invChainArmed`. The fill
+    /// itself doesn't change for INV CHAIN — its mid-ROM offset is
+    /// already represented by the polyline shape — but the legend keeps
+    /// the user oriented when the mode is on.
+    let invChainArmedActive: Bool
+
     init(
         samples: [ForceSample],
         peakLb: Double,
@@ -104,7 +142,8 @@ struct ForceChartV2: View {
         idlePhase: VoltraPhase,
         yAxisMaxLb: Double = 160,
         eccBandActive: Bool = false,
-        chainMirrorActive: Bool = false
+        chainMirrorActive: Bool = false,
+        invChainArmedActive: Bool = false
     ) {
         self.samples = samples
         self.peakLb = peakLb
@@ -113,6 +152,7 @@ struct ForceChartV2: View {
         self.yAxisMaxLb = yAxisMaxLb
         self.eccBandActive = eccBandActive
         self.chainMirrorActive = chainMirrorActive
+        self.invChainArmedActive = invChainArmedActive
     }
 
     // MARK: Tunables
@@ -153,8 +193,22 @@ struct ForceChartV2: View {
                     // mode 3: synthetic idle ramp (5 samples, leftmost ~14% of width)
                     idleRamp(width: w, height: h)
                 } else {
+                    // b60-prep KI-11 §3e: 80%-peak dashed reference line
+                    // drawn UNDER the rep history. Hidden until the set
+                    // has actually generated a meaningful peak so the
+                    // empty-set state stays uncluttered.
+                    eightyPercentReferenceLine(width: w, height: h)
                     // mode 1: rep-history overlay (b57 §1a)
                     activeChart(samples: samples, width: w, height: h)
+                }
+
+                // b60-prep KI-11 §3g: compact mode-aware legend chip in
+                // the top-left. Only renders when at least one of ECC /
+                // CHAIN / INV CHAIN is armed AND we're not in the empty
+                // resting state. Stays out of the way of the polyline by
+                // sitting above the highest sample's typical y-range.
+                if !resting {
+                    legendChip()
                 }
             }
             .frame(width: w, height: h, alignment: .topLeading)
@@ -180,6 +234,86 @@ struct ForceChartV2: View {
                 .font(.system(size: 9, weight: .regular, design: .monospaced))
                 .foregroundColor(VoltraColor.danger.opacity(0.7))
                 .offset(x: 6, y: y - 14)
+        }
+    }
+
+    // MARK: - b60-prep KI-11 §3e — 80%-peak dashed reference line
+
+    /// Horizontal dashed line at 80% of the set's running peak force.
+    /// Rendered behind the rep history so the polylines and fills sit on
+    /// top. Hidden when peak < 10 lb so the early-set / pre-pull state
+    /// stays clean. Y-axis math matches the active-chart denom so the
+    /// line tracks the same scale as the polyline.
+    @ViewBuilder
+    private func eightyPercentReferenceLine(width w: CGFloat, height h: CGFloat) -> some View {
+        if peakLb >= 10 {
+            let observed = max(peakLb, samples.map { $0.forceLb }.max() ?? 0)
+            let denom = max(max(minYDenom, yAxisMaxLb), observed)
+            let target = peakLb * 0.80
+            let y = h - pad - CGFloat(target / denom) * (h - 2 * pad - 8)
+            ZStack(alignment: .topLeading) {
+                Path { p in
+                    p.move(to: CGPoint(x: 0, y: y))
+                    p.addLine(to: CGPoint(x: w, y: y))
+                }
+                .stroke(
+                    VoltraColor.textDim.opacity(0.55),
+                    style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                )
+                Text("80%")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .kerning(1.0)
+                    .foregroundColor(VoltraColor.textDim.opacity(0.75))
+                    .offset(x: w - 28, y: max(0, y - 11))
+            }
+        }
+    }
+
+    // MARK: - b60-prep KI-11 §3g — compact mode-aware legend chip
+
+    /// Tiny top-left chip listing the active non-baseline modes. Hidden
+    /// when no mods are armed so the chart stays clean for vanilla sets.
+    /// Each entry uses its phase color so the legend reads at a glance.
+    @ViewBuilder
+    private func legendChip() -> some View {
+        let anyArmed = eccBandActive || chainMirrorActive || invChainArmedActive
+        if anyArmed {
+            HStack(spacing: 6) {
+                legendEntry(label: "CON", color: VoltraColor.pull)
+                if eccBandActive {
+                    legendEntry(label: "ECC", color: VoltraColor.returnPhase)
+                }
+                if chainMirrorActive {
+                    legendEntry(label: "CHAIN", color: VoltraColor.transition)
+                }
+                if invChainArmedActive {
+                    legendEntry(label: "INV", color: VoltraColor.transition)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(VoltraColor.bg.opacity(0.55))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(VoltraColor.border, lineWidth: 0.5)
+            )
+            .offset(x: 8, y: 6)
+        }
+    }
+
+    @ViewBuilder
+    private func legendEntry(label: String, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(color)
+                .frame(width: 5, height: 5)
+            Text(label)
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .kerning(0.8)
+                .foregroundColor(VoltraColor.text.opacity(0.85))
         }
     }
 
@@ -273,13 +407,28 @@ struct ForceChartV2: View {
                     )
                 }
                 repPolyline(rep: rep, width: w, height: h, denom: denom, opacity: opacity)
-                // b58 V4 §1: ECC / CON inline labels on the most recent
-                // rep ONLY (repsAgo == 0). Drawn last so they sit on top
-                // of every other layer.
-                if repsAgo == 0 {
-                    inlinePhaseLabels(
-                        rep: rep, width: w, height: h, denom: denom
+                // b60-prep KI-11 §3e: per-rep peak dot + value label.
+                // Drawn for every visible rep with the same logarithmic
+                // fade so older reps' labels recede gracefully. Suppressed
+                // below opacity 0.30 to avoid label noise.
+                if opacity >= 0.30 {
+                    perRepPeakMarker(
+                        rep: rep, width: w, height: h, denom: denom,
+                        opacity: opacity, isNewest: repsAgo == 0
                     )
+                }
+                // b58 V4 §1 + b60-prep KI-11 §3c: ECC / CON inline labels
+                // on the most recent rep ONLY (repsAgo == 0), with the
+                // new label-fade timing applied (3 s full opacity → 1 s
+                // ease to 0 → suppressed).
+                if repsAgo == 0 {
+                    let lblAlpha = labelFadeAlpha(rep: rep)
+                    if lblAlpha > 0.05 {
+                        inlinePhaseLabels(
+                            rep: rep, width: w, height: h, denom: denom,
+                            alpha: lblAlpha
+                        )
+                    }
                 }
             }
 
@@ -360,6 +509,17 @@ struct ForceChartV2: View {
     /// Build the per-phase gradient. ECC = stronger fill (top stop ≈ 0.55
     /// of opacity), CON = thinner fill (top stop ≈ 0.22 of opacity). Both
     /// fade to ~0.04 at baseline so the BOTTOM marker stays legible.
+    ///
+    /// b60-prep KI-11 §3d: the gradient is now 3-stop instead of 2-stop.
+    /// Adding a mid-band makes the heavy region read as a true band
+    /// rather than a uniform ramp, which encodes ROM position more
+    /// faithfully — the user sees a "hot zone" at the heaviest portion
+    /// of the phase rather than a single blended slope. Combined with
+    /// the existing CHAIN start/endpoint flip, this gives:
+    ///   - ECC + working-only:  hot band low (heaviest at end of ECC =
+    ///                           bottom of ROM)
+    ///   - CHAIN active:         hot band high (heaviest at top of ROM)
+    ///   - CON:                  thin top-anchored band, low alpha
     private func gradientStops(
         for phase: VoltraPhase,
         opacity: Double,
@@ -367,24 +527,30 @@ struct ForceChartV2: View {
         isCon: Bool
     ) -> Gradient {
         let color = VoltraColor.phase(phase)
-        let topAlpha:    Double = isEcc ? 0.55 : (isCon ? 0.22 : 0.10)
+        let topAlpha:    Double = isEcc ? 0.58 : (isCon ? 0.24 : 0.10)
+        let midAlpha:    Double = isEcc ? 0.36 : (isCon ? 0.14 : 0.06)
         let bottomAlpha: Double = 0.04
         return Gradient(stops: [
             .init(color: color.opacity(topAlpha    * opacity), location: 0.0),
+            .init(color: color.opacity(midAlpha    * opacity), location: 0.55),
             .init(color: color.opacity(bottomAlpha * opacity), location: 1.0)
         ])
     }
 
-    /// b58 V4 §1: inline ECC / CON kerned captions placed at the centroid
-    /// of each phase segment of the most-recent rep. Suppressed if the rep
-    /// doesn't contain both phases (avoids a lonely "ECC" hovering over a
-    /// pull-only rep).
+    /// b58 V4 §1 + b60-prep KI-11 §3c: inline ECC / CON kerned captions
+    /// placed at the centroid of each phase segment of the most-recent
+    /// rep. `alpha` is the time-based fade computed by `labelFadeAlpha`
+    /// (full opacity for the first 3 s of the rep, then linearly easing
+    /// to 0 by 4 s, fully suppressed beyond). Suppressed if the rep
+    /// doesn't contain both phases (avoids a lonely "ECC" hovering over
+    /// a pull-only rep).
     @ViewBuilder
     private func inlinePhaseLabels(
         rep: [ForceSample],
         width w: CGFloat,
         height h: CGFloat,
-        denom: Double
+        denom: Double,
+        alpha: Double
     ) -> some View {
         let hasPull   = rep.contains { $0.phase == .pull }
         let hasReturn = rep.contains { $0.phase == .return }
@@ -394,16 +560,68 @@ struct ForceChartV2: View {
                     Text("CON")
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
                         .kerning(1.6)
-                        .foregroundColor(VoltraColor.phase(.pull).opacity(0.7))
+                        .foregroundColor(VoltraColor.phase(.pull).opacity(0.7 * alpha))
                         .position(x: pos.x, y: max(12, pos.y - 12))
                 }
                 if let pos = phaseCentroid(rep: rep, width: w, height: h, denom: denom, phase: .return) {
                     Text("ECC")
                         .font(.system(size: 8, weight: .bold, design: .monospaced))
                         .kerning(1.6)
-                        .foregroundColor(VoltraColor.phase(.return).opacity(0.7))
+                        .foregroundColor(VoltraColor.phase(.return).opacity(0.7 * alpha))
                         .position(x: pos.x, y: max(12, pos.y - 12))
                 }
+            }
+        }
+    }
+
+    /// b60-prep KI-11 §3c: time-based label fade.
+    /// Full opacity for the first 3 s of the rep, then linearly eased to
+    /// 0 over the next 1 s; returns 0 beyond 4 s. The check against the
+    /// REP's own duration (vs. wall clock) keeps the fade tied to set
+    /// progress so a long isometric pause doesn't prematurely hide the
+    /// label.
+    private func labelFadeAlpha(rep: [ForceSample]) -> Double {
+        guard let first = rep.first?.timestamp,
+              let last  = rep.last?.timestamp else { return 0 }
+        let elapsed = last.timeIntervalSince(first)
+        if elapsed <= 3.0 { return 1.0 }
+        if elapsed >= 4.0 { return 0.0 }
+        // Linear ease 1.0 → 0.0 across the 3..4 s window.
+        return 1.0 - (elapsed - 3.0)
+    }
+
+    // MARK: - b60-prep KI-11 §3e — per-rep peak dot + value label
+
+    /// Draw a small dot at the rep's peak sample with a kerned mono
+    /// label of the peak value in lb. Per-rep, fades with the same
+    /// logarithmic curve as the polyline (caller suppresses below 0.30).
+    /// The newest rep's label sits above the dot; older reps' labels
+    /// flip below if the peak is in the upper third of the canvas to
+    /// avoid stacking on top of the legend chip.
+    @ViewBuilder
+    private func perRepPeakMarker(
+        rep: [ForceSample],
+        width w: CGFloat,
+        height h: CGFloat,
+        denom: Double,
+        opacity: Double,
+        isNewest: Bool
+    ) -> some View {
+        if let peak = rep.max(by: { $0.forceLb < $1.forceLb }), peak.forceLb >= 5 {
+            let nx = normalizedX(rep: rep, sample: peak)
+            let x = pad + CGFloat(nx) * (w - 2 * pad)
+            let y = h - pad - CGFloat(peak.forceLb / denom) * (h - 2 * pad - 8)
+            let labelAbove = (y > 24) // flip below when peak is too close to the top edge
+            ZStack {
+                Circle()
+                    .fill(VoltraColor.phase(peak.phase).opacity(opacity))
+                    .frame(width: isNewest ? 6 : 4, height: isNewest ? 6 : 4)
+                    .position(x: x, y: y)
+                Text("\(Int(peak.forceLb.rounded()))")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .kerning(0.6)
+                    .foregroundColor(VoltraColor.text.opacity(opacity))
+                    .position(x: x, y: labelAbove ? max(10, y - 12) : min(h - 10, y + 12))
             }
         }
     }
@@ -488,6 +706,14 @@ struct ForceChartV2: View {
     /// Render one rep's polyline with phase-segmented coloring and the
     /// supplied opacity. Same phase-segmentation logic as the b56
     /// activeChart, but now over the rep's normalized 0..1 x-axis.
+    ///
+    /// b60-prep KI-11 §3b: each segment boundary now renders a small
+    /// soft-blend dot in the OUTGOING segment's color at reduced alpha,
+    /// so the eye reads the CON↔ECC handoff as a brief tween rather
+    /// than a hard color cut. Implementation note: the blend is purely
+    /// stroke-side (the fill side stays segmented because cleanly
+    /// alpha-blending two filled polygons would require composite
+    /// blend modes that don't survive opacity multiplication well).
     @ViewBuilder
     private func repPolyline(rep: [ForceSample], width w: CGFloat, height h: CGFloat, denom: Double, opacity: Double) -> some View {
         let pts: [(x: CGFloat, y: CGFloat, phase: VoltraPhase)] = rep.map { s in
@@ -497,7 +723,7 @@ struct ForceChartV2: View {
             return (x, y, s.phase)
         }
         let segments = phaseSegment(points: pts)
-        ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
+        ForEach(Array(segments.enumerated()), id: \.offset) { idx, seg in
             Path { p in
                 guard let first = seg.points.first else { return }
                 p.move(to: first)
@@ -507,6 +733,15 @@ struct ForceChartV2: View {
                 VoltraColor.phase(seg.phase).opacity(opacity),
                 style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
             )
+            // §3b: at the trailing end of each non-last segment, drop a
+            // small alpha-reduced blend dot in the segment's own color
+            // so the handoff to the next segment reads as a soft tween.
+            if idx < segments.count - 1, let tail = seg.points.last {
+                Circle()
+                    .fill(VoltraColor.phase(seg.phase).opacity(opacity * 0.35))
+                    .frame(width: 5, height: 5)
+                    .position(x: tail.x, y: tail.y)
+            }
         }
     }
 

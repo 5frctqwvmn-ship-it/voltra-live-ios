@@ -161,6 +161,30 @@ b58 ForceChartV2 landed only the 3b dual-band fill + 3c inline labels (current r
 - 6: low-weight Y floor (`max(peak × 1.2, 15 lb)`) — confirm V3 auto-scale already does this.
 - 6: mid-set mode-change rule — historical reps keep prior rendering; new rule for `ForceChartV2` data model.
 
+## 9. b60-prep delta (what landed in KI-11 implementation)
+
+The KI-11 pass on `feat/ui-v4-dropset-armonly` closed every 3e/3f/3g gap and brought 3b/3c/3d into spec. Pure rendering pass — no data-model or call-site changes outside one new prop (`invChainArmedActive`). Diffs in `VoltraLive/Logging/Views/V2/ForceChartV2.swift` and one wire-up line in `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`.
+
+| § | Status before | Status after KI-11 | Implementation note |
+|---|---|---|---|
+| 3a auto-scale (peak × 1.2, ease) | ✅ b57 | ✅ unchanged | Parent already supplies `yAxisMaxLb`; chart still 1.5 s eased on rescale. |
+| 3b 200 ms phase blend | ❌ hard-cut | ✅ stroke-side blend dot at every CON↔ECC boundary | Fill side stays segmented (alpha-blending two filled polygons doesn't survive opacity multiplication well). Compromise documented in code header. |
+| 3c label fade timing | ❌ binary suppress | ✅ `labelFadeAlpha` returns 1.0 for elapsed ≤ 3 s, linear ease 1→0 across 3..4 s, 0 beyond | "OR rep 2, whichever first" is enforced upstream by `repsAgo == 0` gate. |
+| 3d vertical-gradient ROM encoding | ❌ corner-flip only | ✅ 3-stop gradient (0.0 / 0.55 / 1.0) so the heavy region reads as a band, not a uniform ramp | Combined with the existing CHAIN start/end-point flip, gives ECC = hot band low, CHAIN = hot band high. |
+| 3e 80% dashed reference line | ❌ | ✅ horizontal dashed at 80% × peakLb, hidden when peak < 10 lb | Drawn under rep history, "80%" label flush right. |
+| 3e per-rep peak dots + labels | ❌ | ✅ dot at each rep's peak sample with kerned mono lb label | Newest rep dot 6 px, older 4 px; label fades with `fadeOpacity`, suppressed below 0.30. |
+| 3f rep stacking (log fade, cap 8) | ✅ b57 | ✅ unchanged | Already shipped; KI-11 just consumes it. |
+| 3g compact legend top-left | ❌ | ✅ legend chip rendered when any of ECC / CHAIN / INV CHAIN armed | Color-coded entries; baseline working-only sets stay clean. INV CHAIN now drives a legend entry only — the polyline shape still represents its mid-ROM offset. |
+| 4 layering | ⚠️ partial | ✅ grid → 80% line → history fills + polylines + peak dots → current label/legend | Verified by code-walk. |
+| 6 low-weight Y floor | ✅ 60 lb floor | ✅ unchanged | The b57 60-lb floor is already stricter than the 15-lb spec floor. |
+| 6 mid-set mode-change rule | ⚠️ implicit | ✅ implicit + documented | Historical reps render with current `eccBandActive` / `chainMirrorActive` because the chart is stateless on prior arms. The rule is now documented here so it isn't re-litigated. Acceptable tradeoff: reps don't carry per-sample mode metadata yet. |
+
+### KI-11 limits worth knowing
+
+- **No back-pressure on label collisions.** When 4+ reps overlay tightly in time, peak labels can overlap. The opacity-0.30 cutoff thins the older labels; if hardware QA shows the newest 2–3 labels still collide, the next iteration should skip the older labels' text (keep dots) before tweaking fonts.
+- **Phase-blend cosmetic only.** The §3b blend is a stroke-side dot at the boundary, not a true alpha-tween of the fills. If TestFlight feedback wants a "softer" look, the next iteration is to introduce a small overlap region in `phaseSegment` and render that overlap with a custom blend mode.
+- **INV CHAIN gradient.** Per V4-D design (still rejected), the fill direction does NOT change for INV CHAIN; only the legend entry surfaces. Re-litigating this requires per-sample ROM phase metadata that today's `ForceSample` doesn't carry.
+
 ## 9. Handoff Checklist
 
 In the same commit:

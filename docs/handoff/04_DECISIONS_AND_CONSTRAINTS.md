@@ -272,3 +272,47 @@ alone.
   semantic meaning (green = early, red = late); the dropset
   bar doesn't have an analogous "late" state, so a flat accent
   fill is more honest about what the bar communicates.
+
+### V4-D12 (b60-prep, KI-11) — Force-curve full spec compromises
+
+**Q.** Three §-level compromises were made when porting the full
+`force_curve.md` spec into `ForceChartV2.swift`. Document them
+so the next session doesn't re-litigate.
+
+**Decided.**
+1. **§3b 200 ms phase blend = stroke-side dot, not fill-side
+   alpha-tween.** Filled-polygon alpha blends across two
+   gradients don't survive opacity multiplication well in SwiftUI
+   (the under-fill from the next phase shows through and the
+   color stops shift). A 5 px dot in the closing segment's color
+   at 35% alpha gives the eye a soft handoff with one Path call
+   per boundary, no z-order surgery, no custom blend mode.
+2. **§3d gradient is 3-stop (0.0 / 0.55 / 1.0), not a true
+   ROM-position function.** A faithful ROM-position encoding
+   would require per-sample ROM phase metadata that today's
+   `ForceSample` doesn't carry. The 3-stop band reads as "heavy
+   middle" rather than "uniform ramp" and combined with the
+   existing CHAIN endpoint flip is enough to communicate ECC =
+   hot low, CHAIN = hot high without a data-model change.
+3. **§3g INV CHAIN drives the legend only, not the fill
+   direction.** Same reason as §3d above. Until `ForceSample`
+   gets ROM-phase metadata, INV CHAIN can't render a faithful
+   gradient direction. Surfacing the mode in the legend is the
+   honest middle ground — the user knows the mode is on without
+   the chart lying about how the load distributes.
+
+**Why.** All three compromises trade visual fidelity for
+implementation cost without breaking the user's mental model.
+The legend chip + per-rep peak labels + 80% reference line carry
+most of the Tonal-parity weight; the fill-side gradient nuance
+is a polish layer that can be revisited when `ForceSample` is
+ever rev'd.
+
+**Rejected.**
+- Adding `romPhase: ROMPhase` to `ForceSample` for this pass.
+  Touching the telemetry data model for a rendering polish is a
+  bigger surface than the V4 spec asked for and risks a sacred-
+  protocol-adjacent regression. Defer to a dedicated RFC.
+- Shipping §3b as a custom `BlendMode` overlay. Adds two
+  z-layers per rep × per phase boundary; the savings on visual
+  smoothness don't pay for the per-frame cost on long sets.

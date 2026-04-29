@@ -2833,3 +2833,39 @@ install, run the b58 QA wave-1 follow-up checklist (KI-7 / 8 /
 9 / 10) on hardware. If the phantom −5 lb drop (KI-10) recurs,
 we have repro context and can add debug logging on the
 resistance-write call sites in a follow-up build.
+
+## 2026-04-29 15:40 UTC — KI-11 force-curve full spec landed (b60-prep)
+
+- **Files changed:** `VoltraLive/Logging/Views/V2/ForceChartV2.swift`,
+  `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`,
+  `docs/handoff/design/force_curve.md`,
+  `docs/handoff/06_KNOWN_ISSUES.md`,
+  `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md`,
+  `docs/handoff/03_CURRENT_FEATURE_SPEC.md`.
+- **What changed:** Closed the seven §-level gaps in
+  `force_curve.md` that were tracked as KI-11. New on the chart:
+  80% dashed reference line (§3e), per-rep peak dot + lb label
+  (§3e), compact mode-aware legend chip top-left (§3g, includes
+  new INV CHAIN entry), time-based label fade (§3c), 3-stop
+  gradient ROM-band (§3d), stroke-side phase-blend dot at CON↔ECC
+  boundaries (§3b). One new optional init arg
+  `invChainArmedActive`; parent passes `invArmed` into it.
+- **Verification:** Static-only — no Swift toolchain in this
+  Linux container. Hand-traced ViewBuilder branch counts in the
+  modified body / `activeChart` / ZStack to stay within the 10-view
+  limit. Hand-traced gradient-stop math and the
+  `labelFadeAlpha(rep:)` boundary cases (3.0 → 1.0, 3.5 → 0.5,
+  4.0 → 0.0). CI `build.yml` will be the first real compile gate
+  on push.
+- **Risks:** No hardware QA yet. Likely-safe rendering surface,
+  but four watch-items: (1) older-rep peak labels may visually
+  collide on long sets, (2) §3b stroke blend dots may read as
+  artifacts on very fast reps, (3) 80% line uses running-set peak
+  not historical-set peak (matches Tonal pattern but worth
+  confirming on hardware), (4) INV CHAIN fill direction
+  intentionally unchanged — see V4-D12.
+- **Next step:** User pushes a TestFlight from this branch and
+  runs the post-build QA checklist (8 rows in `06_KNOWN_ISSUES`
+  KI-F11). If labels collide, dial the `>= 0.30` opacity
+  cutoff up. If §3b dots feel artifact-y, drop alpha 0.35 → 0.20
+  or remove. Do NOT merge this branch to main without that QA.

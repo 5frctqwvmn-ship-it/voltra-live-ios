@@ -1028,8 +1028,13 @@ struct LiveCaptureViewV2: View {
                 // CHAIN to mirror the user-felt build-up; INV CHAIN's
                 // thru-ROM offset is already represented by the polyline
                 // shape itself.
-                eccBandActive:     eccArmed,
-                chainMirrorActive: chainArmed
+                //
+                // b60-prep KI-11 §3g: INV CHAIN now drives the legend
+                // chip entry (no fill change) so the user sees an "INV"
+                // indicator top-left when the mode is armed.
+                eccBandActive:       eccArmed,
+                chainMirrorActive:   chainArmed,
+                invChainArmedActive: invArmed
             )
             .frame(maxWidth: .infinity, minHeight: 175)
         }

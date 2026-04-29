@@ -116,32 +116,71 @@ after b60 ships before closing this entry.
 add debug logging on every resistance-write call site and ship
 a debug-only follow-up build.
 
-### KI-11 (b58 → b59 QA) — Force-curve full spec not yet implemented
-
-**Surfaced:** b58 post-build QA wave 1; user delivered the full
-design in `docs/handoff/design/force_curve.md`.
-**File(s):** `VoltraLive/Logging/Views/V2/ForceChartV2.swift`.
-**What:** b58 ForceChartV2 only landed §3b dual-band fill + §3c
-basic inline labels + §3d corner-mirror gradient. Still missing:
-- §3b: 200 ms blended phase transition (current is hard-cut).
-- §3c: label fade timing (3 s OR rep 2, whichever first;
-  re-surface on mid-set mode change). Today only suppresses for
-  `repsAgo > 0`.
-- §3d: vertical gradient *within* the fill encoding ROM-position
-  (b58 only flips the outer corner direction).
-- §3e: dotted 80%-of-peak reference line, per-rep peak dots +
-  labels, optional target line hook.
-- §3f: rep stacking with logarithmic opacity decay, cap ·8.
-- §3g: compact mode-aware legend in top-left.
-- §6: low-weight Y floor `max(peak × 1.2, 15 lb)`; mid-set
-  mode-change rule (historical reps keep prior rendering).
-**Severity:** P1 — the chart works, but doesn't yet match the
-design target.
-**Owner:** Next session. Tracked as a single epic; do not split
-the §3e/§3f/§3g rendering passes across builds unless explicitly
-asked. `force_curve.md` is the source of truth.
-
 ## Recently fixed (move to WORK_LOG before deleting)
+
+### KI-F11 (b60-prep, fixed) — Force-curve full spec now matches force_curve.md
+
+**Was.** b58 ForceChartV2 only landed §3b dual-band fill + §3c
+basic inline labels + §3d corner-mirror gradient. The full
+Tonal-style spec in `docs/handoff/design/force_curve.md` had
+seven outstanding gaps tracked as a single epic.
+
+**Fix.** All §3b/§3c/§3d/§3e/§3g items now implemented in
+`VoltraLive/Logging/Views/V2/ForceChartV2.swift`:
+- §3b 200 ms phase blend — stroke-side blend dot at every CON↔ECC
+  segment boundary at 35% alpha. Fill stays segmented (true alpha
+  blend of two filled polygons doesn't survive opacity multiplication
+  in SwiftUI cleanly; documented compromise in the file header).
+- §3c label fade timing — `labelFadeAlpha(rep:)` returns 1.0 for
+  elapsed ≤ 3 s, linear ease 1 → 0 across 3..4 s, 0 beyond. The "OR
+  rep 2, whichever first" is enforced upstream by the existing
+  `repsAgo == 0` gate.
+- §3d vertical-gradient ROM encoding — `gradientStops` now returns
+  three stops (0.0 / 0.55 / 1.0) so the heavy region reads as a
+  band rather than a uniform ramp. Combined with the existing
+  CHAIN start/end-point flip this gives ECC = hot band low,
+  CHAIN = hot band high.
+- §3e 80%-peak dashed line — horizontal dashed line at 80% × peakLb,
+  hidden when peak < 10 lb so the empty / pre-pull state stays
+  clean. "80%" mono caption flush-right.
+- §3e per-rep peak dot + value label — dot at each visible rep's
+  peak sample, kerned mono lb label, fades with the existing
+  logarithmic curve. Suppressed below opacity 0.30.
+- §3g compact legend chip — renders top-left when any of
+  ECC / CHAIN / INV CHAIN is armed. Working-only sets stay clean.
+  INV CHAIN now drives a new `invChainArmedActive` prop that
+  surfaces the legend entry only; fill direction stays unchanged
+  (per `force_curve.md` §9 documented limit — rejecting an
+  INV-CHAIN fill flip until `ForceSample` carries per-sample ROM
+  phase metadata).
+
+**§3f and §6 already in spec.** §3f rep stacking shipped in b57;
+KI-11 just consumes it. §6 low-weight Y floor was already 60 lb
+(stricter than the 15 lb floor `force_curve.md` calls for).
+
+**Files changed.**
+- `VoltraLive/Logging/Views/V2/ForceChartV2.swift` — additive only;
+  no changes to slicer / rep model / parent contract beyond one
+  new optional init arg `invChainArmedActive`.
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — one wire-up
+  line passing `invArmed` into the new chart prop.
+- `docs/handoff/design/force_curve.md` — new §9 lists what landed
+  and the limits.
+
+**Hardware QA needed.** Build needs to ship a TestFlight + 8-row
+post-build QA pass. Specific checks:
+- 80% line tracks the running set peak (not session peak).
+- Per-rep peak dots align to the actual peak sample, not the rep
+  endpoint.
+- Legend chip renders only when at least one mod is armed.
+- Label fade visibly eases out around the 3 s mark of a rep,
+  not abruptly.
+- Phase-blend dots at CON↔ECC boundaries don't read as visual
+  artifacts (false-positive concern).
+- Older reps' peak labels don't pile up — if they collide with
+  the newest, the cutoff is the next dial to turn.
+
+
 
 ### KI-F7 (b60-prep, fixed) — Cascade interval was already 2 s
 
