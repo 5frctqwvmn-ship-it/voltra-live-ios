@@ -13,7 +13,15 @@ runs. Working agents do not need to read this directory.
 
 - `EXTERNAL_AUDIT_PROMPT_A.md` — Flavor A: black-box reproduction
   audit. The agent rebuilds the app spec from documentation alone,
-  with the Swift source hidden, then reports gaps.
+  with the Swift source hidden, then reports gaps. **Local variant**
+  — assumes the agent already has the repo checked out and is
+  running with filesystem access (Claude Code, Cursor, Antigravity,
+  Codex CLI on your machine).
+- `EXTERNAL_AUDIT_PROMPT_A_CLOUD.md` — Same audit, **cloud variant**.
+  Self-contained: the agent clones the repo itself, manages its own
+  working directory, returns outputs as a tarball with SHA-256.
+  Use this for cloud agents (Claude Code cloud, ChatGPT Codex cloud,
+  Devin, Cursor Background Agents) where you can't pre-stage files.
 - `runs/` — recorded outputs of past audit runs. One subdirectory
   per run, named `YYYY-MM-DD-<model>-<flavor>/`, containing the four
   output files the audit prompt produces (`01_understanding.md`,
@@ -41,6 +49,10 @@ of files directly.
 
 Recommended models: Claude Opus 4.7, Gemini 3 Pro, GPT-5. Avoid
 mini/lite tiers — audit value is in reasoning quality, not throughput.
+
+For cloud agents, paste the contents of `EXTERNAL_AUDIT_PROMPT_A_CLOUD.md`
+between the `PROMPT BEGINS` and `PROMPT ENDS` markers as the task. The
+agent does the rest. For local agents, use `EXTERNAL_AUDIT_PROMPT_A.md`.
 
 Do not run the same prompt twice with the same model in the same
 week; you'll get correlated answers. For a second opinion, use a
