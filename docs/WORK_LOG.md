@@ -2579,3 +2579,35 @@ checklist" + `docs/handoff/QA_LOG.md`). CI green and altool
 running on real hardware caught that the dual UI never
 rendered. The QA checklist for b58 surfaced this within
 hours of ship — exactly the gap it's meant to close.
+
+## 2026-04-29 20:00 UTC — b66 V4.2 macro fix: version bump (0.4.39/66)
+
+- **Files changed:** `project.yml`, `VoltraLive/Info.plist`.
+- **What changed:** Bumped MARKETING_VERSION 0.4.37→0.4.39 and
+  CURRENT_PROJECT_VERSION 59→66 in both `project.yml` (target +
+  Info section) and `VoltraLive/Info.plist`. Updated
+  `VOLTRAFeatureLabel` to "b66: V4.2 ASSIGN TO VOLTRA panel +
+  superset switcher (HARDWARE-QA-PENDING)". Skipping b60-b65
+  per the existing "Apple's contaminated 60-64 range" rule
+  (see release/v0.4.38-build60 commits ca01285, 7ebe8f9).
+- **Verification:** None yet — version bump only, no behavioral
+  changes. Subsequent commits will land V4.2 reskin.
+- **Risks:** None at this commit. Macro must agree across both
+  files (project.yml regenerates Info.plist via xcodegen — see
+  b60 root cause commit 52c2a14). Both are bumped consistently.
+- **Next step:** Recreate the V4.2 reskin files (panel +
+  switcher + page badge + MDM extension), cherry-pick
+  3f8d41c (b60-prep dropset arm-only refactor) from
+  release/v0.4.38-build60, bump cascadeArmIdleSec +
+  cascadeIntervalSec 2.0→3.0, mount panel on day +
+  exercise + live screens, ship to TestFlight.
+
+### Recovery note (NOT for next session — this session only)
+
+This commit is a recovery commit. Earlier in this session
+the agent (Claude) wrote ~4 new files + 4 edits + 1
+cherry-pick on a local branch `feat/ui-v4-2-claude` that
+was NEVER pushed. Sandbox reset wiped everything. Hard
+rule going forward: **commit + push every 10 Q&A turns,
+no exceptions.** This recovery commit is turn-1 of the
+new rule.
