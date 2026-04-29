@@ -4,30 +4,24 @@
 > `docs/WORK_LOG.md` and are deleted from here. Unfixed items
 > stay until shipped.
 
-## b67 Bug Batch (queued, fix-mode active)
+## b67 Bug Batch — SHIPPED in v0.4.40 / build 67
 
-User ran b66 on hardware and reported 9 bugs across 8 paste blocks
-on Apr 29 2026. All entries with full evidence + open-Q lists live
-in **`B67_BUG_QUEUE.md`** — that file is the source of truth for
-the b67 cycle. Summary index here so cold-start agents see the
-landscape:
+All 9 entries in `B67_BUG_QUEUE.md` are CLOSED in b67. See
+`docs/WORK_LOG.md` for the full ship entry. Summary:
 
-- **B67-01** — Cold launch → ConnectView (should be `WorkoutSelectionScreen`)
-- **B67-02** — Footer watermark cluttered (verbose b58-era `buildBadgeOverlay`)
-- **B67-03** — `WorkoutSelectionScreen` header has 4-pill row + duplicate sub-row + 3-state HR pill regression
-- **B67-04+05** — Delete `DualConnectView` + `DualCaptureView`; pairing model flips from select-then-connect to tap = connect
-- **B67-06** — ONE `LiveWorkoutScreen` for all modes (single / merged / superset = mode prop) + extract shared `VoltraUnitHeader`
-- **B67-07** — Pairing tap from `ExerciseDetailScreen` fails silently → shared `PairingCoordinator` covering all three header mount points
-- **B67-08** — Duplicate unit-status rows everywhere (3 surfaces home / 2 each on live + detail) → collapse to single `VoltraUnitHeader` (`L`/`R`/`⋏`/`●●`, no `SS`)
-- **B67-09** — (skipped/reserved — user numbered the force-curve bug as Bug 10; see Q10.5)
-- **B67-10** — Force curve on `LiveWorkoutScreen` not a sine wave; restore parametric per-rep sine geometry with log-faded history overlay; flag #8 flipped to `BROKEN`
+- **B67-01** — closed by `3257517` (cold-launch → `LoggingHomeView` always)
+- **B67-02** — closed by `a3b6c6e` (footer watermark cleared)
+- **B67-03** — closed by `faad2c6` (wordmark + duplicate identity chrome removed)
+- **B67-04+05** — closed by `3257517` (`DualConnectView` + `DualCaptureView` deleted; `UnifiedConnectSheet` is canonical)
+- **B67-06** — closed by `faad2c6` (single `VoltraUnitHeader` mounted on all 3 screens)
+- **B67-07** — closed by `3257517` (`PairingCoordinator.swift` env-object; one sheet binding at home root)
+- **B67-08** — closed by `faad2c6` (single canonical unit header; `VoltraAssignmentPanel` deleted)
+- **B67-09** — (skipped / reserved per user; not a real bug)
+- **B67-10** — closed by `660853a` (parametric per-rep `sin(π·t)` lobes in `ForceChartV2`; ADR V4-D13)
 
-Cross-cutting flags + lint-gate grep invariants live in `B67_BUG_QUEUE.md`.
-All 9 are entangled (touch the same view files) — ship together as
-b67 v0.4.40 / build 67 unless otherwise decided.
-
-Closed by b67 will be moved to `WORK_LOG.md` and deleted from here
-at ship time.
+ADRs added in b67: V4-D13 (force-curve geometry), V4-D14 (single
+canonical chrome), V4-D15 (PairingCoordinator). See
+`04_DECISIONS_AND_CONSTRAINTS.md`.
 
 ## Open
 
@@ -141,7 +135,15 @@ after b60 ships before closing this entry.
 add debug logging on every resistance-write call site and ship
 a debug-only follow-up build.
 
-### KI-11 (b58 → b59 QA) — Force-curve full spec not yet implemented
+### KI-11 (b58 → b67, FIXED) — Force-curve full spec
+
+Closed by b67 commit `660853a` (Bug 10 — parametric per-rep sine
+lobes + log-fade history overlay). Concrete §3f and §3a/3b/3d
+bits land; §3e (80% reference line, peak dots) and §3g (compact
+legend) remain optional follow-ups for a later cycle. See ADR
+V4-D13 in `04_DECISIONS_AND_CONSTRAINTS.md`.
+
+### KI-11-LEGACY (b58 → b59 QA, superseded) — original spec note
 
 **Surfaced:** b58 post-build QA wave 1; user delivered the full
 design in `docs/handoff/design/force_curve.md`.

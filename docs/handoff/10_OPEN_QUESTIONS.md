@@ -6,38 +6,6 @@ Things blocked on the user. Resolve before the dependent task can ship.
 > commit** as the code change that uses the answer. Don't let stale
 > questions accumulate.
 
-## b67 — unblocking questions (asked + ANSWERED Apr 29 2026)
-
-Both blocker questions answered before code work began. Recorded
-here for traceability; will be deleted in the b67 ship commit per
-the top-of-file rule.
-
-### Q10.1 — Sine-wave force-curve geometry source → **ANSWERED: A**
-
-> Reimplement from `docs/handoff/design/force_curve.md` spec.
-
-Decision rationale: git history search returned zero commits where
-the live force chart was ever parametric sine; spec doc is the only
-remaining source of truth. Options B/C/D rejected.
-
-**Implementation note:** B67-10 fix builds a fresh per-rep sine-wave
-renderer using `force_curve.md` as canonical, replacing the
-raw-sample polyline path in `ForceChartView.swift` /
-`ForceChartV2.swift`. ADR will be added to
-`04_DECISIONS_AND_CONSTRAINTS.md` (V4-D13 or next available slot)
-in the same commit as the code.
-
-### Q10.5 — Numbering + scope → **ANSWERED: A**
-
-> Keep Bug 10 numbering, ship all 9 in b67.
-
-Decision rationale: bugs are entangled (03/06/07/08 all touch the
-same view files; 04+05 must ship with 07 per cross-cutting flag
-#11). Bug 09 stays explicitly skipped/reserved. Single release:
-**v0.4.40 / build 67**.
-
-Branch stays `feat/ui-v4-2-claude` (continuation, no new branch).
-
 ## V2 promotion
 
 ### Should V2 become the default?

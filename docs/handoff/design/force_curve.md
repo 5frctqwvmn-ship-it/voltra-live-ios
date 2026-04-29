@@ -174,3 +174,41 @@ In the same commit:
 3. Append `docs/WORK_LOG.md` entry (b59 when shipped).
 4. Link this doc from `docs/handoff/03_CURRENT_FEATURE_SPEC.md` under the Force Curve P0 section.
 5. Update `docs/handoff/09_NEXT_AGENT_PROMPT.md` to cite this design doc as the implementation source of truth for the force curve.
+
+---
+
+## 10. b67 implementation status (Apr 29 2026)
+
+Bug 10 (B67_BUG_QUEUE.md) closed by commit `660853a` on
+`feat/ui-v4-2-claude`. Implementation per ADR V4-D13 in
+`04_DECISIONS_AND_CONSTRAINTS.md`:
+
+- §3a **Auto-scaled Y-axis** — preserved from b58 (parent-supplied
+  `yAxisMaxLb`, 1.5 s ease).
+- §3b **Dual-band fill** — preserved + rewired. `eccConFill` now
+  follows the parametric sine path so stroke + fill cannot drift.
+  CHAIN gradient mirror preserved.
+- §3c **Inline CON/ECC labels** — preserved. Most-recent rep only.
+- §3d **Chain mirrored gradient** — preserved (gradient stops
+  reversed for ECC band when `chainMirrorActive`).
+- §3e **80% reference line + peak dots + target line** — NOT
+  implemented in b67. Geometry now exposes per-lobe peak via
+  `RepSineGeometry.conPeak / .eccPeak`, so this is a small
+  follow-up.
+- §3f **Rep stacking with log opacity decay, cap 8** — preserved
+  from b58. `fadeOpacity(repsAgo:)` formula =
+  `max(0.10, 1 / (1 + ln(repsAgo + 1)))`.
+- §3g **Compact legend top-left** — NOT implemented in b67.
+- §6 **Mid-set mode change** — historical reps continue to use
+  their original geometry (peakLb is computed per-rep from that
+  rep's samples, so a mode flip mid-set doesn't restyle prior
+  reps).
+
+### What changed in b67 vs b58
+
+`repPolyline` no longer traces raw sensor samples. It draws two
+half-sine lobes computed from the rep's measured per-phase peak
+force, with phase-boundary `splitT` derived from the first
+`.return` sample's normalized timestamp. See ADR V4-D13 for
+rationale and rejected alternatives (full-period sine,
+`|sin(π · t)|`, sample-mean polyline).

@@ -2884,3 +2884,57 @@ new rule.
   user installs and re-tests KI-10 (phantom -5 lb), the rest-bar
   first-engage path on a fresh launch, and 3-digit + TWIN layout
   on a real device. Results captured in `docs/handoff/QA_LOG.md`.
+
+## v0.4.40 / build 67 — b67: 9-bug ship cycle (Apr 29 2026)
+
+User ran b66 on hardware (Apr 29 2026) and reported 9 bugs across
+8 paste blocks in one session. All entries in `B67_BUG_QUEUE.md`.
+Single release, single branch (`feat/ui-v4-2-claude` open, no PR
+merge per sticky-rules), shipped as v0.4.40 / build 67.
+
+### Bugs closed
+
+| # | Title | Commit | Notes |
+|---|---|---|---|
+| 01 | Cold launch → ConnectView | `3257517` | `ContentView` flipped: `LoggingHomeView` is unconditional landing surface; pairing is foreground gesture via `PairingCoordinator`. |
+| 02 | Footer watermark verbose | `a3b6c6e` | `VOLTRAFeatureLabel` cleared; only the two-sided `pageBadge` carries identity. |
+| 03 | Wordmark / duplicate identity chrome | `faad2c6` | VOLTRA wordmark + bolt logo removed from `ConnectView` and `LoggingHomeView` header. |
+| 04+05 | `DualConnectView` + `DualCaptureView` killed | `3257517` | 598 LOC removed. LOAD/UNLOAD already on weight-tap binding (b56). |
+| 06 | Single `LiveWorkoutScreen` | `faad2c6` | Unified header chrome via `VoltraUnitHeader` removes per-mode forks at the top of the screen. |
+| 07 | Shared `PairingCoordinator` | `3257517` | New file `Coordinators/PairingCoordinator.swift`, env-object, drives `UnifiedConnectSheet` from any of the 3 mounts. |
+| 08 | Single canonical `VoltraUnitHeader` | `faad2c6` | New file `Views/VoltraUnitHeader.swift` (326 lines); mounts on home / detail / live; `VoltraAssignmentPanel.swift` deleted (-359). |
+| 09 | (reserved, skipped) | n/a | User numbered force-curve as Bug 10; 09 stays explicitly reserved. |
+| 10 | Force curve = parametric sine | `660853a` | `ForceChartV2` rewritten: `repSineGeometry` builds two `sin(π·t)` lobes (con + ecc), `eccConFill` traces same path, log-fade history overlay preserved. ADR V4-D13. |
+
+### Decisions added
+
+- ADR **V4-D13** — Force-curve geometry: parametric per-rep sine
+- ADR **V4-D14** — Single canonical chrome: `VoltraUnitHeader`
+- ADR **V4-D15** — Shared `PairingCoordinator`
+
+(All in `04_DECISIONS_AND_CONSTRAINTS.md`.)
+
+### Net code delta
+
+- Created: `Views/VoltraUnitHeader.swift` (326), `Coordinators/PairingCoordinator.swift` (80)
+- Deleted: `Views/VoltraAssignmentPanel.swift` (359), `Views/Dual/DualConnectView.swift` (336), `Views/Dual/DualCaptureView.swift` (262), `Views/WorkoutVoltraPickerSheet.swift` (186)
+- Modified: `LoggingHomeView`, `ExerciseDetailView`, `LiveCaptureViewV2`, `ContentView`, `VoltraLiveApp`, `ConnectView`, `ForceChartV2`, `Info.plist`, `project.yml`
+- Empty `Views/Dual/` directory removed.
+
+### Lint-gate verification
+
+`grep -rni "VL1\|LiveStatusPill\|LeftRightStatusPill\|DeviceStatusStrip\|VoltraWordmark" VoltraLive/Views/ VoltraLive/Logging/Views/`
+returns matches **only** in:
+- comments inside `VoltraUnitHeader.swift` (intentional documentation header listing what was removed)
+- `DebugView.swift` user-facing copy referring to "VOLTRA Live" as the iOS app name in Settings → Privacy → Health (legitimate product reference)
+
+Zero matches in non-comment in-app chrome.
+
+### Sacred files: untouched.
+
+`VoltraProtocol.swift`, `TelemetryExtractor.swift`, `PacketParser.swift`,
+`FrameAssembler.swift`, `release.yml`, `build.yml` all clean.
+
+### Ship verification
+
+(See "Ship verification" subsection below — populated post-altool.)

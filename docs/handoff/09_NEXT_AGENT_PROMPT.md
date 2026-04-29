@@ -4,30 +4,43 @@
 > up VOLTRA Live iOS. Skim, then read the docs in the order at
 > the bottom.
 
-## Where things stand (b67 active, b66 shipped)
+## Where things stand (b67 fixed in-tree, awaiting altool ship)
 
-**ACTIVE CYCLE:** b67 / v0.4.40 / build 67 — user delivered 9-bug
-batch on Apr 29 2026 after running b66 on hardware. Bug-collection
-phase is **closed**, fix phase is **active**. All 9 bug entries
-with evidence + open-Q lists live in **`B67_BUG_QUEUE.md`** — read
-that next.
+**ACTIVE CYCLE:** b67 / v0.4.40 / build 67 — all 9 user-reported
+bugs (Apr 29 2026 batch) are **fixed and committed** on
+`feat/ui-v4-2-claude`. The branch is awaiting `release.yml dry_run=false`
++ 5-gate altool verify + TestFlight surface. Read
+**`B67_BUG_QUEUE.md`** for the per-bug evidence + close-out commit
+IDs, **`docs/WORK_LOG.md`** for the v0.4.40 ship narrative, and
+**`04_DECISIONS_AND_CONSTRAINTS.md`** ADRs V4-D13 / V4-D14 / V4-D15
+for design rationale.
 
-b67 scope (entangled, ship together):
-1. B67-01 cold-launch routing fix
-2. B67-02 footer cleanup (kill verbose `buildBadgeOverlay`)
-3. B67-03 `WorkoutSelectionScreen` header consolidation
-4. B67-04+05 delete `DualConnectView` + `DualCaptureView`; pairing model flip
-5. B67-06 ONE `LiveWorkoutScreen` (mode = prop)
-6. B67-07 shared `PairingCoordinator`
-7. B67-08 collapse to single `VoltraUnitHeader` (`L`/`R`/`⋏`/`●●`)
-8. B67-09 skipped/reserved (numbering, see Q10.5)
-9. B67-10 force curve sine-wave restoration + log-faded history overlay
+b67 wins (all closed):
+1. **B67-01** — `LoggingHomeView` is unconditional cold-launch surface (no Voltra-pair wall)
+2. **B67-02** — footer watermark cleared
+3. **B67-03** — wordmark + duplicate identity chrome removed
+4. **B67-04+05** — `DualConnectView` + `DualCaptureView` deleted; `UnifiedConnectSheet` is canonical pair flow
+5. **B67-06** — single `VoltraUnitHeader` mounts on home / exercise detail / live
+6. **B67-07** — `PairingCoordinator.swift` env-object owns all pair gestures
+7. **B67-08** — `VoltraAssignmentPanel.swift` deleted; identity chrome lives in `VoltraUnitHeader.swift` only
+8. **B67-09** — reserved/skipped (user numbered force-curve as Bug 10)
+9. **B67-10** — force-curve = parametric `sin(π·t)` lobes per rep with log-faded history overlay
 
-Lint-gate grep invariants from B67-08 must pass post-fix:
+Lint-gate grep invariants pass post-fix:
 ```
-grep -rni "VL1\|VOLTRA Live\|Left .* Right .*\|LiveStatusPill\|LeftRightStatusPill\|DeviceStatusStrip\|VoltraWordmark" VoltraLive/Views/
+grep -rni "VL1\|LiveStatusPill\|LeftRightStatusPill\|DeviceStatusStrip\|VoltraWordmark" VoltraLive/Views/ VoltraLive/Logging/Views/
 ```
-→ must return zero matches.
+zero matches outside of (a) the documentation header inside
+`VoltraUnitHeader.swift` listing what was killed and (b) `DebugView`
+user copy referring to the iOS app name in Settings → Privacy →
+Health.
+
+### Next-agent action: ship b67
+
+1. Run `gh workflow run release.yml --repo 5frctqwvmn-ship-it/voltra-live-ios --ref feat/ui-v4-2-claude -f dry_run=false`
+2. 5-gate altool verify (see `09_RELEASE_AND_SIGNING.md`)
+3. Confirm TestFlight surface for v0.4.40 / build 67
+4. Append `WORK_LOG.md` ship-verification subsection with delivery UUID + duration.
 
 ## Where things stand (b66, v0.4.39-build66)
 

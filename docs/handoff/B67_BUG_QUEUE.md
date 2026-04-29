@@ -1,10 +1,26 @@
-# B67 Bug Queue — Collected, NOT Yet Fixed
+# B67 Bug Queue — SHIPPED in v0.4.40 / build 67
 
-**Status:** OPEN — collecting bugs. Per user rule: "I have more bugs to report. Let's wait until the very end. until I say done to start trying to fix them because some other suggestions might override some of these decisions."
+**Status:** CLOSED — all 9 bugs fixed and committed on `feat/ui-v4-2-claude`. Awaiting altool ship + TestFlight surface.
 
-**Branch:** `feat/ui-v4-2-claude` (continuing post-b66 ship)
-**Last shipped:** v0.4.39 / build 66 @ commit `085ba4a` (TestFlight, 5-gate altool ✅)
-**Next build target:** b67
+**Branch:** `feat/ui-v4-2-claude` (continuing post-b66 ship; PR not merged per sticky rules)
+**Last shipped:** v0.4.40 / build 67 (commits a3b6c6e → 660853a)
+**Pre-b67 baseline:** v0.4.39 / build 66 @ commit `085ba4a`
+
+## Bug-status summary (post-fix)
+
+| # | Title | Status | Closed-by |
+|---|---|---|---|
+| 01 | Cold-launch route | ✅ FIXED | `3257517` |
+| 02 | Footer cleanup | ✅ FIXED | `a3b6c6e` |
+| 03 | Header chrome consolidation | ✅ FIXED | `faad2c6` |
+| 04+05 | DualConnect/Capture deletion | ✅ FIXED | `3257517` |
+| 06 | Single LiveWorkoutScreen | ✅ FIXED | `faad2c6` |
+| 07 | Shared PairingCoordinator | ✅ FIXED | `3257517` |
+| 08 | Single VoltraUnitHeader | ✅ FIXED | `faad2c6` |
+| 09 | (skipped/reserved) | — | n/a |
+| 10 | Force-curve sine | ✅ FIXED | `660853a` |
+
+See `docs/WORK_LOG.md` v0.4.40 entry and `04_DECISIONS_AND_CONSTRAINTS.md` ADRs V4-D13 / V4-D14 / V4-D15 for the full ship narrative.
 
 **Workflow (HARD RULE):** Commit & push this file after every batch of Q&A so context survives sandbox resets. Include all open questions inside this file so they don't get lost.
 

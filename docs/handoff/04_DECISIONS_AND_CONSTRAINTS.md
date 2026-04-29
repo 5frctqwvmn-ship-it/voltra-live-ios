@@ -381,3 +381,118 @@ KI-F1 (b57), which fixed the engagement-detection side in
   fails. Switching the predicate is the honest fix.
 - Move the publisher to a 0.0 s tick. Doesn't solve the race;
   the publisher's first run is still on the next run-loop turn.
+
+### V4-D13 (b67, Bug 10) — Force-curve geometry: parametric per-rep sine
+
+**Q.** The b58–b66 force-curve traced raw sensor samples as a
+phase-segmented polyline. User feedback: reps look blocky/spiky
+and "bleed into one continuous trace." How should rep shapes be
+rendered on `LiveWorkoutScreen` (`LiveCaptureViewV2` →
+`ForceChartV2`)?
+
+**Decided.** Each rep is rendered as **two half-sine lobes**:
+- Concentric (`pull`)  : `sin(π · t)` over `[0, splitT]`,
+                          peaking at the rep's measured concentric
+                          peak force.
+- Eccentric (`return`) : `sin(π · t)` over `[splitT, 1]`,
+                          peaking at the rep's measured eccentric
+                          peak force.
+
+`splitT` is the normalized timestamp of the first `.return` sample
+in the rep (so a slow lower vs fast lift still renders correctly).
+Both fill (`eccConFill`) and stroke (`repPolyline`) use the SAME
+parametric path so they cannot drift. Older reps in the set are
+overlaid at log-decay opacity (newest 100% → oldest 15%, cap 8)
+exactly as `docs/handoff/design/force_curve.md` §3f requires.
+
+**Why.** The polyline-of-samples approach was honest to telemetry
+but visually ambiguous — 80 Hz sample noise dominated the rep
+envelope shape, and the user reads the chart for *envelope*, not
+microvariance. A parametric shape lets the rep peak and the
+ECC-vs-CON asymmetry telegraph at a glance, matching Tonal
+parity (`force_curve.md` §3a–§3f). Phase boundary is still
+hardware-derived (not a fixed 50/50 guess) so a slow eccentric
+genuinely takes more chart-width.
+
+**Rejected.**
+- Sample-mean polyline. Smooths the raw-sample noise but
+  inherits the bleeding-rep boundary problem and still has
+  asymmetric peak-misalignment artifacts.
+- Single full-period `sin(2π · t)` per rep. Pretty but maps
+  con→peak→ecc→trough; the ecc trough goes BELOW baseline
+  which is geometrically wrong for force-vs-time (force is
+  non-negative).
+- `|sin(π · t)|` of a single half-period. Collapses to a
+  single hump, loses the ECC vs CON visual asymmetry that's
+  the whole point.
+
+### V4-D14 (b67, Bug 03/06/08) — Single canonical chrome: VoltraUnitHeader
+
+**Q.** Three screens (`WorkoutSelectionScreen` /
+`LoggingHomeView`, `ExerciseDetailScreen` /
+`ExerciseDetailView`, `LiveWorkoutScreen` / `LiveCaptureViewV2`)
+each rendered their own VOLTRA wordmark + L/R status pill +
+HR pill + LIVE/IDLE/WAIT chip. Diverged copy, diverged colors,
+duplicated state. What replaces them?
+
+**Decided.** One file: `VoltraLive/Views/VoltraUnitHeader.swift`.
+Owns L/R/⋏/●● mode pills + 3-state HR pill (dark/blink/solid).
+Mounted at all 3 screens with the same call signature; per-screen
+behavior controlled by two props:
+- `exerciseName: String?` — `nil` means "writes
+  `mdm.workoutMode` (default for the day)"; non-nil means
+  "writes `mdm.exerciseAssignmentOverride[name]` (per-exercise
+  override)". Mirror rule 1A.
+- `isReadOnly: Bool` — locks every pill mid-set. Mirror rule 2A.
+
+**Removed entirely:** VOLTRA wordmark text + bolt icon,
+"Live" word, telemetryPulsePill (LIVE/IDLE/WAIT chip),
+connectionPill (Left ● Right ●), and the `VoltraAssignmentPanel`
+file's duplicate `VL1 ⌚ │ … │ SS` strip.
+
+**Why.** The user's evidence (Bugs 03/06/08) showed the same
+identity chrome rendered 2–3 times on a single screen — wordmark
+in nav, wordmark in panel, dot status in two places. Single
+canonical surface is the only fix that scales as we add more
+screens later (Settings, History, Onboarding).
+
+**Rejected.**
+- Keep the wordmark, just dedupe the pills. User explicitly
+  said the wordmark is also redundant — they know what app
+  they're in.
+- Make the header per-screen with shared sub-views. Doesn't
+  prevent future divergence.
+
+### V4-D15 (b67, Bug 07) — Shared PairingCoordinator
+
+**Q.** Pairing was triggered from three places (greyed-pill
+tap on home, exercise detail, live screen) and presented from
+local `@State showingPairSheet: Bool` on each — with each
+screen subscribing independently to
+`MultiDeviceManager.scanRequestedSubject`. How should the
+gesture be unified?
+
+**Decided.** New file:
+`VoltraLive/Coordinators/PairingCoordinator.swift`.
+- Owned by `VoltraLiveApp` as `@StateObject`.
+- Injected as `@EnvironmentObject` so any screen can call
+  `pairing.presentPair(slot:)`.
+- `VoltraUnitHeader.onPairRequest` closure is the canonical
+  surface from any of the 3 mounts.
+- Sheet binding lives at `LoggingHomeView` root so a single
+  `UnifiedConnectSheet` presentation backs all three triggers.
+- Bridges legacy `MultiDeviceManager.scanRequestedSubject` so
+  deep-links / debug menu / hot-reload still surface the sheet
+  without per-view subscriptions.
+
+**Why.** Bug 07's hard dependency: once `DualConnectView` is
+deleted (Bug 04+05), the only working pairing path today is
+gone. Coordinator centralizes both the "what sheet do we show"
+and the "how do we show it" decisions, so deletion of legacy
+chrome doesn't strand the user mid-flow.
+
+**Rejected.**
+- Keep `DualConnectView` alive, just wrap call sites. Doesn't
+  remove the duplicate pair UX or the duplicate scanner state.
+- Per-screen `@State showingPairSheet`. Status quo; defeats
+  the dedupe.
