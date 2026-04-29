@@ -3327,3 +3327,63 @@ in `info.properties` and bump only the target build settings.
 Pattern (b) — now in effect — is single-source-of-truth and prevents
 this drift class entirely.
 
+
+---
+
+## 2026-04-29 17:55 UTC — Doc update: codify b60 macro fix for GPT-5.5 release-conduit
+
+**Goal:** Make sure the next time GPT-5.5 (or any other agent) bumps the
+build for VOLTRA Live iOS, the release-conduit can push it through with
+minimal tokens and zero rediscovery of the xcodegen-info.properties trap.
+
+**Files changed:**
+- `docs/handoff/09_RELEASE_AND_SIGNING.md` — replaced the obsolete
+  "Three places to bump" section (which was the b55-fix's wrong solution)
+  with three new sections:
+  1. "ONE place to bump on every release (post-b60 macro fix)" — the
+     new procedure: edit only `MARKETING_VERSION` /
+     `CURRENT_PROJECT_VERSION` at `project.yml` lines 64–65.
+  2. "DO NOT re-add hardcoded version literals to `info.properties`" —
+     explains the xcodegen regen mechanism, names the workflow log line
+     to look for (`⚙️ Generating plists...`), and explicitly retires the
+     three-places-in-sync rule.
+  3. "If you see this altool error" — recognizable troubleshooting
+     section with the exact 409 ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE
+     signature, the 3–5s wall-clock pre-flight rejection tell, and a
+     diagnostic flow (download dry-run IPA via `gh api`, plistlib-read
+     the embedded Info.plist) that catches re-corruption immediately.
+- `docs/handoff/00_START_HERE.md` — added "Uploaded to TestFlight,
+  awaiting hardware QA: v0.4.38-build60" entry above the b56 paragraph,
+  framing the ship per the user's "not done, awaiting hardware QA"
+  direction. Names the macro fix, the three failed-upload audit-trail
+  tags, the dry-run plistlib verification step, and the QA-pending
+  items (dual-Voltra routing, KI-9/10/11). Points future agents at
+  the new "ONE place to bump" + "DO NOT re-add hardcoded literals"
+  sections.
+
+**Why this matters:** The b55-fix tried to solve the
+`info.properties` overwrite class of bug by writing a "three places
+must agree" checklist into 09_RELEASE_AND_SIGNING.md. That checklist
+is fragile — any agent who edits build settings and forgets
+`info.properties` (or vice-versa) ships a wrong build. b60/b61/b65
+all hit exactly that failure mode three times in a row before the
+macro pattern was applied. The doc now documents the macro pattern
+as the only correct approach and explicitly tells future agents not
+to reintroduce the checklist.
+
+**Verification:**
+- `09_RELEASE_AND_SIGNING.md` line 8 now reads
+  "ONE place to bump on every release (post-b60 macro fix)".
+- `00_START_HERE.md` "Uploaded to TestFlight, awaiting hardware QA"
+  line precedes the b56 paragraph.
+- No code or sacred-file changes. No version bumps. No CI churn.
+
+**Risks:** None — docs-only. Working tree was clean before this
+commit (post-b60 ship + WORK_LOG ship-success entry already
+committed in `b79434c`).
+
+**Next step:** Commit + push to `release/v0.4.38-build60`. Branch
+state will be: a48cf7c → … → 52c2a14 (FIX) → b79434c (ship-success
+log) → <this commit> (doc update). Hardware QA on b60 still
+outstanding; dual-Voltra / KI-9 / KI-10 / KI-11 unconfirmed on
+real device.
