@@ -2621,3 +2621,27 @@ new rule.
      The dropset arm-only entry (b60-prep) below is
      preserved verbatim — it pre-dates the fork split
      and lives on shared release/v0.4.38-build60. -->
+
+## 2026-04-29 20:30 UTC — b66 T1: cascade timers 2.0 → 3.0 s
+
+- **Files changed:** `VoltraLive/Logging/Persistence/LoggingStore.swift`,
+  `docs/handoff/entities/dropset_state_machine.md`.
+- **What changed:** Bumped both `cascadeArmIdleSec` and
+  `cascadeIntervalSec` from 2.0 → 3.0 in `LoggingStore.swift`,
+  with b66-tagged comments on each. Updated
+  `dropset_state_machine.md` constants table to reflect the
+  new values + bump history (4.0 → 2.0 → 3.0).
+- **Verification:** Constant change only; cherry-pick of
+  3f8d41c brought in the arm-only refactor wiring (commit
+  0465b34 on this branch). The two constants flow through
+  the same code paths the cherry-pick added — `armDropSet`,
+  `engageArmedDropSet`, `noteTelemetryActivity`, and the
+  `cascadeTimer` publisher.
+- **Risks:** User-observable feel change. 3 s arm-to-first-
+  drop and 3 s tier-to-tier may feel slow to repeat users
+  who built muscle memory on 2 s. If user wants 2.5 s as
+  a compromise, bump both constants in lockstep again.
+- **Next step:** Recreate V4.2 reskin files (panel +
+  switcher + page badge + MDM extension), mount on
+  LoggingHomeView + LiveCaptureViewV2 + ExerciseDetailView,
+  delete WorkoutVoltraPickerSheet wiring, then ship.

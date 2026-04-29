@@ -124,7 +124,10 @@ final class LoggingStore: ObservableObject {
     /// Cascade tick interval. b45: tightened from 4s to 2s per user request
     /// — 4s felt sluggish and cost mid-cascade tempo; 2s matches the rate
     /// at which the user is physically able to swap mental weight targets.
-    private let cascadeIntervalSec: Double = 2.0
+    /// b66: bumped 2s → 3s per user post-b58 QA ask. 2s was too fast on
+    /// hardware once the arm-only refactor (KI-9) was in — user lost a
+    /// drop because the next tier fired before they re-engaged.
+    private let cascadeIntervalSec: Double = 3.0
     /// b49: read-only mirror so LiveCaptureView's drop-set progress bars
     /// can size themselves from the same constant the timer uses, instead
     /// of a hardcoded 4.0 that drifted out of sync with the actual fuse.
@@ -479,7 +482,9 @@ final class LoggingStore: ObservableObject {
     /// post-b58 QA ask ("DROP timer should be 2 s") and the
     /// `cascadeIntervalSec` already in use for tier-to-tier ticks, so
     /// arm-to-first-drop and tier-to-tier feel like the same beat.
-    private let cascadeArmIdleSec: Double = 2.0
+    /// b66: bumped 2s → 3s in lockstep with `cascadeIntervalSec` so
+    /// arm-to-first-drop and tier-to-tier remain the same beat.
+    private let cascadeArmIdleSec: Double = 3.0
     /// b60 (KI-8): read-only mirror so the unified progress bar can size
     /// the armed-countdown segment from the same constant the engine
     /// uses.

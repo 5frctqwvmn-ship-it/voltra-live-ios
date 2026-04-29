@@ -70,8 +70,8 @@ All state transitions live in `LoggingStore.swift`.
 
 | Constant | Value | Reason |
 |---|---|---|
-| `cascadeArmIdleSec` | 2.0 s | b60 (KI-9). Time the lift must be idle (sub-floor force) AFTER arming before the first drop fires. Matches `cascadeIntervalSec` so arm-to-fire and tier-to-tier feel like the same beat. |
-| `cascadeIntervalSec` | 2.0 s | b45 tightened from 4 s → 2 s. Drives the recurring `cascadeTimer` between tiers and the published `nextDropFiresAt` deadline. The b58 → b59 QA item KI-7 ("user wants 2 s") was already satisfied in code by b45 — the KI doc was stale. |
+| `cascadeArmIdleSec` | **3.0 s** (b66; was 2.0 s b60) | b60 (KI-9). Time the lift must be idle (sub-floor force) AFTER arming before the first drop fires. Bumped to 3.0 s in b66 in lockstep with `cascadeIntervalSec` so arm-to-fire and tier-to-tier remain the same beat. |
+| `cascadeIntervalSec` | **3.0 s** (b66; was 2.0 s b45–b65, was 4.0 s b25–b44) | Drives the recurring `cascadeTimer` between tiers and the published `nextDropFiresAt` deadline. b66 bump per user post-b58 QA — 2 s was too fast once the arm-only refactor was in; user lost a drop because the next tier fired before they re-engaged. |
 | `cascadeIdleFinalizeSec` | 10.0 s | No-movement watchdog. After this many seconds without a rep increment AND without an above-floor sample, the cascade finalizes the parent set. |
 | `cascadeIdleForceFloorLb` | 3.0 lb | Threshold below which a sample counts as "lift is idle" for both the arm gate and the per-tier fuse. Prevents machine jitter from holding either timer open indefinitely. |
 | `dropChainArmCooldownUntil` | now + 1.5 s on cancel | Prevents a long-press cancel + simultaneous SwiftUI button tap from re-arming the cascade in the same gesture. |
