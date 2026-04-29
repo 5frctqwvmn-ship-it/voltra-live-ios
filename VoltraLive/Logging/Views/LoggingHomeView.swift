@@ -25,6 +25,10 @@ struct LoggingHomeView: View {
     /// sheet. Selection of which Voltra is active for a workout still
     /// happens pre-workout (b42), so this chip is purely informational.
     @EnvironmentObject var mdm: MultiDeviceManager
+    /// b67 V4.3 (Bug 07): canonical pair-sheet presenter. Owned by
+    /// VoltraLiveApp; injected here so VoltraUnitHeader's onPairRequest
+    /// hook can drive the same UnifiedConnectSheet from any screen.
+    @EnvironmentObject var pairing: PairingCoordinator
 
     /// b51: 1 Hz tick driving the telemetry pulse indicator + connection
     /// freshness check. SwiftUI's @Published bindings only re-render when
@@ -37,12 +41,10 @@ struct LoggingHomeView: View {
     @State private var pickedDayType: DayType? = nil
     @State private var customLabel: String = ""
 
-    /// b66 V4.2: present DualConnectView as a sheet when the assignment
-    /// panel emits a `scanRequestedSubject` event (greyed L/R pill tap).
-    /// The pair flow lives in DualConnectView already; we just surface
-    /// it on demand without changing the canonical pair UX.
-    @State private var showingPairSheet: Bool = false
-    @State private var pairSheetSubBag: AnyCancellable? = nil
+    /// b67 V4.3 (Bug 07): pair-sheet presentation moved to
+    /// PairingCoordinator (env-object). No more local @State or
+    /// per-view subscription to scanRequestedSubject — the coordinator
+    /// owns both.
     /// Build 42: pre-workout Voltra picker. When both Voltras are paired,
     /// tapping a day tile (or starting a custom workout) defers calling
     /// `logging.startSession` until the user picks a WorkoutMode in the
@@ -89,8 +91,17 @@ struct LoggingHomeView: View {
                         // b67 B67-03/06/08: single canonical unit-status
                         // header. Replaces VoltraAssignmentPanel + the
                         // legacy telemetryPulsePill + connectionPill chrome.
-                        VoltraUnitHeader(mdm: mdm, hk: health)
-                            .padding(.horizontal, 18)
+                        // b67 B67-07: tap-to-pair flows through the shared
+                        // PairingCoordinator so the same gesture works
+                        // here, on ExerciseDetailView, and on Live.
+                        VoltraUnitHeader(
+                            mdm: mdm,
+                            hk: health,
+                            onPairRequest: { slot in
+                                pairing.presentPair(slot: slot)
+                            }
+                        )
+                        .padding(.horizontal, 18)
 
                         VStack(spacing: 14) {
                             Text("PICK A DAY")
@@ -205,25 +216,13 @@ struct LoggingHomeView: View {
             // b66 V4.2: page-name badge — bottom-leading, faint mint,
             // Swift type name verbatim. Always visible in TestFlight.
             .pageBadge("LoggingHomeView")
-            // b66 V4.2: subscribe to assignment-panel pair-scan requests.
-            // Greyed L/R pill tap surfaces the existing DualConnectView
-            // pair sheet. Subscription lives for the view's lifetime.
-            .onAppear {
-                pairSheetSubBag = MultiDeviceManager.scanRequestedSubject
-                    .receive(on: RunLoop.main)
-                    .sink { _ in
-                        showingPairSheet = true
-                    }
-            }
-            .onDisappear {
-                pairSheetSubBag?.cancel()
-                pairSheetSubBag = nil
-            }
-            .sheet(isPresented: $showingPairSheet) {
-                NavigationStack {
-                    DualConnectView()
-                }
-                .preferredColorScheme(.dark)
+            // b67 V4.3 (Bug 07): pair sheet is owned by PairingCoordinator.
+            // We bind the sheet presentation here at the home root so the
+            // canonical UnifiedConnectSheet appears regardless of which
+            // screen requested it (home, exercise detail, live).
+            .sheet(isPresented: $pairing.isPresenting) {
+                UnifiedConnectSheet()
+                    .preferredColorScheme(.dark)
             }
         }
     }

@@ -19,6 +19,9 @@ struct VoltraLiveApp: App {
     // risk. The dual flow is reachable from a small "Pair 2 Voltras"
     // entry point inside ConnectView and is ignored otherwise.
     @StateObject private var multi = MultiDeviceManager()
+    /// b67 (Bug 07): single source-of-truth for the pair-sheet gesture.
+    /// Owned at the app root so its identity survives view re-renders.
+    @StateObject private var pairing = PairingCoordinator()
 
     let modelContainer: ModelContainer = {
         // v0.1 dashboard models + v0.2 logging models in one container so
@@ -106,6 +109,7 @@ struct VoltraLiveApp: App {
                 .environmentObject(loggingStore)
                 .environmentObject(healthStore)
                 .environmentObject(multi)
+                .environmentObject(pairing)
                 // v0.4.6.3: .demoModeOverlay() is a ViewModifier that itself
                 // reads @EnvironmentObject DemoController. Modifiers cannot
                 // see env objects injected ABOVE them in the chain — only

@@ -38,6 +38,9 @@ struct ExerciseDetailView: View {
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var ble: VoltraBLEManager
     @EnvironmentObject var health: HealthKitStore
+    /// b67 V4.3 (Bug 07): shared pair-sheet presenter — same coordinator
+    /// drives UnifiedConnectSheet from the home screen, here, and live.
+    @EnvironmentObject var pairing: PairingCoordinator
     // b45: needed by WriterRouter so writes route through MDM when dual
     // is paired. Without this the legacy single-device manager is used
     // even when both peripherals are owned by MDM — weights never load.
@@ -100,7 +103,10 @@ struct ExerciseDetailView: View {
                     VoltraUnitHeader(
                         mdm: mdm,
                         hk: health,
-                        exerciseName: logging.activeInstance?.exercise?.name
+                        exerciseName: logging.activeInstance?.exercise?.name,
+                        onPairRequest: { slot in
+                            pairing.presentPair(slot: slot)
+                        }
                     )
 
                     if showsDualVoltraPanel {

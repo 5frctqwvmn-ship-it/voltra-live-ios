@@ -84,6 +84,10 @@ struct LiveCaptureViewV2: View {
     @EnvironmentObject var logging: LoggingStore
     @EnvironmentObject var health:  HealthKitStore
     @EnvironmentObject var mdm:     MultiDeviceManager
+    /// b67 V4.3 (Bug 07): shared pair-sheet presenter — lets the user
+    /// re-pair a slot mid-session by tapping a greyed L/R pill in the
+    /// VoltraUnitHeader (subject to the live-set isReadOnly lock).
+    @EnvironmentObject var pairing: PairingCoordinator
 
     @Environment(\.dismiss) private var dismiss
 
@@ -151,7 +155,10 @@ struct LiveCaptureViewV2: View {
                         mdm: mdm,
                         hk: health,
                         exerciseName: logging.activeInstance?.exercise?.name,
-                        isReadOnly: isLiveSetInProgress
+                        isReadOnly: isLiveSetInProgress,
+                        onPairRequest: { slot in
+                            pairing.presentPair(slot: slot)
+                        }
                     )
                     .padding(.bottom, 8)
 
