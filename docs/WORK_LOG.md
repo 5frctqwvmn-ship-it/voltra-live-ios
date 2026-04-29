@@ -3114,3 +3114,117 @@ so the next agent doesn't think a build went missing.
 
 **Cost callout:** Third release.yml run this session = adds
 another medium block. Cumulative session is solidly heavy.
+
+---
+
+## 2026-04-29 — b60 RELEASE: ROOT CAUSE FOUND, FIX COMMITTED
+
+**Status:** Source-of-truth bug fixed. Ship blocked on dry-run verification.
+
+**Root cause:**
+
+Three altool failures (b60 / b61 / b65) all rejected with
+`-19232 ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE`,
+`previousBundleVersion: 59`, on a 4-second wall-clock — i.e. Apple's
+metadata pre-flight rejection, before any IPA bytes were uploaded.
+
+Initial theory was phantom slot reservations on Apple's side. Wrong.
+Reservations expire in minutes, never persist across unrelated build
+numbers. If reservations were the cause, b65 would have shipped.
+
+The actual cause was in our own `project.yml`. The `targets.VoltraLive.info`
+block had hardcoded literals:
+
+```yaml
+info:
+  path: VoltraLive/Info.plist
+  properties:
+    CFBundleShortVersionString: "0.4.37"
+    CFBundleVersion: "59"
+```
+
+`xcodegen generate` runs on every CI build (workflow log line 159:
+`⚙️ Generating plists...`) and **regenerates `VoltraLive/Info.plist`**
+from these literals — overwriting any edits to the source file. Every
+b60/b61/b65 archive was built with `CFBundleVersion=59` in the IPA
+manifest. Apple's "duplicate" rejection was correct; our IPA literally
+matched the existing b59 build.
+
+The bumps to `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` at the
+target-level build settings were correct and necessary, but they only
+affect Xcode build settings — they don't reach the regenerated Info.plist
+because xcodegen's `info.properties` block is the source of truth for that
+file, and it was hand-maintaining stale literals.
+
+**Why b58 and b59 worked:** `info.properties` literals were in sync with
+the target settings at those points (last-touched manually together).
+Drift started when this session bumped target settings without bumping
+`info.properties`.
+
+**Fix (this commit):**
+
+1. `project.yml`: changed `info.properties.CFBundleShortVersionString`
+   to `$(MARKETING_VERSION)` and `info.properties.CFBundleVersion` to
+   `$(CURRENT_PROJECT_VERSION)`. xcodegen passes these macros through
+   verbatim into the generated Info.plist; xcodebuild's
+   `-expandbuildsettings` then substitutes them at archive time from
+   the target build settings. Single source of truth = target-level
+   `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`. Apple's recommended
+   pattern. No more drift possible.
+
+2. `project.yml`: target `CURRENT_PROJECT_VERSION` reset to `60`. Apple
+   has never received a real build 60 — all three failed uploads got
+   stopped at metadata pre-flight before any binary reached Apple's
+   storage. Build 60 is clean and available.
+
+3. `VoltraLive/Info.plist`: literal CFBundleVersion synced to `60`,
+   CFBundleShortVersionString to `0.4.38`, and VOLTRAFeatureLabel
+   updated to b60 wording. xcodegen will regenerate this file on next
+   CI run, but matching values keeps the repo internally consistent.
+
+**Diagnostic verification path (next):**
+
+Trigger `release.yml` via `workflow_dispatch` with `dry_run=true`.
+This runs the full archive + sign + IPA-export pipeline but skips
+altool entirely. After the run, the archive's actual Info.plist
+content can be inspected from CI artifacts / logs to confirm the
+macro substitution produced `60` not `59`. If confirmed, then push
+the real release (already-existing tag `v0.4.38-build60` will trigger
+release.yml on tag push).
+
+**Tags preserved as audit trail:**
+- `v0.4.38-build60` (first attempt — broken xcodegen plist)
+- `v0.4.38-build61` (second attempt — same bug, different bump target)
+- `v0.4.38-build65` (third attempt — same bug, skipped contaminated range)
+
+The real b60 will reuse tag `v0.4.38-build60` if pushed via
+workflow_dispatch on the `release/v0.4.38-build60` branch HEAD,
+since release.yml triggers on both `push: tags` and
+`workflow_dispatch`. No tag re-use issue.
+
+**Build-number ledger (corrected understanding):**
+
+| Tag | What we shipped | What Apple stored |
+|---|---|---|
+| v0.4.36-build58 | IPA cfBundleVersion=58 | Complete |
+| v0.4.37-build59 | IPA cfBundleVersion=59 | Complete |
+| v0.4.38-build60 | IPA cfBundleVersion=59 (stale) | rejected pre-flight |
+| v0.4.38-build61 | IPA cfBundleVersion=59 (stale) | rejected pre-flight |
+| v0.4.38-build65 | IPA cfBundleVersion=59 (stale) | rejected pre-flight |
+| v0.4.38-build60 (real) | IPA cfBundleVersion=60 | TBD after dry-run |
+
+**Sacred files:** untouched.
+**Source payload:** unchanged (gpt55/feat/ui-v4-dropset-armonly @ 59a3c05).
+**Fork:** untouched.
+**main branch:** untouched.
+
+**Hardware-QA-pending items (unchanged from b60 entry):**
+- Dual-Voltra routing (b59 carry-over)
+- DROP arm-only (KI-9)
+- KI-10 phantom -5lb
+- KI-11 force-curve full spec
+
+**Cost callout:** This commit + dry-run = ~1 medium block.
+If dry-run passes, real ship adds another ~1 medium. Cumulative
+session is very-heavy now.
+
