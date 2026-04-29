@@ -2869,3 +2869,125 @@ resistance-write call sites in a follow-up build.
   KI-F11). If labels collide, dial the `>= 0.30` opacity
   cutoff up. If §3b dots feel artifact-y, drop alpha 0.35 → 0.20
   or remove. Do NOT merge this branch to main without that QA.
+
+---
+
+## b60 — release conduit ship: V4 from GPT-5.5 fork (v0.4.38-build60)
+
+**Date/time:** 2026-04-29 16:30 UTC
+
+**Goal:** Ship V4 work completed by the GPT-5.5 agent's fork to
+TestFlight via the original repo's signing pipeline. This session is
+a release conduit only — no re-implementation, no wiki re-authoring.
+
+**Source of payload:**
+- Fork: `5frctqwvmn-ship-it/voltra-live-ios-gpt-5-5`
+- Branch: `feat/ui-v4-dropset-armonly`
+- HEAD SHA: `59a3c05`
+- Fork PR (informational, not merged): #1
+- Fork branch frozen as rollback fallback. Not pushed to.
+
+**History approach:** Linear merge-base. Fork branched from this
+repo's `main` at `592131f` (b59 hotfix) with three commits ahead:
+
+| SHA | Subject |
+|---|---|
+| `a48cf7c` | chore: GPT-5.5 track handoff pre-flight |
+| `3f8d41c` | feat(v4): dropset arm-only refactor + unified progress bar (b60-prep) |
+| `59a3c05` | feat(v4): KI-11 force-curve full spec — 80% line, peak dots, legend (b60-prep) |
+
+`git checkout -b release/v0.4.38-build60 59a3c05` succeeded cleanly —
+no cherry-pick needed. All three fork commits are carried verbatim.
+
+**Files changed in this session (release branch, on top of fork HEAD):**
+- `project.yml` — bumped `MARKETING_VERSION` 0.4.37 → 0.4.38,
+  `CURRENT_PROJECT_VERSION` 59 → 60.
+- `VoltraLive/Info.plist` — bumped `CFBundleShortVersionString` /
+  `CFBundleVersion` to match; updated `VOLTRAFeatureLabel` to b60.
+- `docs/WORK_LOG.md` — this entry.
+
+**Files NOT changed (by intent — owned by fork commits):**
+- `VoltraLive/Logging/Persistence/LoggingStore.swift`
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
+- `VoltraLive/Logging/Views/V2/ForceChartV2.swift`
+- `docs/handoff/00_START_HERE.md`
+- `docs/handoff/03_CURRENT_FEATURE_SPEC.md`
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md`
+- `docs/handoff/06_KNOWN_ISSUES.md`
+- `docs/handoff/QA_LOG.md`
+- `docs/handoff/design/force_curve.md`
+- `docs/handoff/entities/dropset_state_machine.md`
+- `AGENTS.md` (fork added a 7-line note in `a48cf7c`)
+- `README.md` (fork added a 5-line note in `a48cf7c`)
+
+All wiki deltas are present on the release branch by virtue of
+checking out fork HEAD. No verbatim re-copy was needed since the
+checkout IS the verbatim copy.
+
+**Wiki diff vs original `main` @ `592131f`** (informational, no
+overwrite needed since we branched from fork HEAD, not main):
+- `00_START_HERE.md` — fork added b60-prep startup notes (+25 lines).
+- `03_CURRENT_FEATURE_SPEC.md` — fork added §3 dropset arm-only
+  + §5 force-curve KI-11 sections (+97 lines total across
+  `3f8d41c` and `59a3c05`).
+- `04_DECISIONS_AND_CONSTRAINTS.md` — fork added decision records
+  for arm-only refactor + KI-11 spec (+110 lines).
+- `06_KNOWN_ISSUES.md` — fork updated KI-9 (DROP arm-only resolution
+  pending hardware), KI-11 (force-curve spec resolution pending
+  hardware) (+89/-52 churn).
+- `QA_LOG.md` — fork added b59 QA wave-2 + b60-prep entries.
+- `design/force_curve.md` — fork added 24 lines for legend +
+  peak-dot + 80% line spec.
+- `entities/dropset_state_machine.md` — NEW file from fork (136
+  lines), formalizes the b60 arm-only state machine.
+
+**Source of truth for fork-owned content:**
+The fork's `docs/WORK_LOG.md` and `docs/handoff/QA_LOG.md` carry
+the implementation narrative. The PR description references those;
+this WORK_LOG entry deliberately does not re-paste them.
+
+**Verification:**
+- Sacred files untouched (`Protocol/*` checked — no fork commits
+  modified them).
+- Linear history confirmed via `git merge-base` =
+  `592131f` (this repo's main HEAD).
+- All required wiki files present on branch (8/8).
+- Tag `v0.4.38-build60` confirmed unused (`git tag --list` only
+  shows up to `v0.4.37-build59`).
+- Hardware testing matrix: NOT run this session. The agent has no
+  device. All hardware-confirmation items are explicitly marked
+  awaiting user QA in the b60 PR + ship message.
+
+**Risks at ship:**
+- **Dual-Voltra routing (b59) is still hardware-unconfirmed.** The
+  b59 `LiveCaptureContainer.shouldUseV2` rewrite shipped to
+  TestFlight on b59 but the user reported the legacy V1
+  ACTIVE/NEXT header still surfaced. b60 does NOT touch routing —
+  inherits whatever state b59 left. Requires real-hardware QA to
+  determine if b60's V4 changes are even reachable.
+- **DROP arm-only (KI-9) hardware-unconfirmed.** Fork commit
+  `3f8d41c` rewires DROP tap to arm-only (no immediate −5 lb).
+  Logic verified by code review only.
+- **KI-10 phantom −5 lb during reps.** Not addressed by fork.
+  Still open, still hardware-only repro.
+- **KI-11 force-curve full spec (legend/peak dots/80% line)** —
+  fork commit `59a3c05`. Visual spec compliance hardware-unverified.
+- Fork branch frozen at `59a3c05` as rollback fallback. If b60
+  TestFlight QA fails, user can revert to b59 and we re-spin from
+  the fork's PR #1 with corrections.
+
+**Next step:**
+1. Push release branch to origin.
+2. Open PR against `main` referencing fork SHA + fork PR #1 + fork
+   `WORK_LOG`/`QA_LOG` as testing source-of-truth.
+3. Tag `v0.4.38-build60`, push tag, run release.yml.
+4. Poll workflow → run 5-gate altool verify → poll App Store Connect
+   for processing.
+5. Report status to user as **"uploaded to TestFlight, awaiting
+   user hardware QA"** — NOT "shipped". Per user explicit
+   directive at b60 kickoff: "do not overclaim … b60 should be
+   framed as 'uploaded to TestFlight for hardware QA,' not 'done.'"
+
+**Cost callout:** This entire ship cycle is **medium** —
+checkout + 2 file edits + WORK_LOG append + commit + push + PR
+open + tag + release.yml polling loop + ASC polling loop.
