@@ -28,9 +28,19 @@ These interlock and should be resolved together when user says **done**:
 
 7. **Bug 06 cross-cut:** All live workouts (single, merged, superset) route through ONE live screen — mode is a prop, not a separate view. `DualCaptureView` deletion is already covered in Bug 04+05; Bug 06 adds the single-screen rule + extracts `VoltraUnitHeader` as a shared component used on `WorkoutSelectionScreen` AND `LiveWorkoutScreen`.
 
-8. **Sine-wave FORCE trace is live.** The b66 V3 live screen (target image) already renders the proper sine-wave force curve in the `FORCE · 30 S` card. Validates F1 telemetry-rule skip from b66 — no additional work needed here.
+8. **⚠ CONTRADICTION FLAG — sine-wave FORCE trace status DISPUTED.** Earlier read of the b66 V3 live target image (Bug 06 evidence `targets/06-live-workout-screen-target.jpeg`) suggested the proper sine-wave force curve was already rendering in `FORCE · 30 S`. **Bug 09 (incoming) directly contradicts this** — user reports the curve is NOT a sine wave and must be restored to the earlier working sine-wave geometry with logarithmic-fade history overlay. Resolution deferred until Bug 09 entry is logged; do NOT treat F1 as 'skipped/validated' until that bug is filed and reconciled. The b66 page-badge / chrome / VL1 strip readings from that image remain valid — only the FORCE-card waveform claim is in doubt.
 
-9. **Footer Bug 02 confirmed on multiple screens.** The verbose b58-era watermark `v0.4.39 (66) · b66: V4.2 ASSIGN TO VOLTRA panel + superset switcher (HARDWARE-QA-PENDING)` plus `ContentView` page-badge bleed-through appears on BOTH `WorkoutSelectionScreen` (Bug 02) AND `LiveWorkoutScreen` (visible at bottom of Bug 06 target image). Single fix to `buildBadgeOverlay` removal + `pageBadge` two-sided footer covers all screens.
+9. **Footer Bug 02 confirmed on multiple screens.** The verbose b58-era watermark `v0.4.39 (66) · b66: V4.2 ASSIGN TO VOLTRA panel + superset switcher (HARDWARE-QA-PENDING)` plus `ContentView` page-badge bleed-through appears on `WorkoutSelectionScreen` (Bug 02), `LiveWorkoutScreen` (Bug 06 target), AND `ExerciseDetailScreen` (Bug 07 image). Single fix to `buildBadgeOverlay` removal + `pageBadge` two-sided footer covers all screens.
+
+10. **Bug 07 reveals THREE screens currently embed the cluttered `VL1 ⌘ | L R | SS` header**, not two:
+    - `WorkoutSelectionScreen` (Bug 03)
+    - `LiveWorkoutScreen` (Bug 06)
+    - `ExerciseDetailScreen` — the pre-workout exercise history/detail view (Bug 07 image, e.g., `Back Extension` with progress chart + LAST SESSION + MODE/MODIFIERS)
+    The shared `VoltraUnitHeader` extraction must cover all three mount points. None of the prior bugs called out `ExerciseDetailScreen`.
+
+11. **Bug 07 is a hard dependency for Bug 04+05 ship.** Once `DualConnectView` is deleted (Bug 04+05), the only working pairing path today is gone. If Bug 07's silent-scan-from-anywhere fix doesn't ship in the same release, **mid-flow pairing is completely broken**. Bug 04+05 and Bug 07 must land in the same b67 build.
+
+12. **Critical disambiguation:** The screen in the Bug 07 image (`Back Extension`) is **`ExerciseDetailScreen` (pre-workout history/detail)**, NOT `LiveWorkoutScreen` (active session). They both embed the unit header but are different views. The fix is the same (shared `PairingCoordinator` binding) but the doc must distinguish them — they likely have different state ownership and different sheet presentation contexts.
 
 ---
 
@@ -303,7 +313,7 @@ From top to bottom:
 11. **`REPS` card:** `8` — keep
 12. **`TOTAL VOLUME` card:** `0 lb` — keep
 13. **`⊕ Added plates` button + `○ Pulley` button** — keep
-14. **`FORCE · 30 S` card:** `52 lb` + **sine-wave force trace already rendering** — keep (validates F1 telemetry skip)
+14. **`FORCE · 30 S` card:** `52 lb` + force trace visible — ⚠ **DISPUTED per cross-cutting flag #8 / Bug 09 incoming**: earlier read claimed sine-wave geometry was already correct; user reports it is not. Hold judgment until Bug 09 is logged.
 15. **Footer (TO BE FIXED per Bug 02):** verbose b58-era watermark + `ContentView` page-badge bleed-through
 
 ### What's right (required behavior)
@@ -393,11 +403,208 @@ From top to bottom:
 
 ---
 
-## Bug 07 — (PLACEHOLDER, awaiting screenshot)
+## Bug 07 — Pairing from `ExerciseDetailScreen` (and any non-home screen with the unit header) fails silently; must use shared `PairingCoordinator`
 
-**User tease:** "Pairing a second Voltra mid-workout only blinks the light but doesn't actually connect."
+**One-sentence summary:** When a user is on `ExerciseDetailScreen` (the pre-workout exercise history/detail view, e.g., `Back Extension`) and taps the unpaired `R` pill in the embedded `VL1 ⌘ | L R | SS` header, the pill shows a red/amber outlined error state but no BLE pairing actually fires — the Voltra is in range and blinking but never connects. The only working pairing path today is the legacy `DualConnectView`, which Bug 04+05 deletes — so without Bug 07's fix, **mid-flow pairing breaks entirely** in b67.
 
-**Action:** User to send screenshot or screen-recording description of the live workout screen where they tapped an unpaired `R` (or `L`) from inside an active session and it failed to pair (Voltra in range, blinking, but no connection). One-sentence description of what happened → I'll produce the Bug 07 entry.
+### Evidence
+
+| File | Page-badge | What it shows |
+|------|------------|---------------|
+| `bugs/07-mid-workout-pair-fails.jpeg` (IMG_2429) | (cut off; visible bleed in footer) | `ExerciseDetailScreen` for `Back Extension`. Top has cluttered `VL1 ⌘ \| L R \| SS` header with `L` mint-filled (active+paired) and **`R` rendered with a thin red/amber outline** — the failed-pair error state. Below: `< Back` button, `Back Extension` title, `LAST SESSION 25 lb × 10 5 mo. ago / SET 1 25 lb · 10 reps`, full PROGRESS chart (Top Weight, −19 lb · 30d, Apr–Oct), MODE row (Weight active / Band / Damper), MODIFIERS row partial (Eccentric On / Chains / Inverse). Bug 02 footer watermark also present. |
+| `bugs/07-legacy-dualconnect-fallback.jpeg` (IMG_2421 — reused from Bug 04+05) | `DualConnectView` | The dead-end legacy screen mid-workout pairing currently falls back to. Already in deletion list (Bug 04+05). |
+
+**Note on screenshot duplication:** The user attached `IMG_2429.jpeg` and `IMG_2430.jpeg` for Bug 07, but they are byte-near-identical — both show the same `ExerciseDetailScreen` failed-pair state. The user's prose described `IMG_2430` as the legacy `DualConnectView` fallback, but it isn't — IMG_2430 is a duplicate of IMG_2429. Reused `bugs/04-dual-connect-idle.jpeg` (IMG_2421 from Bug 04+05) for the legacy-fallback evidence slot since it depicts the actual `DualConnectView` and the prose intent is satisfied.
+
+**New surface this bug exposes:** `ExerciseDetailScreen` was not previously on the list of screens that embed the unit header. Bugs 03 and 06 only addressed `WorkoutSelectionScreen` and `LiveWorkoutScreen`. The `VoltraUnitHeader` extraction must cover this third mount point.
+
+### What's wrong
+
+- The `R` pill on the `ExerciseDetailScreen` unit-header is visually interactive (renders a red/amber outline when tapped or in error state), but the tap does **not** trigger BLE silent-scan + auto-pair.
+- No user feedback: no toast, no bottom sheet, no state change. The pill just sits in the error-outline style.
+- Voltra hardware is ready (light blinking, in range, advertising) — the app's pairing path simply isn't wired from this surface.
+- Today the only path that works is navigating back to `DualConnectView`, which Bug 04+05 deletes. **After b67 lands without Bug 07's fix, mid-flow pairing has zero working paths.**
+
+### What's right (required behavior)
+
+`VoltraUnitHeader` is the **single entry point** for pairing from EVERY screen it appears on:
+
+- `WorkoutSelectionScreen` (Bug 03)
+- `LiveWorkoutScreen` (Bug 06)
+- `ExerciseDetailScreen` (Bug 07 — newly identified)
+- Any future screen that embeds the header
+
+Tapping an unpaired pill from ANY of these surfaces runs the exact same flow as from home (Bug 04+05):
+
+1. Silent BLE scan (~4s)
+2. Exactly one candidate → auto-pair, pill paired-active, no dialog, no navigation
+3. Multiple candidates → `PairVoltraSheet` slides up over the current screen as a global modal. Tap row → pair → dismiss. **Stay on `ExerciseDetailScreen` / `LiveWorkoutScreen`.**
+4. Zero candidates → inline toast, pill returns to unpaired
+5. **Never** navigate to a full-screen pairing view. **Never** push `DualConnectView` (it's deleted anyway).
+
+### Root cause hypotheses (to verify at fix time)
+
+Likely one of:
+- **Hypothesis A (most likely):** `VoltraUnitHeader` on `ExerciseDetailScreen` is currently rendered as a **display-only** status strip with stub or no-op tap handlers — or its tap handlers route to the now-(soon-to-be)-deleted `DualConnectView`.
+- **Hypothesis B:** The BLE scan service requires a foreground scan context that was only initialized inside `DualConnectView.onAppear`, so scans never start from other surfaces.
+- **Hypothesis C:** The `units` store mutation path for pairing is scoped to `WorkoutSelectionScreen` state and not reachable from deeper nav stack levels (`ExerciseDetailScreen` is presumably pushed from `WorkoutSelectionScreen` after picking a day + exercise).
+
+Claude should:
+1. Confirm which hypothesis is the actual cause.
+2. Refactor so `VoltraUnitHeader` always uses the **same pairing action binding** regardless of mount point. The action calls a shared `PairingCoordinator.startPairing(slot:)` method that works from any screen.
+3. Ensure `PairingCoordinator` owns the BLE scan lifecycle and presents `PairVoltraSheet` on the currently visible screen via a global modal presenter (not a per-screen `.sheet` modifier).
+
+### Implementation requirements
+
+- `VoltraUnitHeader` has **one** pill-tap handler, injected via environment object or a singleton coordinator. **No screen-specific re-implementations.**
+- `PairingCoordinator` (new service, or extend existing `BluetoothService`/`MultiDeviceManager`) exposes:
+  - `startPairing(slot: UnitSlot)` — silent scan + auto-pair-or-sheet
+  - `activate(slot: UnitSlot)` — toggle active state on already-paired unit
+  - `toggleMerge()` / `toggleSuperset()` with mutual exclusion
+- `PairVoltraSheet` is rendered by a top-level host (app root or `SheetHost` env object), **NOT** by any individual screen. This guarantees consistent presentation regardless of where the tap originates.
+- Any "blocked" scan state (BT off, permissions denied, radio busy) surfaces as a **toast on the current screen**, not a full-screen error view.
+- Scan never blocks navigation: user can swipe back / dismiss / change screens during scan, scan auto-cancels.
+
+### Files likely to touch
+
+- `VoltraLive/Views/Components/VoltraUnitHeader.swift` — ensure tap handler uses shared coordinator (created in Bug 06)
+- `VoltraLive/Services/PairingCoordinator.swift` — **NEW** — owns scan lifecycle, presents sheet (or extend `MultiDeviceManager` if simpler)
+- `VoltraLive/App/VoltraLiveApp.swift` (or root view) — mount global `SheetHost` / `PairVoltraSheet` presenter
+- `VoltraLive/Views/ExerciseDetailScreen.swift` (find actual file at fix time) — confirm embeds `VoltraUnitHeader` with the same binding
+- `VoltraLive/Views/LiveWorkoutScreen.swift` — same
+- `VoltraLive/Views/LoggingHomeView.swift` (or `WorkoutSelectionScreen.swift`) — same
+- Delete any legacy routes that push `DualConnectView` from deeper screens (Bug 04+05 covers home; verify nothing in `ExerciseDetailScreen` still references it)
+
+### Doc updates (Karpathy rule, same commit as code)
+
+- `docs/handoff/06_KNOWN_ISSUES.md` — add B67-07 with both screenshots
+- `docs/handoff/03_CURRENT_FEATURE_SPEC.md` — add: "Pairing is initiated from `VoltraUnitHeader` on any screen. `PairingCoordinator` owns scan lifecycle. `PairVoltraSheet` is presented globally by `SheetHost` — never owned by an individual screen."
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` — append:
+  - **D-B67-8:** Pairing action on `VoltraUnitHeader` is identical across every screen it appears on; there are no screen-specific pairing paths.
+  - **D-B67-9:** `PairVoltraSheet` is a global modal, not a per-screen navigation destination.
+  - **D-B67-10:** Bug 04+05 (delete `DualConnectView`) and Bug 07 (shared pairing from any screen) **must ship in the same release** to avoid breaking mid-flow pairing.
+- `docs/handoff/entities/pairing_flow.md` — extend (created in Bug 04+05) to document `PairingCoordinator` API, mid-flow pairing flow, sheet presentation via `SheetHost`, toast fallbacks, "pairing never navigates" rule
+- `docs/handoff/entities/voltra_unit_header.md` — specify tap handler injected via `PairingCoordinator`, identical behavior from any mount point, list ALL mount points (`WorkoutSelectionScreen`, `ExerciseDetailScreen`, `LiveWorkoutScreen`)
+- `docs/handoff/07_FILE_MAP.md` — register `PairingCoordinator`, `SheetHost`, `PairVoltraSheet`
+- `docs/WORK_LOG.md` — append b67 entry tying Bug 07 fix to Bug 04+05 deletion
+
+### Verification
+
+1. Screen recording — `WorkoutSelectionScreen` with L paired, tap `R` with one Voltra in range → pill paired-active, no navigation
+2. Screen recording — select `LEG DAY` → land on `ExerciseDetailScreen` with L paired, tap `R` with one Voltra in range → pill paired-active, **stay on `ExerciseDetailScreen`**
+3. Screen recording — enter `LiveWorkoutScreen` (active workout) with L paired, tap `R` with **two** Voltras in range → `PairVoltraSheet` slides up over live screen → tap row → sheet dismisses → pill paired-active → **live screen state preserved** (exercise, set count, weight, force trace unchanged)
+4. Screen recording — tap `R` with zero Voltras in range from `ExerciseDetailScreen` → toast "No Voltra found..." → pill returns to unpaired → no navigation
+5. `grep -rni "DualConnectView" VoltraLive/` returns zero matches
+6. `grep -rn "VoltraUnitHeader" VoltraLive/Views/` shows component mounted on `WorkoutSelectionScreen`, `ExerciseDetailScreen`, AND `LiveWorkoutScreen` — all using same `PairingCoordinator` binding
+
+### Open questions for batch (re-ask when queue closes)
+
+- **Q7.1 (sheet presentation context during active workout):** When `PairVoltraSheet` slides up over `LiveWorkoutScreen` mid-workout, what happens to in-progress telemetry (force-trace recording, rep counter)?
+  - (a) **Continue uninterrupted; sheet is purely presentational** (recommended; user's mid-set data must not be lost)
+  - (b) Pause telemetry while sheet is open; resume on dismiss
+  - (c) Reject pair attempts during active set; only allow during rest
+- **Q7.2 (red/amber outline current state):** The `R` pill in IMG_2429 has a red/amber outline. Is that an existing intentional "failed pair" visual state, or is it just the default `.errorTint` SwiftUI applied because the tap handler threw?
+  - (a) **Default error tint (unintentional)** — fix removes it; pills only have dark/blink-mint/solid-mint states
+  - (b) Intentional "pair failed, try again" state — keep it as a fourth pill state
+  - (c) Don't know yet — verify in code at fix time
+- **Q7.3 (PairingCoordinator vs extending MultiDeviceManager):** Architecture choice:
+  - (a) **Extend existing `MultiDeviceManager`** with `startPairing(slot:)` (recommended; less new surface area, MDM already owns BLE state)
+  - (b) New separate `PairingCoordinator` service (cleaner separation of concerns; more files to wire)
+- **Q7.4 (sheet host mounting):** Where does the global `PairVoltraSheet` host live?
+  - (a) **App root view** (recommended; covers every screen, including modals)
+  - (b) Root navigation stack only (skips full-screen modals)
+  - (c) Per-tab if app gains tabs in future
+
+---
+
+## Bug 08 — Duplicate unit-status rows everywhere → collapse to one shared `VoltraUnitHeader`
+
+**Symptom:** Multiple legacy unit-status surfaces are stacked on top of each other on every screen that mounts `MultiDeviceManager` or `LiveCapture` chrome. The b66 build accidentally kept the *old* surfaces alive while *also* adding the new V4.2 pill row — so the user now sees the same `L` / `R` / `⋏` (HRV) / `●●` (HR) state rendered 2–3 times per screen.
+
+### Evidence
+
+| File | Screen | Duplicate surfaces visible |
+|---|---|---|
+| `bugs/08-duplicate-status-home.jpeg` | `WorkoutSelectionScreen` | **3 surfaces** — (a) `VOLTRA` wordmark + `LIVE` pill + `Left ● Right ●` pill row at the very top, (b) `VL1 ⌚ | L R | SS` compact strip mid-page, (c) new V4.2 active pill row (`L` / `R` / `⋏` / `●●` / `SS`) below that |
+| `bugs/08-duplicate-status-live.jpeg` | `LiveWorkoutScreen` (V3 target) | **2 surfaces** — (a) `VL1 ⌚ | L R | SS` reference strip across the top, (b) new V4.2 active pill row directly underneath |
+| `bugs/08-duplicate-status-detail.jpeg` | `ExerciseDetailScreen` | **2 surfaces** — (a) `VL1 ⌚ | L R | SS` reference strip, (b) new V4.2 active pill row underneath |
+| `targets/08-consolidated-header.jpeg` | (target for all three) | **1 surface** — single `VoltraUnitHeader` row: `L` / `R` / `⋏` / `●●` (no `SS` per Bug 06 rule) |
+
+### What's wrong (current b66 state)
+
+- `WorkoutSelectionScreen` stacks **three** redundant status surfaces (Bug 03 already covers the top wordmark/`LIVE`/`Left●Right●` row deletion — Bug 08 covers the OTHER two surfaces below it).
+- `LiveWorkoutScreen` stacks **two**: the `VL1 ⌚ | L R | SS` reference strip is duplicate chrome above the active pill row.
+- `ExerciseDetailScreen` stacks **two**: same `VL1 ⌚ | L R | SS` strip + active pill row.
+- The `VL1 ⌚ | L R | SS` strip is the SAME legacy `LiveStatusPill` / `LeftRightStatusPill` / `DeviceStatusStrip` chrome that Bug 06 already mandated extracting; it was never actually removed when the new pill row was added.
+- `SS` (superset) appears in the legacy strip on all three screens; Bug 06 explicitly forbids `SS` in the new shared header (superset state is in `SupersetSwitcherBanner`, not the unit header).
+
+### What's right (required after fix)
+
+- Each of `WorkoutSelectionScreen`, `LiveWorkoutScreen`, `ExerciseDetailScreen` mounts **exactly one** `VoltraUnitHeader` row.
+- `VoltraUnitHeader` content (locked spec):
+  - `L` pill — left unit pair status (idle / pairing / paired-active)
+  - `R` pill — right unit pair status (same states)
+  - `⋏` pill — HRV / breath state
+  - `●●` pill — HR (3-state per Bug 03: dark / blinking / solid)
+  - **No `SS` pill** (per Bug 06 — superset state lives in `SupersetSwitcherBanner` only)
+  - **No `VL1` device label, no `⌚` watch glyph, no `VOLTRA` wordmark, no `LIVE` text pill, no `Left ● Right ●` summary pill** — all redundant chrome.
+- All three screens share the same `VoltraUnitHeader` SwiftUI view — single source of truth, no copy-paste variants.
+
+### Implementation requirements
+
+1. Confirm `VoltraUnitHeader.swift` exists as a shared `View` (created in Bug 06 spec). If not yet created, this bug requires creating it.
+2. Delete (or `#if false` out) the following legacy surfaces wherever they are mounted:
+   - `LiveStatusPill`
+   - `LeftRightStatusPill`
+   - `DeviceStatusStrip`
+   - Any inline `HStack` rendering literal text `"VL1"` / `"VOLTRA Live"` / `"Left ● Right ●"` / `"⌚"` glyph + device label
+3. On `WorkoutSelectionScreen`: also delete the top wordmark/`LIVE` pill/`Left●Right●` row that Bug 03 mandates removing — Bug 08 verifies that fix lands.
+4. On `LiveWorkoutScreen` and `ExerciseDetailScreen`: replace the `VL1 ⌚ | L R | SS` strip with `VoltraUnitHeader()` mounted at the top of the screen layout.
+5. `VoltraUnitHeader` reads state from the same `MultiDeviceManager` observable already used by the active pill row — the active pill row is REPLACED by `VoltraUnitHeader`, not supplemented.
+6. Verify no regressions: `WorkoutVoltraPickerSheet` is already deleted (b66); confirm Bug 08 fix does not re-introduce any picker chrome.
+
+### Lint invariant (grep gate)
+
+After Bug 08 fix lands, the following must return **zero matches**:
+
+```bash
+grep -rni "VL1\|VOLTRA Live\|Left .* Right .*\|LiveStatusPill\|LeftRightStatusPill\|DeviceStatusStrip\|VoltraWordmark" VoltraLive/Views/
+```
+
+(Search is intentionally `Views/` only — the strings may legitimately appear in `Models/`, `Telemetry/`, or test fixtures and should not block.)
+
+### Doc updates (with this fix)
+
+- `docs/handoff/06_KNOWN_ISSUES.md` — close "duplicate status surfaces" entry; add lint-gate as recurring CI check.
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` — add ADR: "`VoltraUnitHeader` is the single canonical unit-status surface; no other view may render unit pair / HR / HRV chrome."
+- `docs/WORK_LOG.md` — append-only b67 entry referencing Bugs 03/06/07/08 as the consolidated chrome cleanup.
+
+### Verification checklist (post-b67)
+
+1. Cold-launch → `WorkoutSelectionScreen` shows **one** `VoltraUnitHeader` row, nothing above it except the safe-area inset.
+2. Tap into `LiveWorkoutScreen` → same `VoltraUnitHeader` row, no `VL1` strip above it.
+3. Tap any exercise tile from `WorkoutSelectionScreen` → `ExerciseDetailScreen` shows same `VoltraUnitHeader` row, no `VL1` strip above it.
+4. Toggle HK auth on/off → `●●` pill cycles dark / blinking / solid (cross-validates with Bug 03).
+5. Pair only `L` unit → `L` pill goes mint-filled, `R` stays dim. Pair only `R` → mirror. Pair both → both mint-filled. (Cross-validates with Bug 04+05 and Bug 07.)
+6. Run lint-gate grep above → zero matches.
+7. Page badge `LiveWorkoutScreen` / `ExerciseDetailScreen` / `WorkoutSelectionScreen` visible at footer of each (cross-validates Bug 02 footer cleanup).
+
+### Open questions (Bug 08)
+
+- **Q8.1** Does `VoltraUnitHeader` already exist in the codebase from b66 work, or does Bug 08 fix need to *create* it? (Bug 06 spec'd it but the b66 ship may or may not have committed an actual `VoltraUnitHeader.swift` file — need to grep.)
+- **Q8.2** When pairing is **active but not yet established** (mid-handshake), should the corresponding `L` or `R` pill show a third intermediate state (e.g., breathing / pulsing) or just stay dim until paired? Bug 06 sign-off reverted breathing-ring on active pills, but mid-handshake state was not explicitly addressed.
+- **Q8.3** On `ExerciseDetailScreen` (pre-workout exercise history view), is the `VoltraUnitHeader` interactive (tap = pair, per Bug 07's `PairingCoordinator`), or read-only (display state only, pairing must happen on a parent screen)? Bug 07 spec implies tap-to-pair from `ExerciseDetailScreen` is required — confirm.
+- **Q8.4** Does Bug 08 fix go in the same b67 release as Bugs 03/04+05/06/07, or should it be split? Recommendation: same release — they are entangled (each one re-touches the same view files) and shipping them piecemeal will cause merge conflicts.
+
+---
+
+## Bug 09 — (PLACEHOLDER, awaiting full report)
+
+**User tease:** "Force curve is not a sine wave; must be restored to earlier working sine-wave geometry with logarithmic-fade history overlay."
+
+**⚠ Contradiction with cross-cutting flag #8:** Bug 09 will directly overturn the prior reading that "sine-wave FORCE trace is live" in the b66 V3 target image. Flag #8 has been updated to `DISPUTED`. When Bug 09 lands, this placeholder gets replaced with the full entry and flag #8 is rewritten with Bug 09's resolution.
+
+**Action:** User to send (a) screenshot of the broken curve as it appears in b66, (b) screenshot or reference of the earlier working sine-wave geometry with logarithmic-fade history overlay, (c) one-sentence note on whether the regression is a math change (waveform generator) or a render change (chart smoothing / sample rate) so I can scope the fix correctly. → I'll produce the Bug 09 entry.
 
 ---
 
