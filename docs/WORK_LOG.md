@@ -2764,3 +2764,75 @@ new rule.
   then move to bug fixes B1/B2 (DROP ±5/±1 stepper behavior),
   P1-1 (3-digit weight + TWIN badge overlap), P1-2 (rest-
   timer first-engage), F1 (sine-wave per-rep — scope-first).
+
+## 2026-04-29 21:24 UTC — b66 V4.2: bug fixes P1-1 + P1-2 (ship-prep)
+
+- **Files changed:**
+  - `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — P1-1
+    TWIN badge overlap fix in WEIGHT card; P1-2 view-side
+    predicate alignment to `session.restActive` for both the
+    rest bar mount (`phaseOrRestBar`) and the chart's resting
+    flag (`forceChartCard`).
+  - `VoltraLive/Session/SessionStore.swift` — P1-2 publish
+    `restElapsedSeconds` synchronously inside `finalizeSet()`
+    (computed against `Date()` so the -2 s backdate is
+    honored); kick `restElapsedSeconds = 0` inside
+    `tapRestTile()` to re-fire observers on a fresh tap.
+- **What changed:**
+  - **P1-1** (3-digit weight + TWIN badge overlap): TWIN
+    badge promoted out of the inner weight HStack to a
+    fixed-size sibling between the weight cluster and stepper
+    spacer in the outer HStack. Weight Text wrapped in
+    leading-aligned flexible frame; `lb` suffix gets
+    `.layoutPriority(2) + .fixedSize()` so 3-digit values
+    can never push the badge into overlap. (V4-D9 from b58
+    fixed the stepper overlap; this fix extends the same
+    principle to the TWIN badge.)
+  - **P1-2** (rest-timer first-engage view race): Distinct
+    from KI-F1 (b57). The view-side mount predicate keyed on
+    `Int(restElapsedSeconds.rounded()) > 0`, but
+    `restElapsedSeconds` only updates via the 0.25 s ticker.
+    `finalizeSet()` set `restStartedAt` synchronously but
+    `restElapsedSeconds` stayed 0 until the next tick, so
+    the very first set after launch silently failed to mount
+    the rest bar. Two-sided fix: SessionStore publishes the
+    elapsed value immediately on finalize/tap; the view keys
+    on `restActive` (set synchronously) instead of rounded
+    seconds.
+- **Sacred files audit:** None of `VoltraProtocol.swift`,
+  `TelemetryExtractor.swift`, `PacketParser.swift`,
+  `FrameAssembler.swift`, `release.yml`, `build.yml` were
+  touched.
+- **B1 / B2 / F1 status (no code change):**
+  - **B1** (DROP ±5/±1 disabled/cycle when armed) — VERIFIED
+    already correct in b58 at `ModStepperRowV2.swift:99-102`
+    + `dropMode: true` plumbing in
+    `LiveCaptureViewV2.swift:856-861` + `adjustDropStep` at
+    line 1381-1393.
+  - **B2** (base ±5/±1 always live) — VERIFIED already
+    correct: `adjustWeight` (line 1333) calls
+    `reanchorCascadeIfActive` (line 1338) and is never gated
+    by drop state.
+  - **F1** (sine-wave per-rep) — SKIPPED per the user's
+    "skip if it touches telemetry" rule. Existing
+    `ForceChartV2.swift` already does Tonal-style rep-map
+    gradients; the sine-wave overlay would re-derive
+    per-rep peaks from samples and was deemed too close to
+    telemetry interpretation for a UI build.
+- **Verification:** None on hardware yet — pending TestFlight
+  install of v0.4.39 / build 66.
+- **Risks:**
+  - P1-2 view-side flip from `restElapsedSeconds` to
+    `restActive` is a tiny semantic change. If any other
+    view in the codebase reads `restElapsedSeconds > 0` as
+    a proxy for "rest active", that view will keep working
+    on the second-tick cadence (no regression). Already
+    grep-audited: only the two LiveCaptureViewV2 sites used
+    this pattern.
+  - P1-1 layout assumes the outer HStack always renders
+    weight cluster + TWIN badge + stepper spacer in that
+    order. Verified visually by reading the file; layout
+    matches spec.
+- **Next step:** Push branch; run `release.yml` workflow
+  with `dry_run=false`; 5-gate altool ship verify; confirm
+  TestFlight v0.4.39 / build 66 live.

@@ -272,3 +272,112 @@ alone.
   semantic meaning (green = early, red = late); the dropset
   bar doesn't have an analogous "late" state, so a flat accent
   fill is more honest about what the bar communicates.
+
+### V4.2-D1 (b66) — Top-of-screen VoltraAssignmentPanel mirror rule
+
+**Q.** When the user changes the L/R/MERGE/TWIN selection from
+inside an exercise context (LiveCaptureViewV2 or
+ExerciseDetailView), should that change scope globally
+(MultiDeviceManager.workoutMode) or only to the current
+exercise?
+
+**Decided.** Per-exercise override (mirror rule 1A). Selections
+made inside an exercise context write into
+`MultiDeviceManager.exerciseAssignmentOverride[exerciseName]`
+(side-store via static dict keyed by ObjectIdentifier — Swift
+extensions cannot add stored properties). Selections made on
+LoggingHomeView write to the global `workoutMode`. The panel
+reads from the override first, falls back to the global.
+
+**Why.** A user supersetting Bench + Row may want TWIN on Bench
+(both Voltras pulling on one bar) and L-only on Row (alternating
+arms). Forcing one global selection forces a re-tap every time
+they switch. Override scoping is invisible when the user only
+ever uses one assignment.
+
+**Rejected.**
+- Always-global. Fails the superset use case.
+- Per-set scope. Too granular; the user never asked for this and
+  the bookkeeping (which set "owns" an override) explodes.
+
+### V4.2-D2 (b66) — VoltraAssignmentPanel lock during live set
+
+**Q.** Should the panel allow assignment changes while a set is
+in progress?
+
+**Decided.** No (lock rule 2A). The panel renders read-only
+when `isLiveSetInProgress == true`, defined as
+`ble.telemetry.forceLb > 3.0` (mirrors private
+`LoggingStore.cascadeIdleForceFloorLb`). Pills become
+non-interactive and a faint lock affordance appears in the
+header. The panel re-enables the moment force drops below
+3 lb (between sets).
+
+**Why.** Switching L→R mid-rep would flip which Voltra is
+receiving writes mid-set and shift the cable load instantly.
+Hardware safety risk. Locking by force-floor is honest to the
+"is the user actually pulling the cable right now" question
+without coupling to set state machinery.
+
+**Rejected.**
+- Lock by `currentSet != nil`. Locks the panel during the
+  4-second idle grace window, when the user is between sets
+  and might reasonably want to switch.
+- Lock by `dropSetActive`. Doesn't cover the normal case (a
+  non-dropset set in progress).
+
+### V4.2-D3 (b66, P1-1) — TWIN badge promoted out of inner weight HStack
+
+**Q.** When the WEIGHT card shows a 3-digit weight (≥100 lb)
+plus the TWIN badge, the badge overlapped the `lb` suffix.
+Where should the badge live in the layout?
+
+**Decided.** Outer HStack as a fixed-size sibling between the
+weight cluster and the stepper spacer. The weight Text wraps in
+a leading-aligned flexible frame so it owns its slot; the `lb`
+suffix gets `.layoutPriority(2)` + `.fixedSize()` so 3-digit
+values can never push the badge into overlap.
+
+**Why.** The b58 fix (V4-D9) added `.minimumScaleFactor(0.6)`
++ trailing-mask gradient on the weight number, which solved
+the stepper overlap but didn't account for the TWIN badge that
+b58 placed inside the same inner HStack. Promoting the badge
+to a sibling decouples it from the auto-shrink behavior.
+
+**Rejected.**
+- Shrink the badge with `.minimumScaleFactor`. Badge reads as
+  small text and looks broken at fractional scales.
+- Hide the badge above 99 lb. User explicitly asked to keep
+  it visible; assignment context is more important than a
+  perfectly-tight layout.
+
+### V4.2-D4 (b66, P1-2) — Rest-timer mount predicate keys on restActive
+
+**Q.** The view-side mount predicate for the rest bar was
+`Int(session.restElapsedSeconds.rounded()) > 0`, but
+`restElapsedSeconds` is updated only by the 0.25 s ticker.
+On the very first set finalize after launch, the bar silently
+failed to mount. Where should the synchronization point live?
+
+**Decided.** Two-sided fix:
+1. `SessionStore.finalizeSet()` now publishes
+   `restElapsedSeconds` synchronously (computed against
+   `Date()` so the −2 s backdate is honored).
+2. `LiveCaptureViewV2.phaseOrRestBar` predicate keys on
+   `session.restActive` (set synchronously inside both
+   `finalizeSet()` and `tapRestTile()`) instead of rounded
+   elapsed seconds.
+
+**Why.** The fix could have been done on either side alone, but
+both serve different needs: (1) ensures the displayed elapsed
+value is correct on the first frame; (2) ensures mount/unmount
+honor intent rather than a sampled-clock proxy. Distinct from
+KI-F1 (b57), which fixed the engagement-detection side in
+`SessionStore.handleLiveSample`.
+
+**Rejected.**
+- Fire the rest bar on a 0.001 s nudge to elapsed seconds.
+  Brittle: `Int(0.001.rounded()) == 0` so the predicate still
+  fails. Switching the predicate is the honest fix.
+- Move the publisher to a 0.0 s tick. Doesn't solve the race;
+  the publisher's first run is still on the next run-loop turn.

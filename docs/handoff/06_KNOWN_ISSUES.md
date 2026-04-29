@@ -143,6 +143,55 @@ asked. `force_curve.md` is the source of truth.
 
 ## Recently fixed (move to WORK_LOG before deleting)
 
+### KI-F12 (b66, fixed) — Rest-timer first-engage view race (P1-2)
+
+**Was.** Distinct from KI-F1 (which fixed the *engagement-detection*
+side in `SessionStore.handleLiveSample`). On the very first set
+finalize after launch, the **rest bar would silently fail to mount**
+on the LiveCaptureViewV2. Root cause: the view-side mount predicate
+keyed on `Int(session.restElapsedSeconds.rounded()) > 0`, but
+`restElapsedSeconds` is only updated by the 0.25 s ticker — when
+`finalizeSet()` set `restStartedAt` synchronously, the elapsed value
+stayed at 0 until the next tick fired. SwiftUI re-rendered with the
+stale 0 and the bar never appeared on the first set.
+
+**Fix.**
+- `SessionStore.finalizeSet()`: publish `restElapsedSeconds`
+  immediately after setting `restStartedAt` (computed against
+  `Date()` so the -2 s backdate is honored).
+- `SessionStore.tapRestTile()`: assign `restElapsedSeconds = 0`
+  to re-fire observers on a fresh tap.
+- `LiveCaptureViewV2.phaseOrRestBar`: predicate now keys on
+  `session.restActive` (set synchronously) instead of rounded
+  seconds.
+- `LiveCaptureViewV2.forceChartCard`: `resting` flag aligned to
+  `restActive` for the same race.
+
+### KI-F11 (b66, fixed) — 3-digit weight + TWIN badge overlap (P1-1)
+
+**Was.** Under TWIN mode at 3-digit weights (≥100 lb), the TWIN
+pill overlapped the weight number's `lb` suffix. The badge was
+nested inside the inner weight HStack, where it competed with
+`.minimumScaleFactor` and the trailing-mask gradient.
+
+**Fix.** Promoted TWIN badge OUT of the inner weight HStack to a
+fixed-size sibling between the weight cluster and the stepper
+spacer in the outer HStack. Wrapped weight Text in a leading-aligned
+flexible frame so it owns its slot; gave the `lb` suffix
+`.layoutPriority(2) + .fixedSize()` so 3-digit weights never push
+the badge into overlap. (V4-D9 from b58 fixed the stepper-overlap
+side; this fix extends it to the TWIN badge.)
+
+### KI-F10 (b66, fixed) — Cascade timer cadence (T1)
+
+**Was.** `cascadeArmIdleSec` and `cascadeIntervalSec` were both
+2.0 s. User feedback: too fast, can't keep up with the cable
+stepping mid-cascade.
+
+**Fix.** Both bumped to 3.0 s in `LoggingStore.swift`. Constants
+table in `docs/handoff/entities/dropset_state_machine.md` updated
+to match.
+
 ### KI-F7 (b60-prep, fixed) — Cascade interval was already 2 s
 
 **Was.** b58 QA reported the dropset cascade fire interval as 4 s

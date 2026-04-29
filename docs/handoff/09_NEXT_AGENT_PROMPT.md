@@ -4,10 +4,47 @@
 > up VOLTRA Live iOS. Skim, then read the docs in the order at
 > the bottom.
 
-## Where things stand (b58, v0.4.36-build58)
+## Where things stand (b66, v0.4.39-build66)
 
-**Last shipped:** v0.4.36-build58 (b58). Tag pushed, altool
-verified. See `docs/WORK_LOG.md` for the build entry.
+**Last shipped:** v0.4.39-build66 (b66) on branch
+`feat/ui-v4-2-claude` — head-to-head with the GPT-5.5 fork
+(`voltra-live-ios-gpt-5-5`, do NOT contact). PR is intentionally
+unmerged for side-by-side review.
+
+**The big change in b66 (V4.2 reskin):**
+
+1. **VoltraAssignmentPanel.** New top-of-screen panel
+   `VL1 ⌚ │ L R ⋏ •• │ SS` with a single mint breathing ring on
+   the active pill. Mounted on LoggingHomeView (global scope),
+   ExerciseDetailView (per-exercise override), and
+   LiveCaptureViewV2 (read-only when a live set is in progress
+   per `isLiveSetInProgress` — force > 3 lb).
+2. **SupersetSwitcherBanner.** V1 supersetBanner verbatim port
+   (commit `e22aaa6`) + breathing-ring delta on the ACTIVE side.
+   Mounted on LiveCaptureViewV2 only.
+3. **PageBadgeOverlay.** `.pageBadge("<TypeName>")` modifier
+   visible bottom-leading on every top-level screen — 9 pt mono,
+   faint mint, always shown. Applied to all 15 view structs.
+4. **WorkoutVoltraPickerSheet superseded.** File kept on disk
+   with a header banner; no live call sites.
+5. **Cascade timer cadence T1.** `cascadeArmIdleSec` and
+   `cascadeIntervalSec` bumped 2.0 s → 3.0 s in `LoggingStore`.
+6. **Bug fixes P1-1 + P1-2 (this build).** TWIN badge overlap
+   on 3-digit weights fixed by promoting the badge out of the
+   inner weight HStack; rest-timer first-engage view race fixed
+   by switching the mount predicate to `session.restActive` and
+   publishing `restElapsedSeconds` synchronously inside
+   `finalizeSet()` and `tapRestTile()`.
+
+Full V4.2 spec in `03_CURRENT_FEATURE_SPEC.md`. Decisions in
+`04_DECISIONS_AND_CONSTRAINTS.md` (entries V4-D1 … V4-D9 +
+V4.2 entries). Dual-VOLTRA details in `07_DUAL_VOLTRA.md`.
+
+## Where things stood at b58 (kept for context)
+
+**Last shipped before b66:** v0.4.36-build58 (b58). Tag pushed,
+altool verified.
+
 
 **The big change in b58 (V4):** four spec items in one ship.
 
@@ -69,9 +106,9 @@ Before you start, repeat the user's request back to them so
 they can confirm you're getting it correct. They will catch
 misunderstandings before you waste a build.
 
-## Current open issues (post-b58)
+## Current open issues (post-b66)
 
-See `06_KNOWN_ISSUES.md`. At b58 ship:
+See `06_KNOWN_ISSUES.md`. At b66 ship:
 
 - **KI-1:** 2× pulley snaps ±1 by 2 lb. Cosmetic.
 - **KI-3:** V2 dial cleanup (residual references in tests).
@@ -81,9 +118,16 @@ See `06_KNOWN_ISSUES.md`. At b58 ship:
 - **KI-6:** Missing `weight-overlap-v3.jpeg` reference (S3 was
   unreachable when user dropped the screenshot link). Recreate
   from local photo if user reposts.
+- **KI-10:** Phantom -5 lb weight drop — likely closed by the
+  b60-prep arm-only refactor (cherry-picked into b66 as
+  `0465b34`); awaiting hardware re-test.
+- **KI-11:** Force-curve full spec not yet implemented (P1).
 
-Closed in b58: KI-F3 (dropset cascade source-of-truth),
-KI-F4 (weight cell wrap-overlap).
+Closed in b66: KI-F10 (cascade timer cadence T1), KI-F11
+(3-digit weight + TWIN badge overlap, P1-1), KI-F12 (rest-timer
+first-engage view race, P1-2).
+Closed in b60-prep (cherry-picked into b66): KI-F7, KI-F8, KI-F9.
+Closed in b58: KI-F3, KI-F4.
 
 ## Read order for cold start
 
