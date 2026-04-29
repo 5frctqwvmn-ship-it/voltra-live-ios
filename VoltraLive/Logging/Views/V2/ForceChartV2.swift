@@ -307,6 +307,11 @@ struct ForceChartV2: View {
     /// so the visual weight reads heaviest at top-of-ROM (right side of
     /// the normalized x-axis) — communicates that chain load builds as
     /// the cable extends.
+    /// b67 V4.3 (Bug 10): fill now traces the parametric sine geometry
+    /// from `repSineGeometry` so the fill exactly matches the stroke.
+    /// The b58 version filled raw-sample polygons — visibly mismatched
+    /// the new sine stroke and produced jagged artifacts at the phase
+    /// boundary.
     @ViewBuilder
     private func eccConFill(
         rep: [ForceSample],
@@ -316,38 +321,52 @@ struct ForceChartV2: View {
         opacity: Double,
         chainMirror: Bool
     ) -> some View {
-        let pts: [(x: CGFloat, y: CGFloat, phase: VoltraPhase)] = rep.map { s in
-            let nx = normalizedX(rep: rep, sample: s)
-            let x = pad + CGFloat(nx) * (w - 2 * pad)
-            let y = h - pad - CGFloat(s.forceLb / denom) * (h - 2 * pad - 8)
-            return (x, y, s.phase)
-        }
-        let segments = phaseSegment(points: pts)
-        let baselineY = h - pad
+        let geom = repSineGeometry(rep: rep, width: w, height: h, denom: denom)
+        let baselineY = geom.baselineY
 
-        ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
-            let isEcc = (seg.phase == .return)   // VoltraPhase.return = lowering / eccentric
-            let isCon = (seg.phase == .pull)     // VoltraPhase.pull  = lifting / concentric
-            // Skip idle segments — no fill for between-rep idle pauses.
-            if isEcc || isCon {
+        return ZStack {
+            // Concentric lobe fill (lighter band).
+            if !geom.conPoints.isEmpty {
                 Path { p in
-                    guard let first = seg.points.first,
-                          let last  = seg.points.last else { return }
+                    guard let first = geom.conPoints.first,
+                          let last  = geom.conPoints.last else { return }
                     p.move(to: CGPoint(x: first.x, y: baselineY))
-                    p.addLine(to: CGPoint(x: first.x, y: first.y))
-                    for pt in seg.points.dropFirst() {
-                        p.addLine(to: pt)
-                    }
+                    p.addLine(to: first)
+                    for pt in geom.conPoints.dropFirst() { p.addLine(to: pt) }
                     p.addLine(to: CGPoint(x: last.x, y: baselineY))
                     p.closeSubpath()
                 }
                 .fill(
                     LinearGradient(
                         gradient: gradientStops(
-                            for: seg.phase,
+                            for: .pull,
                             opacity: opacity,
-                            isEcc: isEcc,
-                            isCon: isCon
+                            isEcc: false,
+                            isCon: true
+                        ),
+                        startPoint: chainMirror ? .topTrailing : .top,
+                        endPoint:   chainMirror ? .bottomLeading : .bottom
+                    )
+                )
+            }
+            // Eccentric lobe fill (heavier band — visually weightier).
+            if !geom.eccPoints.isEmpty {
+                Path { p in
+                    guard let first = geom.eccPoints.first,
+                          let last  = geom.eccPoints.last else { return }
+                    p.move(to: CGPoint(x: first.x, y: baselineY))
+                    p.addLine(to: first)
+                    for pt in geom.eccPoints.dropFirst() { p.addLine(to: pt) }
+                    p.addLine(to: CGPoint(x: last.x, y: baselineY))
+                    p.closeSubpath()
+                }
+                .fill(
+                    LinearGradient(
+                        gradient: gradientStops(
+                            for: .return,
+                            opacity: opacity,
+                            isEcc: true,
+                            isCon: false
                         ),
                         startPoint: chainMirror ? .topTrailing : .top,
                         endPoint:   chainMirror ? .bottomLeading : .bottom
@@ -485,29 +504,154 @@ struct ForceChartV2: View {
         return max(0, min(1, dt / span))
     }
 
-    /// Render one rep's polyline with phase-segmented coloring and the
-    /// supplied opacity. Same phase-segmentation logic as the b56
-    /// activeChart, but now over the rep's normalized 0..1 x-axis.
+    /// b67 V4.3 (Bug 10): per-rep PARAMETRIC SINE rendering.
+    ///
+    /// The b58/b66 implementation traced raw sensor samples as a
+    /// phase-segmented polyline. The user reports this looks blocky /
+    /// spiky and "reps bleed into one continuous trace" — because
+    /// that's literally what a sample polyline does. Per the
+    /// `docs/handoff/design/force_curve.md` spec (§3f rep-stacking)
+    /// and the user's verbatim description ("one full sine wave per
+    /// rep, concentric = rising half, eccentric = falling half"), each
+    /// rep is now drawn as **two half-sine lobes**:
+    ///
+    ///   • Concentric (`pull`)  : sin(π·tₙ) where tₙ ∈ [0, splitT],
+    ///                            peaking at the rep's measured
+    ///                            concentric peak force.
+    ///   • Eccentric (`return`) : sin(π·tₙ) where tₙ ∈ [splitT, 1],
+    ///                            peaking at the rep's measured
+    ///                            eccentric peak force — which is
+    ///                            naturally 20–50% taller when ECC mode
+    ///                            is armed.
+    ///
+    /// `splitT` is derived from the rep's actual phase boundary in
+    /// telemetry (so a slow lower vs fast lift still renders
+    /// correctly). Idle segments at the start/end of a rep are clipped.
+    /// History overlays (older reps) reuse the same parametric shape
+    /// scaled by their own peak — so a fatigued rep visibly shrinks
+    /// underneath the current one, exactly matching §3f's fatigue-
+    /// envelope intent.
     @ViewBuilder
     private func repPolyline(rep: [ForceSample], width w: CGFloat, height h: CGFloat, denom: Double, opacity: Double) -> some View {
-        let pts: [(x: CGFloat, y: CGFloat, phase: VoltraPhase)] = rep.map { s in
-            let nx = normalizedX(rep: rep, sample: s)
-            let x = pad + CGFloat(nx) * (w - 2 * pad)
-            let y = h - pad - CGFloat(s.forceLb / denom) * (h - 2 * pad - 8)
-            return (x, y, s.phase)
-        }
-        let segments = phaseSegment(points: pts)
-        ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
+        let geom = repSineGeometry(rep: rep, width: w, height: h, denom: denom)
+
+        // Concentric lobe (rising-then-falling sine half-wave).
+        if !geom.conPoints.isEmpty {
             Path { p in
-                guard let first = seg.points.first else { return }
-                p.move(to: first)
-                for pt in seg.points.dropFirst() { p.addLine(to: pt) }
+                p.move(to: geom.conPoints[0])
+                for pt in geom.conPoints.dropFirst() { p.addLine(to: pt) }
             }
             .stroke(
-                VoltraColor.phase(seg.phase).opacity(opacity),
+                VoltraColor.phase(.pull).opacity(opacity),
                 style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
             )
         }
+
+        // Eccentric lobe (rising-then-falling sine half-wave; visually
+        // taller than concentric whenever ECC mode is armed because the
+        // sample stream peakLb_ecc > peakLb_con).
+        if !geom.eccPoints.isEmpty {
+            Path { p in
+                p.move(to: geom.eccPoints[0])
+                for pt in geom.eccPoints.dropFirst() { p.addLine(to: pt) }
+            }
+            .stroke(
+                VoltraColor.phase(.return).opacity(opacity),
+                style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+            )
+        }
+    }
+
+    /// Per-rep parametric sine geometry. Computed once per repPolyline
+    /// call and (b67) re-used by `eccConFill` so the fill exactly
+    /// follows the stroke. All coordinates are in canvas-space.
+    private struct RepSineGeometry {
+        let conPoints: [CGPoint]   // concentric half-sine lobe
+        let eccPoints: [CGPoint]   // eccentric half-sine lobe
+        let conPeak:   CGPoint     // labeled peak dot (con phase)
+        let eccPeak:   CGPoint     // labeled peak dot (ecc phase)
+        let xStart:    CGFloat
+        let xEnd:       CGFloat
+        let baselineY: CGFloat
+        let splitX:    CGFloat     // x-coord of phase boundary (con→ecc)
+    }
+
+    /// Derive a rep's parametric sine path. Strategy:
+    ///   1. Find the rep's PULL peak (concentric peak force).
+    ///   2. Find the rep's RETURN peak (eccentric peak force).
+    ///   3. Find the time-fraction where pull → return transitions in
+    ///      the actual sample stream → maps to splitX on canvas.
+    ///   4. Sample sin(π·tₙ) at ~24 points across each lobe.
+    /// If a rep has only one phase (pure pull, pure return), the other
+    /// lobe is empty.
+    private func repSineGeometry(rep: [ForceSample], width w: CGFloat, height h: CGFloat, denom: Double) -> RepSineGeometry {
+        let baselineY = h - pad
+        let usableH   = h - 2 * pad - 8
+        let xL        = pad
+        let xR        = w - pad
+
+        // Phase peaks (lb).
+        let conSamples = rep.filter { $0.phase == .pull }
+        let eccSamples = rep.filter { $0.phase == .return }
+        let conPeakLb  = conSamples.map { $0.forceLb }.max() ?? 0
+        let eccPeakLb  = eccSamples.map { $0.forceLb }.max() ?? 0
+
+        // Phase-boundary fraction along the rep's normalized timeline.
+        // We use the FIRST .return sample's normalized x as the split.
+        // If no .return samples exist, the rep is pull-only → split=1.
+        // If no .pull samples exist, the rep is return-only → split=0.
+        let splitT: Double
+        if let firstReturn = eccSamples.first {
+            splitT = max(0.0, min(1.0, normalizedX(rep: rep, sample: firstReturn)))
+        } else if conSamples.isEmpty {
+            splitT = 0.0   // return-only rep
+        } else {
+            splitT = 1.0   // pull-only rep
+        }
+        let splitX = xL + CGFloat(splitT) * (xR - xL)
+
+        // Y mapper: lb → canvas-y (denom guards divide-by-zero in caller).
+        let yForLb: (Double) -> CGFloat = { lb in
+            baselineY - CGFloat(lb / denom) * usableH
+        }
+
+        // Build half-sine lobes. ~24 samples per lobe = visually smooth
+        // at any chart width without per-frame allocation churn.
+        let steps = 24
+
+        var conPoints: [CGPoint] = []
+        if conPeakLb > 0 && splitX > xL {
+            for i in 0...steps {
+                let u  = Double(i) / Double(steps)        // 0…1 along this lobe
+                let lb = conPeakLb * sin(.pi * u)         // half-sine
+                let x  = xL + CGFloat(u) * (splitX - xL)
+                conPoints.append(CGPoint(x: x, y: yForLb(lb)))
+            }
+        }
+
+        var eccPoints: [CGPoint] = []
+        if eccPeakLb > 0 && splitX < xR {
+            for i in 0...steps {
+                let u  = Double(i) / Double(steps)
+                let lb = eccPeakLb * sin(.pi * u)
+                let x  = splitX + CGFloat(u) * (xR - splitX)
+                eccPoints.append(CGPoint(x: x, y: yForLb(lb)))
+            }
+        }
+
+        let conPeak = CGPoint(x: (xL + splitX) / 2, y: yForLb(conPeakLb))
+        let eccPeak = CGPoint(x: (splitX + xR) / 2, y: yForLb(eccPeakLb))
+
+        return RepSineGeometry(
+            conPoints: conPoints,
+            eccPoints: eccPoints,
+            conPeak:   conPeak,
+            eccPeak:   eccPeak,
+            xStart:    xL,
+            xEnd:       xR,
+            baselineY: baselineY,
+            splitX:    splitX
+        )
     }
 
     /// Fallback when slicer returns nothing — render the whole sample
