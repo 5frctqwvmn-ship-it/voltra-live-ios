@@ -13,7 +13,7 @@
 //     their hand so they can give precise page-level directions back to the
 //     agent. Once b66 ships and the user confirms the badge has served its
 //     purpose, gate it behind a flag in a follow-up build.
-//   • Color: faint mint — uses VoltraTheme.textFaint (same dim cool-mint
+//   • Color: faint mint — uses VoltraColor.textFaint (same dim cool-mint
 //     used by other low-priority labels) so it does not compete with the
 //     primary content. ~9 pt to stay below the visual noise floor.
 //
@@ -36,7 +36,7 @@ private struct PageBadgeOverlay: ViewModifier {
             .overlay(alignment: .bottomLeading) {
                 Text(name)
                     .font(.system(size: 9, weight: .regular, design: .monospaced))
-                    .foregroundStyle(VoltraTheme.textFaint)
+                    .foregroundStyle(VoltraColor.textFaint)
                     .padding(.leading, 12)
                     // Sit just above the home indicator. SafeArea bottom
                     // already pushes us above the indicator on devices
