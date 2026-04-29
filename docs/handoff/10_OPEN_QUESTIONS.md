@@ -6,9 +6,39 @@ Things blocked on the user. Resolve before the dependent task can ship.
 > commit** as the code change that uses the answer. Don't let stale
 > questions accumulate.
 
-## Build 30
+## V2 promotion
 
-### Old-store import
+### Should V2 become the default?
+
+Status: **needs user answer.**
+
+V2 currently ships as opt-in via the first-launch picker
+(`@AppStorage("liveCaptureUIVersion")` empty → user picks). V2 only
+renders for single-Voltra-no-chain sessions; everything else falls
+back to V1. Once V2 has shipped a couple of stable builds, do we:
+
+a. Flip the default to V2 (existing users who never picked stay on
+   whatever they have; new users default to V2).
+b. Auto-migrate everyone to V2 on next launch.
+c. Keep first-launch picker indefinitely.
+
+Tracking: minimum 2 clean ships of V2 before this question can be
+answered. b54 is `1 / 2`.
+
+### Should SWAP's no-auto-LOAD change get an in-app hint?
+
+Status: **needs user answer (UX decision).**
+
+b53 changed SWAP behavior — it no longer pushes the stored weight
+back to the newly-active Voltra. Users who learned the b49 SWAP will
+find the bar quiet on their first b53 swap. Options:
+
+a. Add a one-time toast/banner the first time SWAP is tapped on b53+.
+b. Add a permanent caption under the SWAP button.
+c. Document only (release notes / TestFlight description).
+d. No change — the empty bar IS the hint.
+
+## Old-store import (carried from b30)
 
 Status: **needs user answer before any importer code is written.**
 
@@ -20,12 +50,24 @@ If yes: write a one-shot importer that opens the legacy store with a
 separate `ModelContainer`, reads all sets, writes them into the v2 store,
 then sets a "imported" flag so it doesn't run again.
 
-## Build 31 (Superset)
-
-(Defer until build 30 ships.) See `08_SUPERSET.md` "Open questions for
-build 31" — copy them here when build 31 begins.
-
 ## Recently closed
+
+### Per-instance Voltra routing (b53)
+
+Resolved in b53. Routing source of truth moved from
+`mdm.hasAnySupersetChainEntry(for:)` predicate to
+`ExerciseInstance.assignedVoltra` field stamped at exercise-add time.
+3-way L/R/Both picker replaces binary L/R. SWAP unloads both sides
+without auto-LOAD. See `08_SUPERSET.md`.
+
+### V2 spec match (b54)
+
+Resolved in b54. V2 was rebuilt as a 1:1 port of
+`design-system/ui-kit.html` (design-studio branch HEAD `74d0d3b9`),
+replacing the b53 generic version that was built from a prose summary
+without opening the spec. New rule in `00_START_HERE.md`: external
+specs must be opened verbatim before any code is written, with file
+path + commit hash cited in WORK_LOG.
 
 ### HealthKit first-launch prompt (b47/b48 deferred, b49 closed)
 
@@ -41,6 +83,14 @@ them with exact-key match. See `06_HEALTHKIT.md` for the full writeup.
 
 Not a user question — a self-imposed gate. Don't re-enable CloudKit until
 the v2 store has been stable across at least 2 releases past build 29.
-Track the count: `0 / 2` after build 30 ships, `1 / 2` after build 31, etc.
+Track the count: **post-b54 → 25 / 2 (well past gate, can re-enable
+when desired).**
 
-(Move this to a tracker once we have 2+ open process gates.)
+### Karpathy-method ship discipline (added post-b54)
+
+Not a user question — a process gate. After b53 shipped wrong because
+handoff docs were 25+ builds stale, every ship now updates `02`,
+`03`, `00`, the relevant topic doc, and `WORK_LOG.md` in the same
+commit as the version bump. See `00_START_HERE.md` "Mandatory ship
+discipline" section. If a ship lands without doc updates, the next
+session should treat that as a bug and back-fill before any new work.

@@ -1,86 +1,41 @@
 # 03 — Roadmap
 
-## Build 30 (in progress) — v0.4.8
+_Last updated: 2026-04-28 (post-b54)._
 
-Locked-in priority order:
+> **Maintenance rule:** overwritten on every ship. Items that ship move to "Done" with the build number; items that emerge get added to "Next up". History lives in `docs/WORK_LOG.md`.
 
-1. **Drop-set fix.** ✅ DONE. Real bug was UX, not math: every tap on the
-   active tile was both bumping the tier AND firing a drop, because
-   `bumpCascadeTier()` called `fireNextCascadeStep()`. Fixed by making
-   tier-bump preview-only; the 4s fuse remains the sole drop trigger.
-   Cascade math was already anchor-correct. Regression tests pin the new
-   behavior in `VoltraLiveTests/DropSetCascadeTests.swift`.
-2. **Live HealthKit streaming.** ✅ DONE. Real cause was missing
-   `enableBackgroundDelivery` — the anchored query was already wired,
-   but without background delivery the iPhone wasn't woken for samples
-   the Watch wrote. Added `.immediate` background delivery for both
-   `.heartRate` and `.activeEnergyBurned`, called once after auth
-   succeeds (idempotent on every start).
-3. **Pulsing data indicator.** ✅ DONE. `PulseDot` view at
-   `VoltraLive/Logging/Views/PulseDot.swift` pulses green at ~1.4 Hz
-   while data is fresh (≤8s since last sample), fades to faint grey
-   when stale. Wired into HR + KCAL tiles via the `tile()` helper's new
-   `freshnessIndicator` parameter.
-4. **Warmup phase.** ✅ DONE. `SetLogView.prefillIfNeeded()` now detects
-   the first-set-of-instance condition (`isFirstSetOfActiveInstance`) and
-   auto-selects Warm-Up mode + label. Weight comes from
-   `LoggingStore.lastWarmup(for:)`; if the user has never logged a warmup
-   for that exercise, falls back to 50% of `lastWorkingSet(for:)` rounded
-   to nearest 5 lb. No new schema — reuses existing `LoggedSet.mode ==
-   .warmUp`. Telemetry-detected peak force still wins over the warmup
-   default; user can always tap Working to override.
-5. **Dual-Voltra.** Restore from `.dual-voltra-wip/`, ship the 3-button
-   Connect screen, scanner picker, `MultiDeviceManager`, Independent +
-   Combined modes. See `07_DUAL_VOLTRA.md` for the spec.
-6. **Workout-creation Group dropdown.** Existing tags ("Back Day", "Chest
-   Day", "Leg Day") + ability to create a new group inline.
+## Done (recent shipped milestones)
 
-After all six land:
+| Build | Tag | Label | Highlights |
+|---|---|---|---|
+| 54 | v0.4.32-build54 | V2 spec match | V2 LiveCaptureView rewritten as 1:1 port of design-system/ui-kit.html. V2 gate tightened to fall back on any chain entry. |
+| 53 | v0.4.31-build53 | V2 preview + chain fixes | Per-instance `assignedVoltra` routing, 3-way Left/Right/Both picker, "Superset · {head} · HR · {day}" header, no SWAP auto-LOAD, session vitals + comparison cards, EXERCISES count fix, markdown export fixed-width. V2 itself was wrong, hotfixed in b54. |
+| 52 | v0.4.30-build52 | Chain logging + summary | Chain logging foundations, multi-card export, totals + vitals lines. |
+| 51 | v0.4.29-build51 | Telemetry + UI fixes | Telemetry wiring + assorted UI fixes. |
+| 50 | v0.4.28-build50 | Chain routing fix | First chain routing pass (superseded by b53's per-instance approach). |
+| 49 | v0.4.27-build49 | Unified flow + HK fix | Unified add-exercise flow + HealthKit query fix. |
 
-- Bump 0.4.7/29 → 0.4.8/30 in the **three places** (see `02_CURRENT_STATE.md`).
-- Tag `v0.4.8-build30`, push tag to trigger TestFlight release.
+For anything pre-b49, read `docs/WORK_LOG.md`.
 
-## Build 31 — Superset
+## Next up (no build number assigned yet)
 
-See `08_SUPERSET.md` for the full spec. Summary:
+Order is rough priority, not commitment.
 
-- "+" button on existing workout screens to add the configured workout
-  (weight, reps, Voltra-assignment) to an in-progress superset.
-- Persistent superset tray chip: `Superset · N steps · [Start] [Clear]`.
-- Each step bound to a specific Voltra (Left/Right).
-- Auto-advance using existing 4s/10s drop-cascade detection; pre-load
-  next step's weight in the background.
-- Logged in history as one superset block.
+1. **Settings toggle for V1/V2.** Currently the first-launch picker is the only way to choose. Add a Settings row (or long-press on the V2 pill) to switch back. Cost: lite.
+2. **V2 polish based on actual user testing.** b54 ships the spec-match. Next round depends on what the user reports after using V2 for real sessions \u2014 likely candidates: tile sizing on smaller iPhones, CompareStrip when no prior data exists, force chart empty state.
+3. **Expire b53 in App Store Connect.** b53 is a known-bad TestFlight build. Pulling it prevents testers installing the wrong version. Ask the user before doing this; needs ASC access.
+4. **Document SWAP no-auto-LOAD in user-facing release note.** The b53 behavior change means the user must manually tap LOAD after SWAP. Mention this somewhere visible.
+5. **Verify session HR rollups are landing.** b53 added async HK snapshot in `endSession`. Confirm `avgHRSession` / `kcalSession` actually populate post-session by checking a real export.
 
-## Beyond build 31 (parking lot)
+## Parking lot
 
-- **CloudKit sync re-enablement.** See `09_RELEASE_AND_SIGNING.md` for the
-  exact procedure. Wait until the fresh store has been stable across at
-  least a couple of releases.
-- **Old-store import.** Build 29 abandoned the old SwiftData store at
-  `Application Support/<old store path>`. If the user wants old logs back,
-  add a one-shot importer that reads the legacy store with a separate
-  `ModelContainer` and copies rows into the v2 store. Confirm with user
-  before doing this.
-- **Apple Watch companion (v1.2).** See `AGENTS.md` "Deferred / known
-  follow-ups" — strategy is a separate Xcode project, not a Watch target
-  in the same project.
-- **`altool` migration to `notarytool`.** Apple is deprecating altool.
-  Still works in Xcode 26 but should migrate before they remove it.
+- **CloudKit sync re-enablement.** See `09_RELEASE_AND_SIGNING.md`. Wait until the fresh store has been stable across more releases.
+- **Old-store import.** Build 29 abandoned the legacy SwiftData store. If the user wants old logs back, add a one-shot importer. Confirm with user first.
+- **Apple Watch companion (v1.2).** Strategy: separate Xcode project, not a Watch target in the same project.
+- **`altool` \u2192 `notarytool` migration.** Apple deprecating altool; migrate before removal.
+- **Drop-set support in V2.** Currently V2 has no cascade UI. Either keep V2 single-Voltra-no-cascade or add it later.
+- **Dual-Voltra in V2.** Currently V2 always falls back to V1 when both Voltras pair. If V2 becomes the default, this needs answering.
 
 ## Ordering rationale
 
-- Drop-set first because it produces wrong numbers in user-visible logs
-  every session. That is the highest-cost regression.
-- HR/kcal streaming next because it's the most common in-session feedback
-  the user looks at. Snapshot HR is near-useless.
-- PulseDot in the same build as HR/kcal because the test for "is streaming
-  working?" is easier with the indicator wired in.
-- Warmup is small but blocked on a user answer — surface the question
-  early so it doesn't gate the build.
-- Dual-Voltra last in build 30 because it's the largest and most isolated
-  change (new files, new mode), so it can ship in parallel with the
-  smaller fixes if needed.
-- Group dropdown is workout-creation only — independent of all the above.
-- Superset deferred because it depends on dual-Voltra working in
-  Independent mode (each step is bound to a side).
+V2 is now in user-test mode. Until the user reports back on real sessions, do not pile more V2 features in \u2014 wait for signal. Chain bugs were the higher-priority fix (they affected V1, the production path) and are landed in b53. Parking-lot items are large, isolated, and should wait until V2 is either promoted or rolled back.

@@ -14,18 +14,34 @@ history is ephemeral — anything that should survive across sessions lives here
 3. Read `docs/handoff/02_CURRENT_STATE.md` — what shipped, what's broken.
 4. Read `docs/handoff/03_ROADMAP.md` — what's next and why.
 5. Read `docs/handoff/10_OPEN_QUESTIONS.md` — anything blocked on user input.
-6. Skim `docs/WORK_LOG.md` (tail) — recent activity in append-only form.
+6. Skim `docs/WORK_LOG.md` (tail — last 200 lines is enough) — recent activity in append-only form.
 7. Summarize state back to the user. Then start work.
+
+**Last shipped: v0.4.32-build54 ("V2 spec match"), HEAD `eae659f`.** If `02_CURRENT_STATE.md` shows a different latest build than this line, the file is stale — trust `git log` and `gh run list` over either source and surface the discrepancy to the user before coding.
 
 ## Mandatory commit discipline
 
-- After **any meaningful change**, append an entry to `docs/WORK_LOG.md`
-  (date/time UTC, goal, files changed, what changed, verification, risks,
-  next step) and commit it **in the same commit** as the code change.
-- If the change touches a topic owned by a handoff doc (architecture, BLE,
-  health, dual-Voltra, releases, secrets, open questions), update that doc
-  in the **same commit**.
+- After **any meaningful change**, append an entry to `docs/WORK_LOG.md` (date/time UTC, goal, files changed, what changed, verification, risks, next step) and commit it **in the same commit** as the code change.
+- If the change touches a topic owned by a handoff doc (architecture, BLE, health, dual-Voltra, releases, secrets, open questions), update that doc in the **same commit**.
 - Never rely on chat history for facts that should live in repo.
+
+## Mandatory ship discipline (Karpathy method)
+
+**Every ship must update the durable state, not just append to history.** A fresh agent must be able to read 4 files (`AGENTS.md` → `01` → `02` → `03`) and know the current state without reading the WORK_LOG.
+
+On every successful ship, in the SAME commit as the version bump:
+
+1. **`docs/handoff/02_CURRENT_STATE.md`** — overwrite the "Latest shipped build", "What works today", and "Recent tags" sections to match HEAD. If the build changed mode handling, regenerate the mode matrix.
+2. **`docs/handoff/03_ROADMAP.md`** — move the just-shipped item from "Next up" to "Done" with its tag and label. Add anything new the build surfaced.
+3. **`docs/handoff/00_START_HERE.md`** — update the "Last shipped" line.
+4. **Topic docs** (`04_ARCHITECTURE.md`, `05_BLE_AND_PROTOCOL.md`, `06_HEALTHKIT.md`, `07_DUAL_VOLTRA.md`, `08_SUPERSET.md`, `09_RELEASE_AND_SIGNING.md`) — update only the ones whose subject area changed in this build. Do not update them speculatively.
+5. **`docs/WORK_LOG.md`** — append the build entry.
+
+If you skip steps 1-4, the next agent's session-resume summary will be wrong, which is exactly how b53 shipped a broken V2 (the prior session's summary claimed design-studio was "fetched" while the handoff docs said the latest build was b29; the resuming agent trusted the summary instead of opening the source).
+
+## Mandatory external-spec discipline
+
+If a build ports an external spec (HTML, CSS, design doc, screenshot, RFC, etc.), **open and read the spec verbatim before writing any code.** Do not rely on prose summaries from prior sessions. Cite the exact file path and commit hash of the spec in the WORK_LOG entry. b53 violated this rule and produced a build that did not match its claimed source.
 
 ## Mandatory secrets discipline
 
