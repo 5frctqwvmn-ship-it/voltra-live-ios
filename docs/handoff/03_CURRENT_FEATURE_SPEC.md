@@ -46,11 +46,25 @@
   unit-selector strip. See §8.
 - **No top dial.** The V2 dial is removed entirely.
 
-### §1a. Phase strip OR Rest Timer Bar
+### §1a. Phase strip OR Dropset Progress Bar OR Rest Timer Bar
 
-Same swap behavior as V2: phase strip while a set is active, rest
-bar after End Set is tapped. Rest bar HSL sweeps green → amber →
-red over the rest preset, blinks 1Hz once over preset.
+> **b60 change vs b58:** the phase strip slot now morphs across
+> **three** states (was two). Priority order on conflict: rest >
+> dropset > phase.
+
+- **Active set, no DROP arm/engage:** compact phase strip with
+  PUSH/PULL/IDLE color band.
+- **DROP armed or active (b60, KI-8):** unified
+  `dropProgressBar`. Labels: `DROP · ARM` (armed, lift active,
+  no countdown yet) → `DROP · IN` (armed, lift idle, 2 s
+  countdown to first drop) → `DROP · NEXT` (active cascade,
+  2 s tier-to-tier countdown) → `DROP · BOTTOM` (cascade hit
+  the 5 lb floor, full bar, no further drops). Sweep tied to
+  `nextDropFiresAt` / `dropArmedFiresAt`; reuses the ambient
+  2 Hz blink republish.
+- **Post-finalize rest:** `RestTimerBarV2` HSL sweep green →
+  amber → red over the rest preset, blinks 1 Hz once over
+  preset.
 
 ### §2. WEIGHT card (the big number)
 
@@ -70,14 +84,29 @@ row per armed mod.
 **Increment grid (all four):** `−5 / −1 / +1 / +5`. ECC range
 5–400, CHAIN/INV CHAIN range 0–300.
 
-**DROP tile (b58 V4 §2 — time-driven cascade, port of b22 / aff322f):**
+**DROP tile (b60 V4 §2 — arm-only, port of b22 / aff322f, KI-9 refactor):**
 
-- **First tap (inactive):** arms the cascade. Immediately fires
-  drop #2 at tier 1 (−5 lb) via
-  `LoggingStore.startDropSet(startingLb:pushWeight:)`. The
-  pushWeight callback re-targets the device with the new
-  device-frame weight; ECC / CHAIN / INV CHAIN flags from the
-  parent set are inherited automatically.
+> **b60 change vs b58:** tap is now arm-only. The cable holds
+> the working weight until the lift goes idle for 2 s, then the
+> first cascade drop fires automatically. See
+> [entities/dropset_state_machine.md](entities/dropset_state_machine.md)
+> for the full state diagram.
+
+- **First tap (inactive):** arms the cascade via
+  `LoggingStore.armDropSet(startingLb:pushWeight:)`. Captures
+  the anchor + writer bridge but DOES NOT touch the cable.
+  `dropSetArmed = true`; the unified progress bar shows
+  `DROP · ARM`.
+- **Lift goes idle (force ≤ 3 lb for ≥ 2 s):** engine engages
+  the cascade. `engageArmedDropSet` re-delegates to
+  `startDropSet` which fires drop #2 at the current tier and
+  starts the recurring 2 s `cascadeTimer` + 10 s no-movement
+  watchdog. `dropSetArmed` clears, `dropSetActive` flips on.
+  ECC / CHAIN / INV CHAIN flags from the parent set are
+  inherited automatically.
+- **Tap while armed (not yet engaged):** `cancelArmedDropSet`
+  clears arm state with a 1.5 s cooldown. The cable was never
+  moved so no device write is needed.
 - **Tap while active:** `bumpCascadeTier` rolls 1 → 2 → 3 → 1
   (5 / 10 / 15 lb step). Fires an immediate drop at the new tier
   AND resets the 4-second next-fire fuse.
@@ -176,6 +205,48 @@ unloaded screens. 1.5 s ease on rescale.
   captions ("ECC" / "CON") at the centroid of each phase
   segment, in phase color at 70% opacity.
 - Suppressed if the rep doesn't contain both phases.
+
+**NEW b60-prep (KI-11): force-curve full spec.**
+
+Implementation closed the §3b/§3c/§3d/§3e/§3g gaps that
+`force_curve.md` had tracked as a single epic. Detailed deltas
+live in `force_curve.md` §9 and `06_KNOWN_ISSUES.md` KI-F11;
+visible behavior on the active chart now is:
+
+- **80% dashed reference line** (§3e). Horizontal dashed line at
+  80% of the running set peak. Hidden when peak < 10 lb so the
+  empty / pre-pull state stays uncluttered. "80%" mono caption
+  flush right.
+- **Per-rep peak dot + lb label** (§3e). Each visible rep in
+  the overlay gets a small dot at its peak sample with a kerned
+  mono lb value. Newest rep's dot is 6 px and label is opaque;
+  older reps fade with the same logarithmic curve as the polyline
+  (suppressed below opacity 0.30 to avoid label noise).
+- **Compact mode-aware legend chip** (§3g). Top-left of the
+  canvas. Renders only when at least one of ECC / CHAIN /
+  INV CHAIN is armed. Color-coded entries match phase colors.
+  Working-only sets stay clean (no chip).
+- **Time-based label fade** (§3c). The ECC / CON inline labels
+  on the most-recent rep fade with elapsed rep time: full
+  opacity for the first 3 s, linear ease 1 → 0 across 3..4 s,
+  fully suppressed beyond. The "OR rep 2, whichever first" half
+  of the spec is enforced upstream by the existing `repsAgo == 0`
+  gate.
+- **3-stop ROM-band gradient** (§3d). The fill gradient now uses
+  three stops (0.0 / 0.55 / 1.0) instead of two so the heavy
+  region reads as a band rather than a uniform ramp. Combined
+  with the existing CHAIN start/end-point flip: ECC = hot band
+  low, CHAIN = hot band high.
+- **Phase-blend boundary dot** (§3b). A 5 px alpha-reduced dot
+  in the closing segment's color sits at every CON↔ECC boundary
+  to soften the hard color cut. Stroke-side only — fill stays
+  segmented (see V4-D12 in `04_DECISIONS_AND_CONSTRAINTS.md`).
+
+INV CHAIN now surfaces a legend-chip entry but does NOT change
+the fill direction. The polyline shape continues to represent
+its mid-ROM offset. Re-litigating this requires per-sample ROM
+phase metadata that `ForceSample` doesn't carry today; deferred
+to a dedicated RFC.
 
 ### §6. Rest timer (b57 V3 §6)
 

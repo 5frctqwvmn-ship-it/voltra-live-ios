@@ -206,3 +206,113 @@ instead of dead-stopping on `…`. Steppers get a hard-min
 **Rejected.** Two-line wrap (kills vertical rhythm of the WEIGHT
 card). Unbounded shrink (3-digit + TWIN at scaleFactor 0.4 is
 unreadable in a glance).
+
+### V4-D10 (b60-prep, KI-9) — DROP tap is arm-only; engine engages on lift-idle
+
+**Q.** When the user taps the DROP tile, should the cable
+weight drop immediately or wait until they finish the rep?
+
+**Decided.** Wait. Tap captures the anchor + writer bridge and
+sets `dropSetArmed = true`. The cable holds the working weight
+until `noteTelemetryActivity` observes 2 s of sub-floor force
+(`forceLb ≤ 3 lb`) since the LAST above-floor sample, then
+`engageArmedDropSet` re-delegates to `startDropSet` and the
+cascade engages. The `armDropSet` / `engageArmedDropSet` split
+keeps the existing snapshot / parity / floor logic in one
+place (still `startDropSet`) while changing the public surface
+the V2 view talks to.
+
+**Why.** Pre-b60 the DROP tile was effectively a "drop weight
+NOW" button — tapping it mid-rep yanked the cable on the user.
+Mirroring the gym mental model ("finish the rep, then the
+weight drops") restores the dropset metaphor and removes the
+incentive to tap DROP only after the lift is already idle. Side
+benefit: the only path that engages the cascade now requires
+explicit arm + 2 s sub-floor gate, which closes the most
+plausible cause of KI-10 (phantom −5 lb mid-rep drop).
+
+**Rejected.**
+- Keep tap-fires-immediately + add a "delay arm" toggle. Two
+  failure modes for one feature; user must remember to arm
+  the toggle.
+- Tap = arm + IMMEDIATELY drop on the FIRST sub-floor sample
+  (no 2 s gate). Machine jitter and rest periods between reps
+  would fire spuriously. The 2 s gate matches `cascadeIntervalSec`
+  so arm-to-fire and tier-to-tier feel like the same beat.
+
+### V4-D11 (b60-prep, KI-8) — Single bar across idle / dropset / rest
+
+**Q.** Should the dropset progress timing get its own bar
+component, or share the existing rest-timer bar?
+
+**Decided.** Share. `LiveCaptureViewV2.phaseOrRestBar` is now
+the single sub-header bar slot, with a 3-state morph (priority:
+rest > dropset > phase). The dropset state renders a new
+private `dropProgressBar` view that mirrors the rest bar's
+geometry (4 pt capsule, kerned 9 pt label + monospaced
+countdown) but uses `VoltraColor.accent` instead of the HSL
+sweep. The new view drives off `nextDropFiresAt` (active) or
+`dropArmedFiresAt` (armed); the ambient 2 Hz `blinkOn`
+republish provides the redraw cadence.
+
+**Why.** Bar contention is impossible because the three states
+are mutually exclusive (you can only be in rest after a
+finalize, only in dropset after arming, only in phase
+otherwise). Sharing the slot keeps the screen's vertical
+rhythm constant — pre-b60 the dropset state had no visual
+surface and the user had to infer timing from weight changes
+alone.
+
+**Rejected.**
+- Standalone `DropProgressBarV2.swift` file. Adds a file just
+  to render a Capsule + GeometryReader; the b60 dropProgressBar
+  computed-var approach inlines into the V2 view without
+  cross-file plumbing.
+- HSL sweep matching the rest bar. The rest bar's color carries
+  semantic meaning (green = early, red = late); the dropset
+  bar doesn't have an analogous "late" state, so a flat accent
+  fill is more honest about what the bar communicates.
+
+### V4-D12 (b60-prep, KI-11) — Force-curve full spec compromises
+
+**Q.** Three §-level compromises were made when porting the full
+`force_curve.md` spec into `ForceChartV2.swift`. Document them
+so the next session doesn't re-litigate.
+
+**Decided.**
+1. **§3b 200 ms phase blend = stroke-side dot, not fill-side
+   alpha-tween.** Filled-polygon alpha blends across two
+   gradients don't survive opacity multiplication well in SwiftUI
+   (the under-fill from the next phase shows through and the
+   color stops shift). A 5 px dot in the closing segment's color
+   at 35% alpha gives the eye a soft handoff with one Path call
+   per boundary, no z-order surgery, no custom blend mode.
+2. **§3d gradient is 3-stop (0.0 / 0.55 / 1.0), not a true
+   ROM-position function.** A faithful ROM-position encoding
+   would require per-sample ROM phase metadata that today's
+   `ForceSample` doesn't carry. The 3-stop band reads as "heavy
+   middle" rather than "uniform ramp" and combined with the
+   existing CHAIN endpoint flip is enough to communicate ECC =
+   hot low, CHAIN = hot high without a data-model change.
+3. **§3g INV CHAIN drives the legend only, not the fill
+   direction.** Same reason as §3d above. Until `ForceSample`
+   gets ROM-phase metadata, INV CHAIN can't render a faithful
+   gradient direction. Surfacing the mode in the legend is the
+   honest middle ground — the user knows the mode is on without
+   the chart lying about how the load distributes.
+
+**Why.** All three compromises trade visual fidelity for
+implementation cost without breaking the user's mental model.
+The legend chip + per-rep peak labels + 80% reference line carry
+most of the Tonal-parity weight; the fill-side gradient nuance
+is a polish layer that can be revisited when `ForceSample` is
+ever rev'd.
+
+**Rejected.**
+- Adding `romPhase: ROMPhase` to `ForceSample` for this pass.
+  Touching the telemetry data model for a rendering polish is a
+  bigger surface than the V4 spec asked for and risks a sacred-
+  protocol-adjacent regression. Defer to a dedicated RFC.
+- Shipping §3b as a custom `BlendMode` overlay. Adds two
+  z-layers per rep × per phase boundary; the savings on visual
+  smoothness don't pay for the per-frame cost on long sets.

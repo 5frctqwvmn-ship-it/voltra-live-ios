@@ -101,6 +101,20 @@ final class LoggingStore: ObservableObject {
     /// Whether the user is currently in a drop-set cascade.
     /// Drives UI affordances on LiveCaptureView.
     @Published var dropSetActive: Bool = false
+    /// b60 (KI-9): tap-to-arm flag. When true, the user has tapped DROP
+    /// but the cable still holds the working weight — we are waiting for
+    /// the lift to go idle so the first cascade drop can fire. Engaged →
+    /// dropSetActive flips true and `dropSetArmed` clears.
+    /// Why: pre-b60 the first cascade tier fired the moment the user
+    /// tapped DROP, even mid-rep. Post-QA the user wants tap = arm only;
+    /// the actual drop fires after the next idle + 2 s timer. Mirrors
+    /// how dropsets actually work in a gym.
+    @Published var dropSetArmed: Bool = false
+    /// b60 (KI-9): wall-clock at which the FIRST cascade drop will fire,
+    /// counting down from the moment the lift went idle while armed.
+    /// nil when not armed or while the lift is still active. Drives the
+    /// new "armed countdown" mode of the unified bar (KI-8).
+    @Published var dropArmedFiresAt: Date? = nil
     /// Realized per-drop Voltra base weights so far in the active cascade.
     /// Element [0] is the user's starting weight; [1..N] are the cascade
     /// drops fired by the 4s timer. Read by the UI to render the chain.
@@ -413,6 +427,79 @@ final class LoggingStore: ObservableObject {
         startIdleWatchdog()
     }
 
+    /// b60 (KI-9): tap-to-arm entry point. The user tapped DROP but the
+    /// cable should HOLD the working weight until the next lift-idle
+    /// boundary. We capture the anchor + writer bridge here, then watch
+    /// the telemetry stream for `cascadeArmIdleSec` seconds of low force;
+    /// the moment that gate clears we promote armed → active (which fires
+    /// the first cascade drop and starts the 2 s recurring timer +
+    /// 10 s no-movement watchdog).
+    ///
+    /// Pre-b60 behavior was `startDropSet` directly (tap → immediate drop).
+    /// That violated the user's mental model — tapping a DROP tile
+    /// mid-set yanked the cable on them. KI-9 splits the call into
+    /// arm-now / fire-on-idle; the same `startDropSet` is reused by the
+    /// engage path so all the existing snapshot / parity / floor logic
+    /// continues to live in one place.
+    func armDropSet(startingLb: Double, pushWeight: @escaping (Double) -> Void) {
+        guard sessionStore != nil else { return }
+        guard startingLb > 0 else { return }
+        if let cd = dropChainArmCooldownUntil, Date() < cd { return }
+        // If a cascade is already running we don't re-arm — the existing
+        // tile-tap-while-active path (`bumpCascadeTier`) handles that case.
+        if dropSetActive { return }
+        dropSetArmed = true
+        dropArmedFiresAt = nil  // becomes non-nil once the lift goes idle
+        chainAnchorLb = startingLb
+        dropPushWeight = pushWeight
+        cascadeTier = 1
+        cascadeAtFloor = false
+    }
+
+    /// b60 (KI-9): engage path called from `noteTelemetryActivity` once the
+    /// arm-idle gate (≥ `cascadeArmIdleSec` of sub-floor force) clears.
+    /// Promotes armed → active by delegating to `startDropSet`, which
+    /// fires the first cascade tier and schedules the recurring 2 s fuse.
+    /// Clears the arm flags so a subsequent tap-while-active is correctly
+    /// routed to `bumpCascadeTier`.
+    private func engageArmedDropSet() {
+        guard dropSetArmed, !dropSetActive, chainAnchorLb > 0 else { return }
+        guard let push = dropPushWeight else { return }
+        let starting = chainAnchorLb
+        // startDropSet captures its own pushWeight + anchor — we hand the
+        // captured ones back. It also stomps `dropPushWeight` and
+        // `chainAnchorLb` with the new values, which is fine.
+        dropSetArmed = false
+        dropArmedFiresAt = nil
+        startDropSet(startingLb: starting, pushWeight: push)
+    }
+
+    /// b60 (KI-9): seconds of sub-floor force the lift must show after
+    /// arming before the first cascade drop fires. Matches the user's
+    /// post-b58 QA ask ("DROP timer should be 2 s") and the
+    /// `cascadeIntervalSec` already in use for tier-to-tier ticks, so
+    /// arm-to-first-drop and tier-to-tier feel like the same beat.
+    private let cascadeArmIdleSec: Double = 2.0
+    /// b60 (KI-8): read-only mirror so the unified progress bar can size
+    /// the armed-countdown segment from the same constant the engine
+    /// uses.
+    var cascadeArmIdleSecondsForUI: Double { cascadeArmIdleSec }
+
+    /// b60 (KI-9): cancel an in-flight ARM (tap to disarm before the
+    /// first drop has fired). Does NOT call into SessionStore drop-mode
+    /// because we never entered drop-mode — the chain hasn't started.
+    /// Arm cooldown so the same touch-up doesn't re-arm immediately.
+    func cancelArmedDropSet() {
+        guard dropSetArmed else { return }
+        dropSetArmed = false
+        dropArmedFiresAt = nil
+        dropPushWeight = nil
+        chainAnchorLb = 0
+        cascadeTier = 1
+        cascadeAtFloor = false
+        dropChainArmCooldownUntil = Date().addingTimeInterval(1.5)
+    }
+
     /// Cancel an in-flight drop cascade WITHOUT finalizing the set. The
     /// currently in-flight set keeps accumulating but as a normal set.
     ///
@@ -434,6 +521,8 @@ final class LoggingStore: ObservableObject {
         }
         cascadeAtFloor = false
         dropSetActive = false
+        dropSetArmed = false       // b60 (KI-9): defensive
+        dropArmedFiresAt = nil     // b60 (KI-9): defensive
         dropChainPlannedLb = []
         currentDropIndex = 1
         cascadeTier = 1
@@ -513,7 +602,12 @@ final class LoggingStore: ObservableObject {
     /// cascade keeps running, the next drop steps off the new anchor,
     /// and the in-progress chain stays consistent.
     func reanchorCascadeIfActive(toLb newLb: Double) {
-        guard dropSetActive, newLb > 0 else { return }
+        // b60 (KI-9): also re-anchor while ARMED but not yet engaged so
+        // that user weight nudges between tap-DROP and the first cascade
+        // drop are honored. Pre-b60 the guard was `dropSetActive` only;
+        // armed-state nudges silently snapped back to the original
+        // anchor when the cascade engaged.
+        guard newLb > 0, dropSetActive || dropSetArmed else { return }
         chainAnchorLb = newLb
         cascadeStepIndex = 0
         // Push the chain's planned-weight history so subsequent UI
@@ -536,7 +630,34 @@ final class LoggingStore: ObservableObject {
     ///     set isn't ended out from under them.
     /// No-op when `dropSetActive == false` so this is safe to call on every
     /// packet regardless of session state.
+    /// b60 (KI-9): also drives the ARM gate. When `dropSetArmed` is true
+    /// but the cascade hasn't engaged yet, sub-floor force samples count
+    /// the lift as idle — once `cascadeArmIdleSec` has passed since the
+    /// LAST above-floor sample, we promote armed → active and fire the
+    /// first cascade tier. Above-floor samples reset the gate (the user
+    /// is still mid-rep).
     func noteTelemetryActivity(forceLb: Double = .infinity) {
+        // ARM-gate path: handle BEFORE the dropSetActive guard so the
+        // very first idle after arming engages the cascade.
+        if dropSetArmed && !dropSetActive {
+            if forceLb > cascadeIdleForceFloorLb {
+                // Lift is active — push the arm-fire deadline back. We
+                // require `cascadeArmIdleSec` of CONTINUOUS sub-floor
+                // force to fire, so any above-floor sample resets the
+                // gate.
+                dropArmedFiresAt = nil
+            } else {
+                // Lift is idle. If this is the first sub-floor sample
+                // since arming (or since the last activity), start the
+                // countdown.
+                if dropArmedFiresAt == nil {
+                    dropArmedFiresAt = Date().addingTimeInterval(cascadeArmIdleSec)
+                } else if let fire = dropArmedFiresAt, Date() >= fire {
+                    engageArmedDropSet()
+                    return  // engage chains into startDropSet which sets up its own timers
+                }
+            }
+        }
         guard dropSetActive else { return }
         // v0.4.6.2: ignore sub-threshold packets so machine jitter doesn't
         // hold the timers open indefinitely. The default `.infinity` keeps
@@ -868,6 +989,8 @@ final class LoggingStore: ObservableObject {
             pendingDropSnapshots = []
             pendingDropPlannedWeights = []
             dropSetActive = false
+            dropSetArmed = false       // b60 (KI-9): defensive
+            dropArmedFiresAt = nil     // b60 (KI-9): defensive
             dropChainPlannedLb = []
             currentDropIndex = 1
             cascadeTier = 1
@@ -947,6 +1070,8 @@ final class LoggingStore: ObservableObject {
         pendingDropSnapshots = []
         pendingDropPlannedWeights = []
         dropSetActive = false
+        dropSetArmed = false       // b60 (KI-9): defensive
+        dropArmedFiresAt = nil     // b60 (KI-9): defensive
         dropChainPlannedLb = []
         currentDropIndex = 1
         cascadeTier = 1

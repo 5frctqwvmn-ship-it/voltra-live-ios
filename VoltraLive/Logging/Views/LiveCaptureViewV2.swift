@@ -530,11 +530,26 @@ struct LiveCaptureViewV2: View {
         .clipShape(Capsule())
     }
 
-    // MARK: - 2. Phase strip OR Rest Timer Bar
+    // MARK: - 2. Phase strip OR Rest Timer Bar OR Dropset Progress Bar
 
-    /// b56: replaces b55's TopBannerV2. Active → small phase-color strip;
-    /// resting → RestTimerBarV2 with HSL sweep & blink. Boundary is 2s
-    /// idle on push or pull, observed via `session.restElapsedSeconds`.
+    /// b56 / b60 (KI-8): single progress bar that morphs across three
+    /// states without ever swapping component identities:
+    ///
+    ///   1. Rest timer (post-finalize): preset countdown w/ HSL sweep
+    ///      and over-time blink. Highest priority — if the rest clock
+    ///      is ticking, the user is between sets.
+    ///   2. Dropset progress (DROP tile armed or active): two
+    ///      sub-states:
+    ///        a. Armed + lift idle → 2 s ARM countdown to first drop.
+    ///        b. Active + cascade running → 2 s tier-to-tier countdown.
+    ///      Bottoming out at the 5 lb floor surfaces "BOTTOM" instead
+    ///      of an empty bar so the user knows the cascade ended.
+    ///   3. Active phase strip: PUSH/PULL/IDLE color band, default.
+    ///
+    /// Why one bar across all three: pre-b60 the dropset countdown was
+    /// invisible — the user could only see weight changes mid-cascade,
+    /// not WHEN the next change would come. KI-8 surfaces that timing
+    /// by reusing the same bar the user is already reading for rest.
     @ViewBuilder
     private var phaseOrRestBar: some View {
         let phase = ble.telemetry.phase
@@ -546,6 +561,9 @@ struct LiveCaptureViewV2: View {
                 blinkOn:        blinkOn
             )
             .padding(.bottom, 10)
+        } else if logging.dropSetArmed || logging.dropSetActive {
+            dropProgressBar
+                .padding(.bottom, 10)
         } else {
             // Compact phase strip when active.
             VStack(spacing: 6) {
@@ -565,6 +583,82 @@ struct LiveCaptureViewV2: View {
                     .frame(height: 4)
             }
             .padding(.bottom, 10)
+        }
+    }
+
+    /// b60 (KI-8): dropset progress bar. Renders one of four labels +
+    /// a sweep that fills as the next-fire wall-clock deadline
+    /// approaches. The fill animates via the ambient `blinkOn` 2 Hz
+    /// republish (same source the rest bar uses for its over-time
+    /// blink) so we don't spin a second timer here.
+    ///
+    ///   - "DROP · ARM"    — armed, lift still active. Empty bar.
+    ///   - "DROP · IN"     — armed, lift idle. 2 s countdown to first drop.
+    ///   - "DROP · NEXT"   — active cascade. 2 s tier-to-tier countdown.
+    ///   - "DROP · BOTTOM" — active cascade hit the 5 lb floor. Full bar.
+    private var dropProgressBar: some View {
+        let armed   = logging.dropSetArmed
+        let active  = logging.dropSetActive
+        let atFloor = logging.cascadeAtFloor
+        let armSec  = logging.cascadeArmIdleSecondsForUI
+        let tickSec = logging.cascadeIntervalSecondsForUI
+        _ = blinkOn // republish driver; we read `Date()` below
+        let now = Date()
+        let progress: Double = {
+            if active && atFloor { return 1.0 }
+            if active, let deadline = logging.nextDropFiresAt {
+                let remaining = max(0, deadline.timeIntervalSince(now))
+                return min(1.0, max(0.0, 1.0 - (remaining / tickSec)))
+            }
+            if armed, let deadline = logging.dropArmedFiresAt {
+                let remaining = max(0, deadline.timeIntervalSince(now))
+                return min(1.0, max(0.0, 1.0 - (remaining / armSec)))
+            }
+            return 0.0
+        }()
+        let label: String = {
+            if active && atFloor { return "DROP \u{00B7} BOTTOM" }
+            if active            { return "DROP \u{00B7} NEXT" }
+            if armed && logging.dropArmedFiresAt != nil { return "DROP \u{00B7} IN" }
+            return "DROP \u{00B7} ARM"
+        }()
+        let secondsRemaining: Int = {
+            if active && !atFloor, let d = logging.nextDropFiresAt {
+                return max(0, Int(d.timeIntervalSince(now).rounded(.up)))
+            }
+            if armed, let d = logging.dropArmedFiresAt {
+                return max(0, Int(d.timeIntervalSince(now).rounded(.up)))
+            }
+            return 0
+        }()
+        return VStack(spacing: 6) {
+            HStack {
+                Text(label)
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.6)
+                    .foregroundColor(VoltraColor.accent)
+                Spacer()
+                if secondsRemaining > 0 {
+                    Text("\(secondsRemaining)s")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundColor(VoltraColor.text)
+                }
+            }
+            GeometryReader { geo in
+                let fillW = geo.size.width * CGFloat(progress)
+                ZStack(alignment: .leading) {
+                    Capsule(style: .continuous)
+                        .fill(VoltraColor.bgElev2)
+                        .frame(height: 4)
+                    Capsule(style: .continuous)
+                        .fill(VoltraColor.accent)
+                        .frame(width: fillW, height: 4)
+                        .animation(.linear(duration: 0.5), value: fillW)
+                }
+                .frame(height: 4)
+            }
+            .frame(height: 4)
         }
     }
 
@@ -934,8 +1028,13 @@ struct LiveCaptureViewV2: View {
                 // CHAIN to mirror the user-felt build-up; INV CHAIN's
                 // thru-ROM offset is already represented by the polyline
                 // shape itself.
-                eccBandActive:     eccArmed,
-                chainMirrorActive: chainArmed
+                //
+                // b60-prep KI-11 §3g: INV CHAIN now drives the legend
+                // chip entry (no fill change) so the user sees an "INV"
+                // indicator top-left when the mode is armed.
+                eccBandActive:       eccArmed,
+                chainMirrorActive:   chainArmed,
+                invChainArmedActive: invArmed
             )
             .frame(maxWidth: .infinity, minHeight: 175)
         }
@@ -1013,11 +1112,11 @@ struct LiveCaptureViewV2: View {
     private var eccArmed:    Bool { logging.upcomingEccEnabled    && logging.upcomingEccLb     > 0 }
     private var chainArmed:  Bool { logging.upcomingChainsEnabled && logging.upcomingChainsLb  > 0 }
     private var invArmed:    Bool { logging.upcomingInverseEnabled && logging.upcomingInverseLb > 0 }
-    /// b58 V4: DROP tile is "armed" whenever a time-cascade is active. The
-    /// b56 manualDropSequence path is deprecated — `dropSetActive` flips on
-    /// the first tap of `tapDropTile()` and stays on until cancellation or
-    /// the 10 s no-movement watchdog finalizes the chain.
-    private var dropArmed:   Bool { logging.dropSetActive }
+    /// b58 V4 / b60 (KI-9): DROP tile is "armed" whenever the cascade is
+    /// either tap-armed (waiting for the lift to go idle) OR actively
+    /// running. Tile visuals + nested-row visibility don't distinguish
+    /// the two states; the unified progress bar (KI-8) does.
+    private var dropArmed:   Bool { logging.dropSetActive || logging.dropSetArmed }
 
     // MARK: - b58 V4: dual-Voltra helpers
 
@@ -1109,30 +1208,39 @@ struct LiveCaptureViewV2: View {
         pushUpcomingStateToDevice()
     }
 
-    /// b58 V4: DROP tile = time-driven cascade (port of b48 / aff322f).
-    ///   First tap (inactive): startDropSet — fires drop #2 immediately,
-    ///     starts the 4 s fuse + 10 s no-movement watchdog. The pushWeight
-    ///     callback re-targets the device for every cascade step.
+    /// b58 V4 / b60 (KI-9): DROP tile state machine.
+    ///   Tap inactive: armDropSet — captures anchor + writer bridge,
+    ///     flips `dropSetArmed = true`, but DOES NOT touch the cable.
+    ///     The first cascade drop fires only after the lift has been
+    ///     idle (force ≤ 3 lb) for `cascadeArmIdleSec` (= 2 s).
+    ///   Tap while armed (not yet engaged): cancelArmedDropSet — clears
+    ///     arm state with a 1.5 s cooldown so a long-press cancel + tap
+    ///     don't fight.
     ///   Tap while active: bumpCascadeTier — 5→10→15→5, fires immediate
-    ///     drop at the new tier, resets the 4 s fuse.
-    ///   Long-press: cancelDropSet — 1.5 s arm-cooldown prevents the same
-    ///     touch-up from re-arming.
+    ///     drop at the new tier, resets the 2 s fuse.
+    ///   Long-press: cancelDropSet (active) or cancelArmedDropSet (armed).
     /// Telemetry activity (forceLb > 3 lb) is forwarded into
     /// `LoggingStore.noteTelemetryActivity` from `VoltraLiveApp`'s BLE
-    /// telemetry pipe — nothing for the view to wire here.
+    /// telemetry pipe — that is the engine that engages the armed
+    /// cascade once the lift has been idle for 2 s.
     private func tapDropTile() {
         if logging.dropSetActive {
             // Tap-while-active: bump the tier & fire immediately.
             logging.bumpCascadeTier()
             return
         }
+        if logging.dropSetArmed {
+            // Tap-to-disarm before the first drop has fired.
+            logging.cancelArmedDropSet()
+            return
+        }
         let starting = (logging.pendingPlannedWeightLb ?? 0)
         guard starting > 0 else { return }
-        // Capture writerRouter + mdm so the cascade can re-target the device.
-        // Pulley-effective math runs inside LoggingStore via
-        // cascadeAnchoredDeviceWeight which already understands
-        // pulleyMultiplier; we just push the device-frame value.
-        logging.startDropSet(startingLb: starting) { [weak ble = ble] lb in
+        // Capture writerRouter + mdm so the cascade can re-target the device
+        // ONCE the arm-idle gate elapses and the engine engages the chain.
+        // armDropSet is a no-op weight write — the cable holds the working
+        // weight until the user finishes the rep and the lift goes idle.
+        logging.armDropSet(startingLb: starting) { [weak ble = ble] lb in
             // Re-build the upcoming state with the new device-frame base
             // weight. ECC / CHAIN / INV CHAIN flags are preserved from the
             // current upcoming state so the chain inherits the parent set's
@@ -1175,11 +1283,17 @@ struct LiveCaptureViewV2: View {
         }
     }
 
-    /// Long-press cancel for the DROP tile. Restores the original anchor
-    /// weight on the device (handled inside LoggingStore.cancelDropSet)
-    /// and starts the 1.5 s re-arm cooldown.
+    /// Long-press cancel for the DROP tile. Branches on cascade state:
+    ///   - active: cancelDropSet (restores anchor weight on device,
+    ///     1.5 s re-arm cooldown).
+    ///   - armed (b60 / KI-9): cancelArmedDropSet (no device write
+    ///     needed — the cable was never moved off the working weight).
     private func cancelArmedDrop() {
-        logging.cancelDropSet()
+        if logging.dropSetActive {
+            logging.cancelDropSet()
+        } else if logging.dropSetArmed {
+            logging.cancelArmedDropSet()
+        }
         let gen = UIImpactFeedbackGenerator(style: .medium)
         gen.impactOccurred()
     }

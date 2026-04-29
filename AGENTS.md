@@ -7,6 +7,13 @@
 > Style guide: [Karpathy Guidelines](https://pyshine.com/Andrej-Karpathy-Skills-LLM-Coding-Guidelines/) —
 > Think Before Coding · Simplicity First · Surgical Changes · Goal-Driven Execution.
 
+> **Track marker (added 2026-04-29):** This repository is the **GPT-5.5 implementation
+> track**, copied from `5frctqwvmn-ship-it/voltra-live-ios`. The original repository
+> remains the **Claude-orchestrated fallback** and must NOT be modified from this copy.
+> All commits, branches, tags, and PRs from work performed in this repo go to
+> `5frctqwvmn-ship-it/voltra-live-ios-gpt-5-5` only. If a request would touch the
+> original fallback repo, stop and surface the assumption before acting.
+
 ## Mandatory startup
 
 1. Read this file in full.

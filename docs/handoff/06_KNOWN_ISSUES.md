@@ -86,53 +86,6 @@ re-uploaded into the repo before the b58 build kicked off.
 this file. Until then, the ASCII description in
 `03_CURRENT_FEATURE_SPEC.md` §P1 is the canonical reference.
 
-### KI-7 (b58 → b59 QA) — Dropset cascade timer is 4 s, user wants 2 s
-
-**Surfaced:** b58 post-build QA wave 1.
-**File(s):** `VoltraLive/Logging/Persistence/LoggingStore.swift` —
-search for the cascade fire interval (`nextDropFiresAt`,
-`dropFinalizeAt`).
-**What:** Currently each cascade tier fires ≈ 4 s after the lift
-enters idle. User wants the interval set to **2 s**.
-**Severity:** P1 — dropset feels sluggish; reduces the "snap" the
-feature is supposed to convey.
-**Owner:** Next session.
-
-### KI-8 (b58 → b59 QA) — Idle bar should morph into dropset progress bar, then rest timer
-
-**Surfaced:** b58 post-build QA wave 1.
-**File(s):** `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
-(idle/rest bar component) + `LoggingStore` (state machine driving
-the cascade).
-**What:** While DROP is armed, the existing idle bar should morph
-into a **dropset progress bar** showing the 2 s countdown to the
-next cascade tier. Once cascade reaches floor, that same bar
-morphs into the **rest timer**. Right now the idle bar stays
-generic and the dropset progress isn't surfaced visually.
-Must be a single bar across all three states (idle / dropset
-progress / rest), not three separate components.
-**Severity:** P1 — dropsets work mechanically but the user can't
-*see* the cascade timing.
-**Owner:** Next session. Pairs with KI-7 (the new bar must reflect
-the correct 2 s interval).
-
-### KI-9 (b58 → b59 QA) — DROP tap pre-lowers weight; should arm-only
-
-**Surfaced:** b58 post-build QA wave 1.
-**File(s):** `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
-`tapDropTile()` + `LoggingStore.startDropSet(...)`.
-**What:** Tapping DROP currently calls into the cascade and the
-weight drops immediately. User wants tap-to-arm only: weight
-should stay at the working number until the lift goes idle AND
-the (KI-7) 2 s timer elapses, then the cascade fires the next
-tier. This matches how dropsets actually work in a gym — you
-finish the rep, *then* the weight drops.
-**Severity:** P0 — changes the felt behavior of the feature; users
-will think the DROP tile is a regular weight stepper.
-**Owner:** Next session. Refactors `startDropSet` into
-`armDropSet` (no-op weight) + a separate `fireNextCascade` driven
-by the idle-detector + KI-8 progress bar.
-
 ### KI-10 (b58 → b59 QA) — Phantom -5 lb weight drop during reps
 
 **Surfaced:** b58 post-build QA wave 1.
@@ -146,36 +99,138 @@ briefly went idle between reps; possibly an unrelated writer
 race. Needs telemetry repro.
 **Severity:** P0 — breaks every set where the user is paused
 between reps.
-**Owner:** Next session. Add a temporary debug log on every
-resistance-write call site, ship as a debug build, capture a
-real session, then patch.
-
-### KI-11 (b58 → b59 QA) — Force-curve full spec not yet implemented
-
-**Surfaced:** b58 post-build QA wave 1; user delivered the full
-design in `docs/handoff/design/force_curve.md`.
-**File(s):** `VoltraLive/Logging/Views/V2/ForceChartV2.swift`.
-**What:** b58 ForceChartV2 only landed §3b dual-band fill + §3c
-basic inline labels + §3d corner-mirror gradient. Still missing:
-- §3b: 200 ms blended phase transition (current is hard-cut).
-- §3c: label fade timing (3 s OR rep 2, whichever first;
-  re-surface on mid-set mode change). Today only suppresses for
-  `repsAgo > 0`.
-- §3d: vertical gradient *within* the fill encoding ROM-position
-  (b58 only flips the outer corner direction).
-- §3e: dotted 80%-of-peak reference line, per-rep peak dots +
-  labels, optional target line hook.
-- §3f: rep stacking with logarithmic opacity decay, cap ·8.
-- §3g: compact mode-aware legend in top-left.
-- §6: low-weight Y floor `max(peak × 1.2, 15 lb)`; mid-set
-  mode-change rule (historical reps keep prior rendering).
-**Severity:** P1 — the chart works, but doesn't yet match the
-design target.
-**Owner:** Next session. Tracked as a single epic; do not split
-the §3e/§3f/§3g rendering passes across builds unless explicitly
-asked. `force_curve.md` is the source of truth.
+**Status (b60-prep):** The b60 KI-9 arm-only refactor is the
+most likely fix. Pre-b60 the only public path into the cascade
+was `startDropSet`, which fired drop #2 immediately on tap. If
+the user had the V2 manualDropSequence path armed
+simultaneously (b56-era `tapDropTile` did NOT route through
+the time-cascade — it sat on `manualDropSequence` and waited
+for SessionStore's idle finalize), the very first idle between
+reps could finalize the set as a "drop" and step the weight
+down by 5 lb. Post-b60, `armDropSet` does NOT touch
+`manualDropSequence` and does NOT call `beginDropChain`, so the
+SessionStore drop boundary path can never engage without
+explicit user arm + 2 s sub-floor gate. Re-test on hardware
+after b60 ships before closing this entry.
+**Owner:** User QA on b60 hardware install. If repro persists,
+add debug logging on every resistance-write call site and ship
+a debug-only follow-up build.
 
 ## Recently fixed (move to WORK_LOG before deleting)
+
+### KI-F11 (b60-prep, fixed) — Force-curve full spec now matches force_curve.md
+
+**Was.** b58 ForceChartV2 only landed §3b dual-band fill + §3c
+basic inline labels + §3d corner-mirror gradient. The full
+Tonal-style spec in `docs/handoff/design/force_curve.md` had
+seven outstanding gaps tracked as a single epic.
+
+**Fix.** All §3b/§3c/§3d/§3e/§3g items now implemented in
+`VoltraLive/Logging/Views/V2/ForceChartV2.swift`:
+- §3b 200 ms phase blend — stroke-side blend dot at every CON↔ECC
+  segment boundary at 35% alpha. Fill stays segmented (true alpha
+  blend of two filled polygons doesn't survive opacity multiplication
+  in SwiftUI cleanly; documented compromise in the file header).
+- §3c label fade timing — `labelFadeAlpha(rep:)` returns 1.0 for
+  elapsed ≤ 3 s, linear ease 1 → 0 across 3..4 s, 0 beyond. The "OR
+  rep 2, whichever first" is enforced upstream by the existing
+  `repsAgo == 0` gate.
+- §3d vertical-gradient ROM encoding — `gradientStops` now returns
+  three stops (0.0 / 0.55 / 1.0) so the heavy region reads as a
+  band rather than a uniform ramp. Combined with the existing
+  CHAIN start/end-point flip this gives ECC = hot band low,
+  CHAIN = hot band high.
+- §3e 80%-peak dashed line — horizontal dashed line at 80% × peakLb,
+  hidden when peak < 10 lb so the empty / pre-pull state stays
+  clean. "80%" mono caption flush-right.
+- §3e per-rep peak dot + value label — dot at each visible rep's
+  peak sample, kerned mono lb label, fades with the existing
+  logarithmic curve. Suppressed below opacity 0.30.
+- §3g compact legend chip — renders top-left when any of
+  ECC / CHAIN / INV CHAIN is armed. Working-only sets stay clean.
+  INV CHAIN now drives a new `invChainArmedActive` prop that
+  surfaces the legend entry only; fill direction stays unchanged
+  (per `force_curve.md` §9 documented limit — rejecting an
+  INV-CHAIN fill flip until `ForceSample` carries per-sample ROM
+  phase metadata).
+
+**§3f and §6 already in spec.** §3f rep stacking shipped in b57;
+KI-11 just consumes it. §6 low-weight Y floor was already 60 lb
+(stricter than the 15 lb floor `force_curve.md` calls for).
+
+**Files changed.**
+- `VoltraLive/Logging/Views/V2/ForceChartV2.swift` — additive only;
+  no changes to slicer / rep model / parent contract beyond one
+  new optional init arg `invChainArmedActive`.
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — one wire-up
+  line passing `invArmed` into the new chart prop.
+- `docs/handoff/design/force_curve.md` — new §9 lists what landed
+  and the limits.
+
+**Hardware QA needed.** Build needs to ship a TestFlight + 8-row
+post-build QA pass. Specific checks:
+- 80% line tracks the running set peak (not session peak).
+- Per-rep peak dots align to the actual peak sample, not the rep
+  endpoint.
+- Legend chip renders only when at least one mod is armed.
+- Label fade visibly eases out around the 3 s mark of a rep,
+  not abruptly.
+- Phase-blend dots at CON↔ECC boundaries don't read as visual
+  artifacts (false-positive concern).
+- Older reps' peak labels don't pile up — if they collide with
+  the newest, the cutoff is the next dial to turn.
+
+
+
+### KI-F7 (b60-prep, fixed) — Cascade interval was already 2 s
+
+**Was.** b58 QA reported the dropset cascade fire interval as 4 s
+and asked for 2 s. **Was already 2 s in code** since b45
+(`cascadeIntervalSec: Double = 2.0` at LoggingStore.swift:113);
+the KI doc was stale. The user-perceived sluggishness in b58 may
+have been the b58 4 s arm-to-first-fire (which DID exist per the
+b58 architecture) bleeding into the perception of the inter-tier
+cadence.
+
+**Fix.** None needed in the cascade path itself. Documented the
+inter-tier interval = 2 s explicitly in
+`docs/handoff/entities/dropset_state_machine.md`. The arm-to-
+first-fire interval (KI-9 fallout) is also set to 2 s as
+`cascadeArmIdleSec`.
+
+### KI-F8 (b60-prep, fixed) — Unified bar across idle / dropset / rest
+
+**Was.** b58 had three separate bar concepts: phase strip
+(active set), RestTimerBarV2 (post-finalize). Dropset progress
+had no visual surface — the user could see weight changes but
+not the timing of the next change.
+
+**Fix.** `LiveCaptureViewV2.phaseOrRestBar` now branches across
+**rest > dropset > phase** in priority order. New
+`dropProgressBar` private view renders one of four labels
+(`DROP · ARM` / `· IN` / `· NEXT` / `· BOTTOM`) with a 2 s sweep
+tied to `nextDropFiresAt` or `dropArmedFiresAt`. Reuses the
+ambient `blinkOn` 2 Hz republish so no new timer source is
+needed. See
+`docs/handoff/entities/dropset_state_machine.md` for the state
+diagram.
+
+### KI-F9 (b60-prep, fixed) — DROP tap pre-lowered weight; now arm-only
+
+**Was.** b58 `tapDropTile()` called `LoggingStore.startDropSet`
+which fired drop #2 immediately. User mental-model violation —
+tapping DROP mid-rep yanked the cable.
+
+**Fix.** Split the engine into `armDropSet` (captures anchor +
+writer; sets `dropSetArmed = true`; cable untouched) and
+`engageArmedDropSet` (private; called from
+`noteTelemetryActivity` once 2 s of sub-floor force have passed
+since the LAST above-floor sample). Tap-to-arm is now the only
+public entry from the V2 view; the cascade engages on the first
+qualifying lift-idle boundary. State diagram, transitions, timer
+constants, and hardware test plan in
+`docs/handoff/entities/dropset_state_machine.md`. See V4-D10 in
+`04_DECISIONS_AND_CONSTRAINTS.md`.
 
 ### KI-F3 (b58, fixed) — DROP tile never actually dropped the cable
 

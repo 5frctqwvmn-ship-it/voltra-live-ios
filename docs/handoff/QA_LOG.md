@@ -113,3 +113,64 @@
     mid-set rule. Tracked as a single epic.
 - Wave 2 of b58 QA (items 5–7) re-runs after the user installs b59
   and can reach V2 with two Voltras paired.
+
+---
+
+## b60-prep — feat/ui-v4-dropset-armonly — branch open 2026-04-29
+
+> Branch not yet shipped. No version bump in this commit. The b60
+> tag will be cut after user sign-off on the PR.
+
+### Items implemented (V4 b58 → b60 follow-ups)
+
+1. **KI-9 — DROP tap is arm-only.** `armDropSet` captures
+   anchor + writer; cable holds working weight; cascade engages
+   on first 2 s sub-floor lift-idle boundary via
+   `noteTelemetryActivity`.
+2. **KI-8 — Unified progress bar.** `phaseOrRestBar` morphs
+   across rest > dropset > phase. New `dropProgressBar`
+   labels: `DROP · ARM` / `· IN` / `· NEXT` / `· BOTTOM`.
+3. **KI-7 — Cascade interval = 2 s.** Already shipped in b45;
+   doc was stale. Verified at LoggingStore.swift:113 and
+   documented in `entities/dropset_state_machine.md`.
+4. **KI-10 (likely fix) — Phantom −5 lb mid-rep drop.** The
+   arm-only refactor blocks the most plausible cause path.
+   Re-test on hardware after b60 ships before closing.
+
+### Items NOT shipped this branch
+
+- **KI-11 — Force curve full spec.** Deferred per the user's
+  "keep features separate bills" rule. Tracked as a single
+  epic; next branch.
+
+### Hardware QA checklist (run after b60 TestFlight install)
+
+- [ ] Tap DROP mid-rep, keep lifting → tile shows armed; weight
+      unchanged; bar shows `DROP · ARM`.
+- [ ] Tap DROP, finish rep, rack the cable → bar morphs to
+      `DROP · IN` with 2 → 1 → 0 countdown. At 0, weight drops
+      by tier 1 (5 lb).
+- [ ] In active cascade, tap DROP → tier rolls 1→2→3→1; bar
+      countdown resets.
+- [ ] Active cascade reaches 5 lb floor → bar shows
+      `DROP · BOTTOM`; no further drops; rest engages after 10 s
+      no-rep watchdog.
+- [ ] Tap DROP twice quickly before lift goes idle → arm
+      clears; weight unchanged; cooldown prevents re-arm.
+- [ ] Long-press DROP while armed → arm clears with haptic.
+- [ ] Long-press DROP while active → cascade cancels; cable
+      returns to anchor weight.
+- [ ] Adjust weight (`±` stepper) while armed → next cascade
+      drop steps off the new working weight, not the value
+      captured at tap.
+- [ ] Run a normal exercise (DO NOT engage DROP) → no phantom
+      −5 lb drops between reps. If repro, this re-opens
+      KI-10.
+
+### User responses
+
+(to be filled in post-ship)
+
+### Actions taken
+
+(to be filled in post-ship)

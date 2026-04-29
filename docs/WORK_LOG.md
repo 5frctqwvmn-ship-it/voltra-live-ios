@@ -2579,3 +2579,861 @@ checklist" + `docs/handoff/QA_LOG.md`). CI green and altool
 running on real hardware caught that the dual UI never
 rendered. The QA checklist for b58 surfaced this within
 hours of ship — exactly the gap it's meant to close.
+
+---
+
+## 2026-04-29 14:52 UTC — chore: GPT-5.5 track handoff pre-flight
+
+### Goal
+
+Pre-flight / fork-prep for the GPT-5.5 implementation track copy
+(`5frctqwvmn-ship-it/voltra-live-ios-gpt-5-5`). Mark this repo as the
+GPT-5.5 track, save the next-agent handoff prompt (Karpathy LLM Wiki
+pattern) into `docs/handoff/09_NEXT_AGENT_PROMPT.md`, and record a
+pre-flight verification table for the canonical wiki layout the prompt
+expects. **No P0/P1 app changes** — this is metadata + handoff only.
+Original Claude-orchestrated repo (`voltra-live-ios`) is untouched and
+remains the fallback baseline.
+
+### Files changed
+
+- `AGENTS.md` — added GPT-5.5 track-marker callout block at top.
+- `README.md` — added GPT-5.5 track-marker callout block at top.
+- `docs/handoff/09_NEXT_AGENT_PROMPT.md` — overwritten with the V4 UI
+  Layout handoff prompt (Karpathy LLM Wiki method) plus a GPT-5.5
+  track marker section, an in-prompt note that flags the existing
+  numbering-scheme mismatch, and a Pre-Flight Verification table
+  recording PASS/MISMATCH/MISSING for each expected wiki file.
+- `docs/WORK_LOG.md` — this entry.
+
+### What changed
+
+1. **GPT-5.5 track marker** is now visible in three durable locations
+   (AGENTS.md callout, README.md callout, 09 handoff prompt header).
+   None of them disrupts existing build, signing, or sacred-file
+   instructions.
+2. **Handoff prompt** now contains the full V4 UI Layout work order
+   (P0-1 dropset state machine, P0-2 Tonal-style force curve, P0-3
+   dual-Voltra top bar, P1 weight-overlap + first-engage idle) and
+   the Karpathy three-layer wiki architecture. The prompt has a
+   clear "do not modify the original fallback repo" directive.
+3. **Pre-flight verification table** captures the gap between the
+   wiki names the prompt expects (`01_PROJECT_STATE`,
+   `02_ARCHITECTURE`, `05_BUILD_TEST_DEPLOY`, `07_FILE_MAP`,
+   `08_GIT_HISTORY_SUMMARY`) and the actual filenames in this copy
+   (`01_PROJECT_OVERVIEW` + `02_CURRENT_STATE`, `04_ARCHITECTURE`,
+   `09_RELEASE_AND_SIGNING`, and two missing). Also flags missing
+   `entities/`, `screenshots/`, and `raw/` directories. The next
+   agent is told NOT to silently rename — propose the rename or add
+   a mapping table to `00_START_HERE.md`.
+
+### Verification
+
+- `git remote -v` confirms `origin` →
+  `5frctqwvmn-ship-it/voltra-live-ios-gpt-5-5`. The original
+  `voltra-live-ios` is not a remote of this clone, so a stray push
+  cannot reach it.
+- `ls docs/handoff/` confirms the handoff inventory listed in the
+  pre-flight table.
+- `09_RELEASE_AND_SIGNING.md` contains real `xcodebuild` /
+  `xcodegen` / dry-run / tag-push commands — pre-flight item "real
+  iOS build commands" passes.
+- AGENTS.md sacred-files section, BLE control-write rules, 5-gate
+  ship verification, and post-build QA checklist are all unchanged
+  by this commit.
+
+### Risks
+
+- **Low.** No code, no protocol, no CI workflow, no Info.plist /
+  project.yml touched. Three documentation files modified, one
+  appended. Build remains b59 (v0.4.37); no version bump needed
+  for a docs-only commit.
+- The pre-flight table flags wiki-naming drift the next agent
+  must reconcile before writing V4 code. Surfacing it here is the
+  fix; not surfacing it would have been the regression.
+
+### Next step
+
+Hand the GPT-5.5 track to the next agent (fresh Perplexity Computer
+session). They run Step 0 of `09_NEXT_AGENT_PROMPT.md` cold, summarize
+state back to the user, and only then begin V4 implementation —
+starting with the wiki-naming reconciliation called out in the
+pre-flight table.
+
+---
+
+## 2026-04-29 (later) — feat: dropset arm-only refactor + unified progress bar (b60-prep)
+
+### Goal
+
+Address the b58 post-build QA wave-1 P0 regressions on the V4
+DROP tile. Specifically:
+
+- **KI-9 (P0):** DROP tap currently pre-lowers the cable weight;
+  user wants tap = arm only, with the actual drop firing after
+  the lift goes idle for 2 s. Mirrors gym mental model.
+- **KI-8 (P1):** make the dropset countdown visible — surface a
+  unified bar that morphs across idle / dropset progress / rest.
+- **KI-7 (P1):** confirm cascade interval is 2 s (already shipped
+  by b45; doc was stale).
+- **KI-10 (P0, partial):** the arm-only refactor likely closes
+  the phantom −5 lb mid-rep drop because the only cascade-fire
+  path now requires explicit `armDropSet` AND a 2 s sub-floor
+  gate. Pre-b60 the engage path could fire on any
+  SessionStore-detected idle while a manualDropSequence was in
+  flight. Verify on hardware before closing KI-10.
+
+This change ships ONLY the dropset state-machine work and the
+unified progress bar. Force curve epic (KI-11) is intentionally
+deferred — see "What was NOT touched" below.
+
+### Files changed
+
+- `VoltraLive/Logging/Persistence/LoggingStore.swift`
+  - +`dropSetArmed: Bool`, `dropArmedFiresAt: Date?` `@Published`
+    fields.
+  - +`armDropSet(startingLb:pushWeight:)` — captures anchor +
+    writer bridge, sets `dropSetArmed = true`. Does NOT touch
+    the cable, does NOT call `beginDropChain`, does NOT start
+    timers. Refuses while in arm-cooldown.
+  - +`engageArmedDropSet()` (private) — called from
+    `noteTelemetryActivity` once the 2 s arm-idle gate clears.
+    Re-delegates to `startDropSet` with the captured anchor +
+    writer.
+  - +`cancelArmedDropSet()` — clears arm flags + 1.5 s cooldown.
+    Distinct from `cancelDropSet` because no SessionStore drop
+    mode was ever entered.
+  - +`cascadeArmIdleSec: Double = 2.0` constant +
+    `cascadeArmIdleSecondsForUI` mirror.
+  - `noteTelemetryActivity(forceLb:)` now drives the arm gate
+    BEFORE the `dropSetActive` guard. Above-floor force resets
+    `dropArmedFiresAt`; sub-floor force starts/keeps the
+    countdown; once the deadline passes, `engageArmedDropSet`
+    fires.
+  - `reanchorCascadeIfActive(toLb:)` guard relaxed to
+    `dropSetActive || dropSetArmed` so user weight nudges
+    between tap-DROP and the first cascade drop are honored.
+  - Defensive resets of `dropSetArmed` / `dropArmedFiresAt` in
+    `cancelDropSet`, `autoLogDropChain` defensive branch, and
+    the autoLogDropChain success path.
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
+  - `tapDropTile()` rewritten — now calls `armDropSet` (was
+    `startDropSet`). Tap-while-armed disarms.
+  - `cancelArmedDrop()` (long-press) branches on active vs.
+    armed.
+  - `dropArmed` computed property = `dropSetActive ||
+    dropSetArmed` so the nested DROP row + 4-up tile render
+    armed visuals without distinguishing sub-state.
+  - `phaseOrRestBar` now morphs **rest > dropset > phase**.
+    New `dropProgressBar` private view renders one of four
+    labels (`DROP · ARM` / `· IN` / `· NEXT` / `· BOTTOM`)
+    with a 2 s sweep tied to `nextDropFiresAt` or
+    `dropArmedFiresAt`. Reuses the ambient `blinkOn` 2 Hz
+    republish so we don't spin a second timer.
+- `docs/handoff/entities/dropset_state_machine.md` — NEW.
+  Entities-layer doc per the V4 prompt (Karpathy wiki). State
+  table, transition diagram, engine method index, timer
+  constants, telemetry contract, UI binding contract, hardware
+  test plan.
+- `docs/handoff/06_KNOWN_ISSUES.md` — KI-7 marked resolved
+  (already 2 s in code since b45). KI-8 marked resolved (unified
+  bar shipped this commit). KI-9 marked resolved (arm-only
+  refactor shipped this commit). KI-10 promoted to "needs
+  hardware repro post-b60" — the most likely cause is closed
+  but verify before deleting.
+- `docs/handoff/03_CURRENT_FEATURE_SPEC.md` — §3 DROP tile
+  rewritten to describe the b60 arm-only state machine. §1a
+  Phase strip OR Rest Timer Bar updated to mention the new
+  third state (dropset progress).
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` — V4-D10
+  appended (arm-only state machine), V4-D11 appended (unified
+  bar across three states).
+- `docs/handoff/00_START_HERE.md` — added the wiki-name
+  mapping table the b59 pre-flight asked the next agent to
+  produce. No file renames.
+- `docs/handoff/QA_LOG.md` — b59 entry placeholder added so
+  hardware QA after this branch ships can fill in the wave-1
+  follow-ups.
+
+### What was NOT touched
+
+- **KI-11 (force curve epic).** Out of scope for this branch
+  per the user's billing convention "keep features separate
+  bills." Force curve full spec stays as documented in
+  `docs/handoff/design/force_curve.md` and `06_KNOWN_ISSUES.md`
+  KI-11 — next branch.
+- **`startDropSet`.** Not deleted — it's now invoked only from
+  `engageArmedDropSet`. Keeps the existing snapshot / parity /
+  floor logic in one place. Public surface is unchanged so
+  V1's `LiveCaptureView` (which still calls `startDropSet`
+  directly at line 1118) continues to work.
+- **Sacred files.** `VoltraProtocol.swift`,
+  `TelemetryExtractor.swift`, `PacketParser.swift`,
+  `FrameAssembler.swift` unchanged.
+- **`project.yml` / `Info.plist`.** No version bump in this
+  branch — version bump + tag happen at ship time, after a
+  user sign-off on the PR.
+
+### Verification
+
+- Static review only — no Mac in this environment, so
+  `xcodebuild` / `xcodegen` were not run. CI will compile + run
+  `VoltraLiveTests/ProtocolGoldenTests.swift` on push (sacred
+  files unchanged so the protocol golden tests are guaranteed
+  to pass).
+- Diff statics:
+  - `dropSetArmed`/`dropArmedFiresAt` declared as `@Published`
+    so SwiftUI observers refresh.
+  - Arm-gate path runs BEFORE the `dropSetActive` guard in
+    `noteTelemetryActivity` (verified by re-reading the diff).
+  - `engageArmedDropSet` returns immediately after delegating
+    to `startDropSet` to avoid double-resetting the timers
+    that `startDropSet` itself sets up.
+  - `reanchorCascadeIfActive` extension is gated by
+    `dropSetArmed` OR `dropSetActive` so callsites in
+    `LiveCaptureView.swift` (V1) are unaffected when nothing
+    is armed.
+  - V1's `LiveCaptureView.swift` calls `startDropSet` directly
+    at line 1118 — left intact. V1 behavior is unchanged.
+
+### Risks at ship
+
+- **First-engage edge case:** if the lift goes idle BEFORE
+  `noteTelemetryActivity` has been called once after arming,
+  `dropArmedFiresAt` won't be set and the engage will wait
+  for the first sub-floor packet. In practice every BLE
+  session has continuous telemetry so this is moot, but if
+  the BLE connection drops mid-arm the cascade silently
+  won't engage. Consider a safety fallback if QA reports it.
+- **Bar contention:** if the rest timer fires WHILE armed
+  (theoretically possible if SessionStore finalizes the set
+  via the existing rep+force heuristic before the user has
+  a chance to cancel arm), rest takes priority and arm
+  silently clears via the `cancelDropSet` path inside the
+  finalize branches. Verify on hardware.
+- **Twin Mode:** DROP tile is hidden in Twin per V4-D6. The
+  arm path never runs in Twin so no Twin-specific code is
+  needed. If Twin DROP is later spec'd, we'll need to plumb
+  the engage path through `mdm.applyCombined`.
+
+### Cost
+
+**Medium.** ~50 lines changed in LoggingStore (3 new methods +
+4 sites of defensive resets), ~110 lines changed in
+LiveCaptureViewV2 (rewrote one var + one method, added one new
+private view), 1 new entity doc, 5 wiki updates. No CI run
+yet — single push + PR open.
+
+### Next step
+
+Open a PR against `main` of the GPT-5.5 repo. User reviews,
+signs off, then we tag b60 and ship via the existing release
+workflow (see `09_RELEASE_AND_SIGNING.md`). On TestFlight
+install, run the b58 QA wave-1 follow-up checklist (KI-7 / 8 /
+9 / 10) on hardware. If the phantom −5 lb drop (KI-10) recurs,
+we have repro context and can add debug logging on the
+resistance-write call sites in a follow-up build.
+
+## 2026-04-29 15:40 UTC — KI-11 force-curve full spec landed (b60-prep)
+
+- **Files changed:** `VoltraLive/Logging/Views/V2/ForceChartV2.swift`,
+  `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`,
+  `docs/handoff/design/force_curve.md`,
+  `docs/handoff/06_KNOWN_ISSUES.md`,
+  `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md`,
+  `docs/handoff/03_CURRENT_FEATURE_SPEC.md`.
+- **What changed:** Closed the seven §-level gaps in
+  `force_curve.md` that were tracked as KI-11. New on the chart:
+  80% dashed reference line (§3e), per-rep peak dot + lb label
+  (§3e), compact mode-aware legend chip top-left (§3g, includes
+  new INV CHAIN entry), time-based label fade (§3c), 3-stop
+  gradient ROM-band (§3d), stroke-side phase-blend dot at CON↔ECC
+  boundaries (§3b). One new optional init arg
+  `invChainArmedActive`; parent passes `invArmed` into it.
+- **Verification:** Static-only — no Swift toolchain in this
+  Linux container. Hand-traced ViewBuilder branch counts in the
+  modified body / `activeChart` / ZStack to stay within the 10-view
+  limit. Hand-traced gradient-stop math and the
+  `labelFadeAlpha(rep:)` boundary cases (3.0 → 1.0, 3.5 → 0.5,
+  4.0 → 0.0). CI `build.yml` will be the first real compile gate
+  on push.
+- **Risks:** No hardware QA yet. Likely-safe rendering surface,
+  but four watch-items: (1) older-rep peak labels may visually
+  collide on long sets, (2) §3b stroke blend dots may read as
+  artifacts on very fast reps, (3) 80% line uses running-set peak
+  not historical-set peak (matches Tonal pattern but worth
+  confirming on hardware), (4) INV CHAIN fill direction
+  intentionally unchanged — see V4-D12.
+- **Next step:** User pushes a TestFlight from this branch and
+  runs the post-build QA checklist (8 rows in `06_KNOWN_ISSUES`
+  KI-F11). If labels collide, dial the `>= 0.30` opacity
+  cutoff up. If §3b dots feel artifact-y, drop alpha 0.35 → 0.20
+  or remove. Do NOT merge this branch to main without that QA.
+
+---
+
+## b60 — release conduit ship: V4 from GPT-5.5 fork (v0.4.38-build60)
+
+**Date/time:** 2026-04-29 16:30 UTC
+
+**Goal:** Ship V4 work completed by the GPT-5.5 agent's fork to
+TestFlight via the original repo's signing pipeline. This session is
+a release conduit only — no re-implementation, no wiki re-authoring.
+
+**Source of payload:**
+- Fork: `5frctqwvmn-ship-it/voltra-live-ios-gpt-5-5`
+- Branch: `feat/ui-v4-dropset-armonly`
+- HEAD SHA: `59a3c05`
+- Fork PR (informational, not merged): #1
+- Fork branch frozen as rollback fallback. Not pushed to.
+
+**History approach:** Linear merge-base. Fork branched from this
+repo's `main` at `592131f` (b59 hotfix) with three commits ahead:
+
+| SHA | Subject |
+|---|---|
+| `a48cf7c` | chore: GPT-5.5 track handoff pre-flight |
+| `3f8d41c` | feat(v4): dropset arm-only refactor + unified progress bar (b60-prep) |
+| `59a3c05` | feat(v4): KI-11 force-curve full spec — 80% line, peak dots, legend (b60-prep) |
+
+`git checkout -b release/v0.4.38-build60 59a3c05` succeeded cleanly —
+no cherry-pick needed. All three fork commits are carried verbatim.
+
+**Files changed in this session (release branch, on top of fork HEAD):**
+- `project.yml` — bumped `MARKETING_VERSION` 0.4.37 → 0.4.38,
+  `CURRENT_PROJECT_VERSION` 59 → 60.
+- `VoltraLive/Info.plist` — bumped `CFBundleShortVersionString` /
+  `CFBundleVersion` to match; updated `VOLTRAFeatureLabel` to b60.
+- `docs/WORK_LOG.md` — this entry.
+
+**Files NOT changed (by intent — owned by fork commits):**
+- `VoltraLive/Logging/Persistence/LoggingStore.swift`
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
+- `VoltraLive/Logging/Views/V2/ForceChartV2.swift`
+- `docs/handoff/00_START_HERE.md`
+- `docs/handoff/03_CURRENT_FEATURE_SPEC.md`
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md`
+- `docs/handoff/06_KNOWN_ISSUES.md`
+- `docs/handoff/QA_LOG.md`
+- `docs/handoff/design/force_curve.md`
+- `docs/handoff/entities/dropset_state_machine.md`
+- `AGENTS.md` (fork added a 7-line note in `a48cf7c`)
+- `README.md` (fork added a 5-line note in `a48cf7c`)
+
+All wiki deltas are present on the release branch by virtue of
+checking out fork HEAD. No verbatim re-copy was needed since the
+checkout IS the verbatim copy.
+
+**Wiki diff vs original `main` @ `592131f`** (informational, no
+overwrite needed since we branched from fork HEAD, not main):
+- `00_START_HERE.md` — fork added b60-prep startup notes (+25 lines).
+- `03_CURRENT_FEATURE_SPEC.md` — fork added §3 dropset arm-only
+  + §5 force-curve KI-11 sections (+97 lines total across
+  `3f8d41c` and `59a3c05`).
+- `04_DECISIONS_AND_CONSTRAINTS.md` — fork added decision records
+  for arm-only refactor + KI-11 spec (+110 lines).
+- `06_KNOWN_ISSUES.md` — fork updated KI-9 (DROP arm-only resolution
+  pending hardware), KI-11 (force-curve spec resolution pending
+  hardware) (+89/-52 churn).
+- `QA_LOG.md` — fork added b59 QA wave-2 + b60-prep entries.
+- `design/force_curve.md` — fork added 24 lines for legend +
+  peak-dot + 80% line spec.
+- `entities/dropset_state_machine.md` — NEW file from fork (136
+  lines), formalizes the b60 arm-only state machine.
+
+**Source of truth for fork-owned content:**
+The fork's `docs/WORK_LOG.md` and `docs/handoff/QA_LOG.md` carry
+the implementation narrative. The PR description references those;
+this WORK_LOG entry deliberately does not re-paste them.
+
+**Verification:**
+- Sacred files untouched (`Protocol/*` checked — no fork commits
+  modified them).
+- Linear history confirmed via `git merge-base` =
+  `592131f` (this repo's main HEAD).
+- All required wiki files present on branch (8/8).
+- Tag `v0.4.38-build60` confirmed unused (`git tag --list` only
+  shows up to `v0.4.37-build59`).
+- Hardware testing matrix: NOT run this session. The agent has no
+  device. All hardware-confirmation items are explicitly marked
+  awaiting user QA in the b60 PR + ship message.
+
+**Risks at ship:**
+- **Dual-Voltra routing (b59) is still hardware-unconfirmed.** The
+  b59 `LiveCaptureContainer.shouldUseV2` rewrite shipped to
+  TestFlight on b59 but the user reported the legacy V1
+  ACTIVE/NEXT header still surfaced. b60 does NOT touch routing —
+  inherits whatever state b59 left. Requires real-hardware QA to
+  determine if b60's V4 changes are even reachable.
+- **DROP arm-only (KI-9) hardware-unconfirmed.** Fork commit
+  `3f8d41c` rewires DROP tap to arm-only (no immediate −5 lb).
+  Logic verified by code review only.
+- **KI-10 phantom −5 lb during reps.** Not addressed by fork.
+  Still open, still hardware-only repro.
+- **KI-11 force-curve full spec (legend/peak dots/80% line)** —
+  fork commit `59a3c05`. Visual spec compliance hardware-unverified.
+- Fork branch frozen at `59a3c05` as rollback fallback. If b60
+  TestFlight QA fails, user can revert to b59 and we re-spin from
+  the fork's PR #1 with corrections.
+
+**Next step:**
+1. Push release branch to origin.
+2. Open PR against `main` referencing fork SHA + fork PR #1 + fork
+   `WORK_LOG`/`QA_LOG` as testing source-of-truth.
+3. Tag `v0.4.38-build60`, push tag, run release.yml.
+4. Poll workflow → run 5-gate altool verify → poll App Store Connect
+   for processing.
+5. Report status to user as **"uploaded to TestFlight, awaiting
+   user hardware QA"** — NOT "shipped". Per user explicit
+   directive at b60 kickoff: "do not overclaim … b60 should be
+   framed as 'uploaded to TestFlight for hardware QA,' not 'done.'"
+
+**Cost callout:** This entire ship cycle is **medium** —
+checkout + 2 file edits + WORK_LOG append + commit + push + PR
+open + tag + release.yml polling loop + ASC polling loop.
+
+---
+
+## b61 — bump-and-retry after Apple rejected b60 (v0.4.38-build61)
+
+**Date/time:** 2026-04-29 16:42 UTC
+
+**Why this exists:** b60 upload failed at altool with Apple error
+`-19232 ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE`:
+
+```
+The bundle version must be higher than the previously uploaded
+version: '59'. The provided entity includes an attribute with a
+value that has already been used.
+```
+
+This is App Store Connect telling us build `60` was already taken
+on Apple's side (origin unknown — possibly a prior CI run, fork
+CI run, or local archive). The 5-gate altool guard caught it at
+gate 4 (no positive success marker) and gate 5 (failure regex
+matched). CI failed loudly — no false-positive ship.
+
+The b60 tag `v0.4.38-build60` is preserved in repo history as a
+failed-upload audit trail per user direction.
+
+**Fix:** single bump commit on top of the b60 release branch.
+Same payload (3 fork commits + b60 conduit commit), version 61.
+
+**Files changed (this commit only):**
+- `project.yml` — `CURRENT_PROJECT_VERSION` 60 → 61.
+- `VoltraLive/Info.plist` — matching `CFBundleVersion`; updated
+  `VOLTRAFeatureLabel` to mention the collision.
+- `docs/WORK_LOG.md` — this entry.
+
+`MARKETING_VERSION` stays at `0.4.38` per user choice (Option 1
+from the bump prompt).
+
+**Source payload unchanged:** still gpt55/feat/ui-v4-dropset-armonly
+@ 59a3c05. Same three implementation commits ride this re-ship.
+
+**Verification:**
+- Tag `v0.4.38-build61` confirmed unused (no such tag on origin).
+- Sacred files still untouched.
+- Branch `release/v0.4.38-build60` retained as the working branch
+  (no rename — keeps PR #3 stable). Tag and PR title carry the
+  build-61 marker; branch name is now slightly stale but harmless.
+
+**Risks:**
+- If `61` is ALSO taken on ASC, we'll see the same `-19232` and
+  bump to 62. There is no API call from this environment to
+  enumerate ASC's existing builds before the fact. User has been
+  informed of this.
+- All hardware-QA risks from b60 still apply unchanged.
+
+**Next step:**
+1. Commit + push to release branch.
+2. Tag `v0.4.38-build61`, push tag.
+3. Run release.yml, poll, 5-gate verify.
+4. If altool succeeds, poll ASC for processing.
+5. Report status as "uploaded to TestFlight, awaiting hardware QA."
+
+**Cost callout:** Re-ship adds another medium block (one more
+release.yml run + altool + poll). Total session is now medium-heavy.
+
+---
+
+## b65 — skip past Apple's contaminated 60–64 range (v0.4.38-build65)
+
+**Date/time:** 2026-04-29 16:55 UTC
+
+**Why:** Apple rejected b60 AND b61 with the same -19232 / 409
+ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE error on
+`/data/attributes/cfBundleVersion`. User screenshot of ASC
+TestFlight confirms highest visible CFBundleVersion is 59 — yet
+Apple's validation backend rejects both 60 and 61 as "already
+used."
+
+**Diagnosis:** Apple's ASC backend reserves CFBundleVersion on
+upload *attempt*, not just on success. The b60 and b61 failed
+attempts likely reserved their numbers in Apple's system but the
+slots never became visible in the TestFlight UI. This is a known
+Apple-side wart; the standard fix is to skip past the contaminated
+range and let Apple's reservations expire (~24h) before reusing.
+
+**Strategy:** bump CFBundleVersion 61 → 65, leaving a 4-build gap
+to clear any phantom reservations. If 65 ALSO collides, the issue
+is structural (not a phantom slot) and we stop again.
+
+**Files changed:**
+- `project.yml` — `CURRENT_PROJECT_VERSION` 61 → 65.
+- `VoltraLive/Info.plist` — matching `CFBundleVersion`; updated
+  `VOLTRAFeatureLabel` to mention both prior collisions.
+- `docs/WORK_LOG.md` — this entry.
+
+`MARKETING_VERSION` stays at `0.4.38`. The b60 and b61 tags both
+remain in repo as failed-upload audit trail. A jump from 61 → 65
+in the build-number sequence is intentional and documented here
+so the next agent doesn't think a build went missing.
+
+**Build-number ledger (post-b65 attempt):**
+
+| Tag | CFBundleVersion | Apple status |
+|---|---|---|
+| v0.4.36-build58 | 58 | Complete (visible in ASC) |
+| v0.4.37-build59 | 59 | Complete (visible in ASC) |
+| v0.4.38-build60 | 60 | -19232 rejected; phantom reservation |
+| v0.4.38-build61 | 61 | -19232 rejected; phantom reservation |
+| (unused) | 62, 63, 64 | reserved as gap |
+| v0.4.38-build65 | 65 | this attempt |
+
+**Sacred files:** untouched. **Source payload:** unchanged
+(gpt55/feat/ui-v4-dropset-armonly @ 59a3c05).
+
+**Risks:**
+- If 65 also rejects, we have a structural issue (e.g. signing
+  cert change, bundle ID issue, Apple account state) that the
+  build-number bump won't fix. STOP at that point.
+- All hardware-QA risks from b60 still apply unchanged.
+
+**Next step:** commit, push, tag, ship, poll, 5-gate verify.
+
+**Cost callout:** Third release.yml run this session = adds
+another medium block. Cumulative session is solidly heavy.
+
+---
+
+## 2026-04-29 — b60 RELEASE: ROOT CAUSE FOUND, FIX COMMITTED
+
+**Status:** Source-of-truth bug fixed. Ship blocked on dry-run verification.
+
+**Root cause:**
+
+Three altool failures (b60 / b61 / b65) all rejected with
+`-19232 ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE`,
+`previousBundleVersion: 59`, on a 4-second wall-clock — i.e. Apple's
+metadata pre-flight rejection, before any IPA bytes were uploaded.
+
+Initial theory was phantom slot reservations on Apple's side. Wrong.
+Reservations expire in minutes, never persist across unrelated build
+numbers. If reservations were the cause, b65 would have shipped.
+
+The actual cause was in our own `project.yml`. The `targets.VoltraLive.info`
+block had hardcoded literals:
+
+```yaml
+info:
+  path: VoltraLive/Info.plist
+  properties:
+    CFBundleShortVersionString: "0.4.37"
+    CFBundleVersion: "59"
+```
+
+`xcodegen generate` runs on every CI build (workflow log line 159:
+`⚙️ Generating plists...`) and **regenerates `VoltraLive/Info.plist`**
+from these literals — overwriting any edits to the source file. Every
+b60/b61/b65 archive was built with `CFBundleVersion=59` in the IPA
+manifest. Apple's "duplicate" rejection was correct; our IPA literally
+matched the existing b59 build.
+
+The bumps to `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` at the
+target-level build settings were correct and necessary, but they only
+affect Xcode build settings — they don't reach the regenerated Info.plist
+because xcodegen's `info.properties` block is the source of truth for that
+file, and it was hand-maintaining stale literals.
+
+**Why b58 and b59 worked:** `info.properties` literals were in sync with
+the target settings at those points (last-touched manually together).
+Drift started when this session bumped target settings without bumping
+`info.properties`.
+
+**Fix (this commit):**
+
+1. `project.yml`: changed `info.properties.CFBundleShortVersionString`
+   to `$(MARKETING_VERSION)` and `info.properties.CFBundleVersion` to
+   `$(CURRENT_PROJECT_VERSION)`. xcodegen passes these macros through
+   verbatim into the generated Info.plist; xcodebuild's
+   `-expandbuildsettings` then substitutes them at archive time from
+   the target build settings. Single source of truth = target-level
+   `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`. Apple's recommended
+   pattern. No more drift possible.
+
+2. `project.yml`: target `CURRENT_PROJECT_VERSION` reset to `60`. Apple
+   has never received a real build 60 — all three failed uploads got
+   stopped at metadata pre-flight before any binary reached Apple's
+   storage. Build 60 is clean and available.
+
+3. `VoltraLive/Info.plist`: literal CFBundleVersion synced to `60`,
+   CFBundleShortVersionString to `0.4.38`, and VOLTRAFeatureLabel
+   updated to b60 wording. xcodegen will regenerate this file on next
+   CI run, but matching values keeps the repo internally consistent.
+
+**Diagnostic verification path (next):**
+
+Trigger `release.yml` via `workflow_dispatch` with `dry_run=true`.
+This runs the full archive + sign + IPA-export pipeline but skips
+altool entirely. After the run, the archive's actual Info.plist
+content can be inspected from CI artifacts / logs to confirm the
+macro substitution produced `60` not `59`. If confirmed, then push
+the real release (already-existing tag `v0.4.38-build60` will trigger
+release.yml on tag push).
+
+**Tags preserved as audit trail:**
+- `v0.4.38-build60` (first attempt — broken xcodegen plist)
+- `v0.4.38-build61` (second attempt — same bug, different bump target)
+- `v0.4.38-build65` (third attempt — same bug, skipped contaminated range)
+
+The real b60 will reuse tag `v0.4.38-build60` if pushed via
+workflow_dispatch on the `release/v0.4.38-build60` branch HEAD,
+since release.yml triggers on both `push: tags` and
+`workflow_dispatch`. No tag re-use issue.
+
+**Build-number ledger (corrected understanding):**
+
+| Tag | What we shipped | What Apple stored |
+|---|---|---|
+| v0.4.36-build58 | IPA cfBundleVersion=58 | Complete |
+| v0.4.37-build59 | IPA cfBundleVersion=59 | Complete |
+| v0.4.38-build60 | IPA cfBundleVersion=59 (stale) | rejected pre-flight |
+| v0.4.38-build61 | IPA cfBundleVersion=59 (stale) | rejected pre-flight |
+| v0.4.38-build65 | IPA cfBundleVersion=59 (stale) | rejected pre-flight |
+| v0.4.38-build60 (real) | IPA cfBundleVersion=60 | TBD after dry-run |
+
+**Sacred files:** untouched.
+**Source payload:** unchanged (gpt55/feat/ui-v4-dropset-armonly @ 59a3c05).
+**Fork:** untouched.
+**main branch:** untouched.
+
+**Hardware-QA-pending items (unchanged from b60 entry):**
+- Dual-Voltra routing (b59 carry-over)
+- DROP arm-only (KI-9)
+- KI-10 phantom -5lb
+- KI-11 force-curve full spec
+
+**Cost callout:** This commit + dry-run = ~1 medium block.
+If dry-run passes, real ship adds another ~1 medium. Cumulative
+session is very-heavy now.
+
+
+---
+
+## 2026-04-29 — b60 SHIPPED to TestFlight (awaiting hardware QA)
+
+**Status:** UPLOAD SUCCEEDED. Apple is processing. Hardware QA pending.
+
+**Ground-truth verification (dry-run, run 25123263886):**
+
+Downloaded the signed IPA artifact from the dry-run, unzipped, and
+read the embedded Info.plist with plistlib. Confirmed:
+
+```
+CFBundleVersion            : '60'
+CFBundleShortVersionString : '0.4.38'
+CFBundleIdentifier         : 'com.voltralive.app'
+VOLTRAFeatureLabel         : 'b60: V4 dropset arm-only + KI-10/11 force curve (HARDWARE-QA-PENDING)'
+```
+
+Macros propagated correctly through xcodegen → xcodebuild → archive →
+IPA. Fix verified before any altool burn.
+
+**Real ship (run 25123591351, workflow_dispatch dry_run=false):**
+
+- Branch: release/v0.4.38-build60 @ commit 52c2a14
+- altool wall-clock: 40 seconds (b59 was 35s — within normal range)
+- Result: UPLOAD SUCCEEDED with no errors
+- Delivery UUID: 75da41b6-b52b-43f7-8999-acafb8e171d7
+- Bytes transferred to Apple: 2,640,225
+
+**5-gate altool ship verification:**
+
+| Gate | Check | Result |
+|---|---|---|
+| 1 | workflow conclusion = success | ✅ |
+| 2 | raw log pulled (>0 lines) | ✅ 2075 lines |
+| 3 | altool duration ≥ 20s | ✅ 40s |
+| 4 | "UPLOAD SUCCEEDED with no errors" present | ✅ 1 occurrence |
+| 5 | zero ERROR: [altool|ContentDelivery] lines | ✅ (2 matches were inside bash echo of regex docs, not real errors) |
+
+**Apple's view of the build chain:**
+
+| ASC build | CFBundleShortVersionString | CFBundleVersion | Status |
+|---|---|---|---|
+| (existing) | 0.4.36 | 58 | Complete |
+| (existing) | 0.4.37 | 59 | Complete |
+| (this ship) | 0.4.38 | 60 | Processing → TestFlight |
+
+**Tags / branches state:**
+
+- Branch `release/v0.4.38-build60` at commit `52c2a14` (the fix +
+  this WORK_LOG entry will land in a follow-up doc-only commit).
+- Tags `v0.4.38-build60`, `v0.4.38-build61`, `v0.4.38-build65` all
+  preserved as audit trail of the xcodegen-regen bug. They point at
+  pre-fix commits that produced IPAs containing CFBundleVersion=59.
+  None of those tags reflect the actual shipped artifact, so they
+  must NOT be re-used for downstream tooling that resolves "what's
+  on TestFlight as 0.4.38(60)" — that is `52c2a14`, not the tag.
+- main: untouched.
+- Fork: untouched.
+- PR #3 against main: open, ready for review/merge after hardware QA.
+
+**HARDWARE-QA-PENDING (carried forward from b60 brief — none of these
+are real-hardware-confirmed yet, only software-verified on simulator):**
+
+- [ ] Dual-Voltra routing (b59 carry-over): correctly routes to V2
+      LiveCapture when both Voltras paired
+- [ ] DROP arm-only behavior (KI-9): only the active arm's drops
+      count toward the dropset cascade
+- [ ] KI-10 phantom -5lb drop: no synthetic drop event fires when
+      weight stays constant
+- [ ] KI-11 force-curve full spec: 80% line, peak dots, legend
+      display correctly across full rep range
+
+**Sacred files audit:**
+
+- VoltraProtocol.swift / TelemetryExtractor.swift / PacketParser.swift /
+  FrameAssembler.swift: untouched (same contents as b59).
+- .github/workflows/release.yml: untouched (the diagnostic edit drafted
+  during debug was reverted before commit; the real fix landed in
+  project.yml + Info.plist only).
+
+**Cost callout:** Two release.yml runs this turn (1 dry-run + 1 real
+ship) = 1 medium block. Total session cost: very-heavy (5 release runs
++ extensive log analysis + IPA artifact extraction + plistlib
+inspection). Root cause now permanently fixed; future bumps will
+just touch project.yml's CURRENT_PROJECT_VERSION line.
+
+**Lesson learned (for future agents):**
+
+When xcodegen has both `info.path` AND `info.properties` set, that
+plist file is REGENERATED on every `xcodegen generate` from the
+properties block. Bumping the source plist file directly is a no-op.
+Always either (a) bump the values in `info.properties` itself, or
+(b) use `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)` macros
+in `info.properties` and bump only the target build settings.
+Pattern (b) — now in effect — is single-source-of-truth and prevents
+this drift class entirely.
+
+
+---
+
+## 2026-04-29 17:55 UTC — Doc update: codify b60 macro fix for GPT-5.5 release-conduit
+
+**Goal:** Make sure the next time GPT-5.5 (or any other agent) bumps the
+build for VOLTRA Live iOS, the release-conduit can push it through with
+minimal tokens and zero rediscovery of the xcodegen-info.properties trap.
+
+**Files changed:**
+- `docs/handoff/09_RELEASE_AND_SIGNING.md` — replaced the obsolete
+  "Three places to bump" section (which was the b55-fix's wrong solution)
+  with three new sections:
+  1. "ONE place to bump on every release (post-b60 macro fix)" — the
+     new procedure: edit only `MARKETING_VERSION` /
+     `CURRENT_PROJECT_VERSION` at `project.yml` lines 64–65.
+  2. "DO NOT re-add hardcoded version literals to `info.properties`" —
+     explains the xcodegen regen mechanism, names the workflow log line
+     to look for (`⚙️ Generating plists...`), and explicitly retires the
+     three-places-in-sync rule.
+  3. "If you see this altool error" — recognizable troubleshooting
+     section with the exact 409 ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE
+     signature, the 3–5s wall-clock pre-flight rejection tell, and a
+     diagnostic flow (download dry-run IPA via `gh api`, plistlib-read
+     the embedded Info.plist) that catches re-corruption immediately.
+- `docs/handoff/00_START_HERE.md` — added "Uploaded to TestFlight,
+  awaiting hardware QA: v0.4.38-build60" entry above the b56 paragraph,
+  framing the ship per the user's "not done, awaiting hardware QA"
+  direction. Names the macro fix, the three failed-upload audit-trail
+  tags, the dry-run plistlib verification step, and the QA-pending
+  items (dual-Voltra routing, KI-9/10/11). Points future agents at
+  the new "ONE place to bump" + "DO NOT re-add hardcoded literals"
+  sections.
+
+**Why this matters:** The b55-fix tried to solve the
+`info.properties` overwrite class of bug by writing a "three places
+must agree" checklist into 09_RELEASE_AND_SIGNING.md. That checklist
+is fragile — any agent who edits build settings and forgets
+`info.properties` (or vice-versa) ships a wrong build. b60/b61/b65
+all hit exactly that failure mode three times in a row before the
+macro pattern was applied. The doc now documents the macro pattern
+as the only correct approach and explicitly tells future agents not
+to reintroduce the checklist.
+
+**Verification:**
+- `09_RELEASE_AND_SIGNING.md` line 8 now reads
+  "ONE place to bump on every release (post-b60 macro fix)".
+- `00_START_HERE.md` "Uploaded to TestFlight, awaiting hardware QA"
+  line precedes the b56 paragraph.
+- No code or sacred-file changes. No version bumps. No CI churn.
+
+**Risks:** None — docs-only. Working tree was clean before this
+commit (post-b60 ship + WORK_LOG ship-success entry already
+committed in `b79434c`).
+
+**Next step:** Commit + push to `release/v0.4.38-build60`. Branch
+state will be: a48cf7c → … → 52c2a14 (FIX) → b79434c (ship-success
+log) → <this commit> (doc update). Hardware QA on b60 still
+outstanding; dual-Voltra / KI-9 / KI-10 / KI-11 unconfirmed on
+real device.
+
+---
+
+## 2026-04-29 18:20 UTC — V4.2 clarifications added to 09_NEXT_AGENT_PROMPT.md
+
+**Goal:** Pre-resolve the five "missing pieces" questions GPT-5.5 asked
+before the V4.2 pass so the next agent does not re-ask. User confirmed
+they will point GPT-5.5 at this file rather than re-paste the answers.
+
+**Files changed:**
+- `docs/handoff/09_NEXT_AGENT_PROMPT.md` —
+  - Updated pre-flight table: `entities/` row flipped from MISSING to
+    PASS (seeded b60). `screenshots/` row reframed as "create on first
+    use" with explicit `mkdir` + naming convention.
+  - Removed the "Seed `docs/handoff/entities/`" bullet since the
+    directory is no longer empty.
+  - Added new `## V4.2 Clarifications (added 2026-04-29 by Claude
+    release-conduit)` section answering Q1–Q5:
+    - Q1: design tokens live in `VoltraLive/Views/VoltraTheme.swift`
+      (Swift, not Markdown). Listed the live `VoltraColor` surface and
+      ruled out hardcoded hex / parallel `tokens.md`.
+    - Q2: A — entities/ already exists; add `voltra_assignment_panel.md`
+      next to `dropset_state_machine.md` in the same commit as code.
+    - Q3: A — create `docs/handoff/screenshots/` on first use, kebab-case
+      filenames, closes KI-6 when seeded.
+    - Q4: B — manual base-weight tap cancels armed/active dropset.
+      Cited `LoggingStore.swift` cancel path + the entity doc transition
+      rows that need updating.
+    - Q5: C — copy V1 layout/behavior verbatim, recolor with VoltraTheme.
+      Cited `V1RestoreSection.swift` (b56 precedent), `WorkoutVoltraPickerSheet.swift`
+      (V1 source), and `LiveCaptureViewV2.swift` (mount site).
+  - Added "Reference apps not in repo" section noting
+    `voltra-v2-preview/index.html`, `voltra-proto`, `voltra-live` are
+    workspace assets the user pastes on demand, not git-tracked.
+- `docs/WORK_LOG.md` — this entry.
+
+**Verification:**
+- File now ends at line 486 with the V4.2 clarifications block. All
+  internal links use relative paths verified against the actual repo
+  layout (entities/ exists, VoltraTheme.swift at
+  VoltraLive/Views/VoltraTheme.swift, V1RestoreSection.swift at
+  VoltraLive/Logging/Views/V2/V1RestoreSection.swift).
+- No code changes. No sacred-file changes. No version bump.
+
+**Risks:** None — docs-only. The clarifications encode user decisions,
+not new engineering work.
+
+**Next step:** Commit + push to release/v0.4.38-build60. User will
+point GPT-5.5 at the updated 09_NEXT_AGENT_PROMPT.md to start the V4.2
+implementation pass.

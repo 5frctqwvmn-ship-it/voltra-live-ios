@@ -1,5 +1,10 @@
 # VOLTRA Live — iOS Native App
 
+> **Track marker:** This repository is the **GPT-5.5 implementation track**, copied
+> from `5frctqwvmn-ship-it/voltra-live-ios`. The original repository remains the
+> Claude-orchestrated **fallback** and is preserved as the recovery baseline.
+> Do not push changes from this track to the original repo.
+
 Real-time workout telemetry for VOLTRA BLE devices. Native SwiftUI app for iPhone and iPad. iPad landscape (rack-mounted) is the primary use case.
 
 ## Features
