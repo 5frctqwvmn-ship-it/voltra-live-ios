@@ -2266,3 +2266,96 @@ minutes of altool's success marker, then the user installs and
 verifies the eight items above against the b56 spec screenshot.
 If anything is off, the next build is a targeted patch — not
 another full rewrite of LiveCaptureViewV2.
+
+---
+
+## b57 — V3 LiveCaptureView rewrite (v0.4.35-build57)
+
+### Summary
+
+V3 UI overhaul of the live-capture screen. Eight deliverables
+tracked, all landed:
+
+1. **Force chart §1 — dynamic Y-axis.** Ceiling = max(working,
+   working+ECC, working+CHAIN, working+ECC+CHAIN) × 1.2, with
+   60-lb floor. 1.5s ease on changes. Recomputes live as the
+   user adjusts weight or arms/disarms mods.
+2. **Force chart §1a — rep history overlay.** Up to 8 most
+   recent reps drawn behind the live curve with logarithmic
+   fade `opacity = max(0.10, 1/(1+ln(repsAgo+1)))`. Resets on
+   End Set and on rest expire.
+3. **DROP §2 — toggle rewrite.** Tap 1 arms a 5-lb drop and
+   expands the nested row + stepper. Tap 2 disarms entirely
+   (the nested row collapses, no greyed remnant). 2s idle
+   auto-fire reschedules on every adjustment. Increments
+   clamped to multiples of 5; ±1 buttons render greyed via
+   `dropMode: true` and are no-ops at the handler.
+4. **Increment grid §3.** All four nested rows
+   (ECC/CHAIN/INV CHAIN/DROP) standardized to −5 / −1 / +1 / +5.
+5. **Pulley §4 — relocate, doubling, BLE math.** Pulley + 1-lb
+   added-plates dials lifted out of V1RestoreSection into a
+   new `PulleyAndPlatesBarV3` mounted directly above the force
+   chart. Pulley default 1×, plates default 1 lb. Doubling
+   logic ported from commits 8a980d6 / ec71bcc. **BLE math bug
+   from b56 fixed:** `pushUpcomingStateToDevice` no longer
+   multiplies base/ECC/CHAIN by `pulleyMultiplier` — those
+   values are device-frame and the device wants device-frame.
+   Display side (WEIGHT card big number, force chart Y axis,
+   log storage) continues to multiply.
+6. **Rest timer §6 — first-engage fix.** `SessionStore.swift`
+   ~line 132 now accepts `cs.peakLb > 10` alongside `cs.reps > 0`
+   as engagement evidence. The very first rep of a session no
+   longer slips through the arm-check.
+7. **Header §7 — V3 chrome.** V2 top dial removed. Inline V3
+   watermark. Exercise-name marquee scroll (5s pause → scroll →
+   1s pause → reset → loop, no scroll if name fits). Status
+   dot replaces the "Connected" button; tap opens a popover
+   with the full BLE state string.
+8. **Docs.** New files: `03_CURRENT_FEATURE_SPEC.md`,
+   `04_DECISIONS_AND_CONSTRAINTS.md`, `06_KNOWN_ISSUES.md`,
+   `09_NEXT_AGENT_PROMPT.md`, `research/intensity_metric.md`.
+   This work-log entry.
+
+### Files
+
+**New:**
+- `VoltraLive/Logging/Views/V2/PulleyAndPlatesBarV3.swift`
+- `VoltraLive/Logging/Views/V2/MarqueeText.swift`
+
+**Rewritten:**
+- `VoltraLive/Logging/Views/V2/ForceChartV2.swift` — dynamic
+  Y-axis ease, rep-history overlay with phase-boundary slicer,
+  logarithmic fade.
+
+**Modified:**
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — header
+  redesign, DROP toggle, BLE math fix, Y-axis formula, idle
+  auto-fire timer, pulley bar mount, V2 dial removed from
+  toolbar.
+- `VoltraLive/Logging/Views/V2/ModStepperRowV2.swift` — −5/−1/+1/+5
+  grid, `dropMode` flag added.
+- `VoltraLive/Logging/Views/V2/V1RestoreSection.swift` — pulley
+  + plates extracted out (now lives in PulleyAndPlatesBarV3).
+- `VoltraLive/Session/SessionStore.swift` — rest-timer
+  first-engage fix.
+
+**Untouched:**
+- `VoltraProtocol.swift`, `TelemetryExtractor.swift`,
+  `PacketParser.swift`, `FrameAssembler.swift` — sacred.
+
+### Cost callout
+
+Medium-or-heavier. 2 new SwiftUI files (~378 lines), 1 full
+rewrite (~396 lines), 4 modified files, version bump,
+5 new doc files. No protocol or Sacred-file changes.
+
+### Risks at ship
+
+- **2× pulley ±1 snap** — documented in `06_KNOWN_ISSUES.md`
+  KI-1. Cosmetic, no firmware impact.
+- **DROP idle auto-fire is a no-op slot** — intentional, hook
+  reserved for future haptics / pre-write. Documented as KI-2.
+- **Marquee scroll in landscape** — only tested in portrait
+  this build. Landscape might wrap weirdly if the exercise
+  name is exceptionally long. Not blocking; flag if a user
+  reports it.

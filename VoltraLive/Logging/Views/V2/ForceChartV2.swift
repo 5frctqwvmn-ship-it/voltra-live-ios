@@ -1,28 +1,37 @@
 // ForceChartV2.swift
 //
-// b55 (v0.4.33): V2-only force chart. Three rendering modes:
+// b57 V3 — UI Layout V3 force-curve rewrite (§1 + §1a).
+//
+// THREE rendering modes (same as b56):
 //
 //   1. ACTIVE — `samples` non-empty, `resting == false`
-//      Phase-segmented polyline of the last 30s of force history.
-//      Each consecutive run of same-phase samples is drawn as a single
-//      polyline in that phase's color (PULL teal / RETURN orange /
-//      TRANSITION blue / IDLE dim). A small filled circle marks the
-//      most recent (rightmost) tip in the current phase color.
+//      Phase-segmented polylines. b57 §1a: instead of one 30s scrolling
+//      polyline, the canvas now overlays ALL reps in the current set.
+//      Each rep is sliced from the sample stream by phase-boundary
+//      detection and re-mapped to the SAME 0..1 normalized x-axis so
+//      they superimpose. The newest rep renders at full opacity in the
+//      current phase color; older reps fade per
+//        opacity = max(0.10, 1 / (1 + ln(repsAgo + 1)))
+//      and are clipped at 8 visible reps. Pattern follows Tonal's
+//      "set-history overlay" — fatigue shows up as shape decay across
+//      reps. Falls back to a single polyline if the slicer can't find
+//      rep boundaries (e.g. one continuous pull).
 //
 //   2. RESTING — `resting == true`
-//      Empty chart. Only the dashed BOTTOM marker line + label.
+//      Empty chart. Only the dashed BOTTOM marker line + label. The
+//      rep-history stack is implicitly cleared because `samples` will
+//      be the post-finalize buffer (lastFinalizedSamples) and the next
+//      set start clears it.
 //
 //   3. IDLE-NO-DATA — `resting == false` and `samples` empty
 //      Sparse 5-sample ramp from x≈0 up to ~14% of the chart width,
-//      anchored to BOTTOM, colored by `idlePhase`. This matches the
-//      reference screenshots where an idle Voltra still shows a tiny
-//      "alive" up-tick on the chart so the user knows the line is
-//      plumbed through. Mirrors the web preview's `buildForceHistory`
-//      function which generates 5 samples ramping 0 → peak.
+//      anchored to BOTTOM, colored by `idlePhase`.
 //
-// All three modes draw the BOTTOM dashed reference line in danger color
-// at 50% opacity. The chart canvas is a fixed 175pt tall (matches the
-// web preview h=175) and stretches to fill the parent's width.
+// b57 §1: Y-axis is now driven by `yAxisMaxLb` from the parent and a
+// 1.5s ease replaces the b56 0.35s rescale. Parent computes
+//   yMax = max(working, working+ECC, working+CHAIN) × 1.2  (floor 60)
+// so eccentric or chain-add never clips. The longer ease prevents
+// "breathing" between reps.
 //
 // IMPORTANT — sacred-files boundary: this view is read-only on the
 // telemetry stream. It does NOT mutate samples, does NOT call into
@@ -30,6 +39,7 @@
 // It just renders whatever `samples` the caller hands it.
 
 import SwiftUI
+import Foundation
 
 struct ForceChartV2: View {
 
@@ -39,7 +49,8 @@ struct ForceChartV2: View {
     /// if no live set is in progress. May be empty.
     let samples: [ForceSample]
 
-    /// Peak force seen in this set (used to scale the y-axis).
+    /// Peak force seen in this set (used to scale the y-axis if it
+    /// exceeds `yAxisMaxLb`).
     let peakLb: Double
 
     /// True when a rest window is engaged (post-finalize). When true, we
@@ -50,13 +61,11 @@ struct ForceChartV2: View {
     /// and we're not resting. Typically `ble.telemetry.phase`.
     let idlePhase: VoltraPhase
 
-    /// b56: Y-axis ceiling in lb, supplied by the parent. Drives the
+    /// b57 §1: Y-axis ceiling in lb, supplied by the parent. Drives the
     /// active-mode polyline scaling AND the idle-ramp scaling so both
     /// modes share the same vertical reference. Parent computes this as
-    /// `max(workingWeight, eccEffective) \u00d7 1.3` (with reasonable headroom),
-    /// then animates the change so the line doesn't pop.
-    /// Defaults to 160 to match the b55 hardcoded value if a parent hasn't
-    /// yet been migrated.
+    /// `max(working, working+ECC, working+CHAIN) × 1.2` with a 60 lb
+    /// floor for headroom on light loads.
     let yAxisMaxLb: Double
 
     init(
@@ -73,14 +82,11 @@ struct ForceChartV2: View {
         self.yAxisMaxLb = yAxisMaxLb
     }
 
-    // MARK: Tunables (mirror web preview)
+    // MARK: Tunables
 
-    /// b55 hard floor for the y-axis denominator so an early-set rep with a
-    /// small peak still draws within the chart instead of slamming into
-    /// the top edge. b56: superseded by `yAxisMaxLb` (passed in by parent),
-    /// but retained as a defensive floor in `activeChart` so legacy
-    /// callers that pass `yAxisMaxLb = 0` don't divide by zero.
-    private let maxFCeiling: Double = 160
+    /// Defensive floor for the y-axis denominator — ensures an unloaded
+    /// preview / idle screen still draws within sensible bounds.
+    private let minYDenom: Double = 60
 
     /// Inner padding inside the SVG-equivalent viewBox.
     private let pad: CGFloat = 8
@@ -89,6 +95,9 @@ struct ForceChartV2: View {
     /// inherited from the parent via a GeometryReader.
     private let canvasHeight: CGFloat = 175
 
+    /// Max number of overlaid reps. Past this they blend into noise.
+    private let repOverlayCap: Int = 8
+
     // MARK: Body
 
     var body: some View {
@@ -96,10 +105,11 @@ struct ForceChartV2: View {
             let w = geo.size.width
             let h = canvasHeight
             ZStack(alignment: .topLeading) {
-                // b56: smooth y-axis rescale animation when yAxisMaxLb
-                // changes (e.g. user nudges ECC, working weight changes).
+                // b57 §1: smoother y-axis rescale (1.5s ease) so the
+                // chart doesn't "breathe" between reps when ECC nudges
+                // the ceiling up/down within a set.
                 Color.clear
-                    .animation(.easeInOut(duration: 0.35), value: yAxisMaxLb)
+                    .animation(.easeInOut(duration: 1.5), value: yAxisMaxLb)
                 // BOTTOM dashed marker (always present, all three modes)
                 bottomMarker(width: w, height: h)
 
@@ -110,7 +120,7 @@ struct ForceChartV2: View {
                     // mode 3: synthetic idle ramp (5 samples, leftmost ~14% of width)
                     idleRamp(width: w, height: h)
                 } else {
-                    // mode 1: phase-segmented polyline of last 30s
+                    // mode 1: rep-history overlay (b57 §1a)
                     activeChart(samples: samples, width: w, height: h)
                 }
             }
@@ -144,9 +154,7 @@ struct ForceChartV2: View {
 
     @ViewBuilder
     private func idleRamp(width w: CGFloat, height h: CGFloat) -> some View {
-        // 5 samples ascending from 0 to a phase-typical peak. Mirrors the
-        // web preview: PULL → ~86 lb peak, RETURN → ~120 lb, anything else
-        // → small dim teal up-tick (~60 lb).
+        // 5 samples ascending from 0 to a phase-typical peak.
         let phasePeak: Double = {
             switch idlePhase {
             case .pull:   return 86
@@ -156,9 +164,9 @@ struct ForceChartV2: View {
         }()
 
         let n = 5
-        // b56: scale the idle ramp against the SAME y-axis the active mode
-        // uses (yAxisMaxLb), with the b55 ceiling as a defensive floor.
-        let denom = max(maxFCeiling, yAxisMaxLb)
+        // b57 §1: scale the idle ramp against the SAME y-axis the active
+        // mode uses (yAxisMaxLb), with the defensive floor.
+        let denom = max(minYDenom, yAxisMaxLb)
         let pts: [CGPoint] = (0..<n).map { i in
             let force = (Double(i) / Double(n - 1)) * phasePeak
             // Sparse: i / 28 of (w - 2*pad) — anchors leftmost ~14% of chart
@@ -188,27 +196,139 @@ struct ForceChartV2: View {
         }
     }
 
-    // MARK: - Mode 1 — active phase-segmented chart
+    // MARK: - Mode 1 — active rep-history overlay (b57 §1a)
 
     @ViewBuilder
     private func activeChart(samples: [ForceSample], width w: CGFloat, height h: CGFloat) -> some View {
-        // Use the last 30 seconds of samples. Use peakLb (caller-supplied)
-        // OR samples' max OR maxFCeiling — whichever is largest — to pick
-        // the y-axis denominator so spikes fit.
+        // Y-axis denominator: parent-supplied yAxisMaxLb is the primary
+        // driver. We still floor at the defensive minimum and ceiling-
+        // bump for transient spikes above the planned ceiling.
+        let observed = max(peakLb, samples.map { $0.forceLb }.max() ?? 0)
+        let denom = max(max(minYDenom, yAxisMaxLb), observed)
+
+        // Slice samples into reps by phase boundaries. A "rep" is the
+        // span between two consecutive starts of pull/return after an
+        // idle gap. Newest rep is the last entry.
+        let reps = sliceIntoReps(samples)
+
+        if reps.isEmpty {
+            // Fallback: single continuous polyline of the whole sample
+            // buffer mapped to 0..1 across the canvas. Keeps the chart
+            // alive when the slicer can't find rep boundaries (e.g. one
+            // long isometric hold).
+            singlePolyline(samples: samples, width: w, height: h, denom: denom)
+        } else {
+            // Render up to repOverlayCap reps, oldest first so newest
+            // ends up on top in z-order.
+            let visible = Array(reps.suffix(repOverlayCap))
+            ForEach(Array(visible.enumerated()), id: \.offset) { idx, rep in
+                let repsAgo = visible.count - 1 - idx
+                let opacity = fadeOpacity(repsAgo: repsAgo)
+                repPolyline(rep: rep, width: w, height: h, denom: denom, opacity: opacity)
+            }
+
+            // Tip dot — pinned to the most recent sample of the most
+            // recent rep, in current phase color. Anchors the eye.
+            if let last = visible.last,
+               let tip  = last.last {
+                let nx = normalizedX(rep: last, sample: tip)
+                let x = pad + CGFloat(nx) * (w - 2 * pad)
+                let y = h - pad - CGFloat(tip.forceLb / denom) * (h - 2 * pad - 8)
+                Circle()
+                    .fill(VoltraColor.phase(tip.phase))
+                    .frame(width: 7, height: 7)
+                    .position(x: x, y: y)
+            }
+        }
+    }
+
+    /// b57 §1a: opacity = max(0.10, 1 / (1 + ln(repsAgo + 1))).
+    /// repsAgo == 0 → 1.0 (newest, full opacity)
+    /// repsAgo == 1 → 1 / (1 + ln(2)) ≈ 0.59
+    /// repsAgo == 4 → 1 / (1 + ln(5)) ≈ 0.38
+    /// repsAgo == 7 → 1 / (1 + ln(8)) ≈ 0.32
+    /// Clamped at 0.10 so deepest history is still faintly visible.
+    private func fadeOpacity(repsAgo: Int) -> Double {
+        guard repsAgo > 0 else { return 1.0 }
+        let raw = 1.0 / (1.0 + log(Double(repsAgo + 1)))
+        return max(0.10, raw)
+    }
+
+    /// Sliced reps. Each entry is a `[ForceSample]` containing the samples
+    /// for that rep, in chronological order. A new rep starts when the
+    /// phase transitions from idle (or a long gap) into pull/return AND
+    /// the prior rep saw at least one non-idle sample. Returns at most
+    /// the most recent ~12 reps to bound work.
+    private func sliceIntoReps(_ samples: [ForceSample]) -> [[ForceSample]] {
+        guard !samples.isEmpty else { return [] }
+        var out: [[ForceSample]] = []
+        var cur: [ForceSample] = []
+        var curHasWork: Bool = false   // true when current rep has seen pull/return
+        var lastWasIdle: Bool = true
+
+        for s in samples {
+            let isIdle = (s.phase == .idle)
+            let isWork = (s.phase == .pull || s.phase == .return)
+            // Boundary: idle → working transition AND current rep already
+            // has some work in it. Cut here.
+            if lastWasIdle && isWork && curHasWork {
+                out.append(cur)
+                cur = []
+                curHasWork = false
+            }
+            cur.append(s)
+            if isWork { curHasWork = true }
+            lastWasIdle = isIdle
+        }
+        if !cur.isEmpty { out.append(cur) }
+        // Bound: only keep the last 12 (we'll show up to 8).
+        if out.count > 12 { out = Array(out.suffix(12)) }
+        return out
+    }
+
+    /// Map a sample within a rep to a normalized x ∈ [0, 1] over the rep's
+    /// own duration. If the rep has only one sample, returns 0.
+    private func normalizedX(rep: [ForceSample], sample: ForceSample) -> Double {
+        guard let first = rep.first?.timestamp,
+              let last  = rep.last?.timestamp,
+              last > first else { return 0 }
+        let span = last.timeIntervalSince(first)
+        let dt   = sample.timestamp.timeIntervalSince(first)
+        return max(0, min(1, dt / span))
+    }
+
+    /// Render one rep's polyline with phase-segmented coloring and the
+    /// supplied opacity. Same phase-segmentation logic as the b56
+    /// activeChart, but now over the rep's normalized 0..1 x-axis.
+    @ViewBuilder
+    private func repPolyline(rep: [ForceSample], width w: CGFloat, height h: CGFloat, denom: Double, opacity: Double) -> some View {
+        let pts: [(x: CGFloat, y: CGFloat, phase: VoltraPhase)] = rep.map { s in
+            let nx = normalizedX(rep: rep, sample: s)
+            let x = pad + CGFloat(nx) * (w - 2 * pad)
+            let y = h - pad - CGFloat(s.forceLb / denom) * (h - 2 * pad - 8)
+            return (x, y, s.phase)
+        }
+        let segments = phaseSegment(points: pts)
+        ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
+            Path { p in
+                guard let first = seg.points.first else { return }
+                p.move(to: first)
+                for pt in seg.points.dropFirst() { p.addLine(to: pt) }
+            }
+            .stroke(
+                VoltraColor.phase(seg.phase).opacity(opacity),
+                style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
+            )
+        }
+    }
+
+    /// Fallback when slicer returns nothing — render the whole sample
+    /// buffer as a single 30s-window polyline (matches b56 behavior).
+    @ViewBuilder
+    private func singlePolyline(samples: [ForceSample], width w: CGFloat, height h: CGFloat, denom: Double) -> some View {
         let now = samples.last?.timestamp ?? Date()
         let windowStart = now.addingTimeInterval(-30)
         let recent = samples.filter { $0.timestamp >= windowStart }
-        // b56: parent-supplied yAxisMaxLb is the primary y-axis driver
-        // (= max(workingLb, eccEffective) \u00d7 1.3). We still take the max
-        // against peakLb / observed samples so a transient spike above the
-        // planned ceiling still fits.
-        let denom = max(
-            max(maxFCeiling, yAxisMaxLb),
-            max(peakLb, recent.map { $0.forceLb }.max() ?? 0)
-        )
-
-        // Map each sample to (x, y, phase). x is normalized over the 30s
-        // window so the chart always feels like it's scrolling left.
         let pts: [(x: CGFloat, y: CGFloat, phase: VoltraPhase)] = recent.map { s in
             let dt = max(0, min(30, s.timestamp.timeIntervalSince(windowStart)))
             let nx = CGFloat(dt / 30)
@@ -216,31 +336,7 @@ struct ForceChartV2: View {
             let y = h - pad - CGFloat(s.forceLb / denom) * (h - 2 * pad - 8)
             return (x, y, s.phase)
         }
-
-        // Phase-segmented runs. Each transition starts a new segment but
-        // includes the boundary point in BOTH segments so the line stays
-        // continuous (no gap between teal and orange runs).
-        let segments: [(phase: VoltraPhase, points: [CGPoint])] = {
-            guard let first = pts.first else { return [] }
-            var out: [(VoltraPhase, [CGPoint])] = []
-            var curPhase = first.phase
-            var curPoints: [CGPoint] = [CGPoint(x: first.x, y: first.y)]
-            for i in 1..<pts.count {
-                let p = pts[i]
-                if p.phase != curPhase {
-                    // close current segment with the boundary point
-                    curPoints.append(CGPoint(x: p.x, y: p.y))
-                    out.append((curPhase, curPoints))
-                    curPhase = p.phase
-                    curPoints = [CGPoint(x: p.x, y: p.y)]
-                } else {
-                    curPoints.append(CGPoint(x: p.x, y: p.y))
-                }
-            }
-            out.append((curPhase, curPoints))
-            return out
-        }()
-
+        let segments = phaseSegment(points: pts)
         ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
             Path { p in
                 guard let first = seg.points.first else { return }
@@ -252,13 +348,35 @@ struct ForceChartV2: View {
                 style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round)
             )
         }
-
         if let tip = pts.last {
             Circle()
                 .fill(VoltraColor.phase(tip.phase))
                 .frame(width: 7, height: 7)
                 .position(x: tip.x, y: tip.y)
         }
+    }
+
+    /// Group consecutive same-phase points into runs. Each run includes
+    /// the boundary point in BOTH segments so the line stays continuous
+    /// (no visual gap between teal and orange runs).
+    private func phaseSegment(points: [(x: CGFloat, y: CGFloat, phase: VoltraPhase)]) -> [(phase: VoltraPhase, points: [CGPoint])] {
+        guard let first = points.first else { return [] }
+        var out: [(VoltraPhase, [CGPoint])] = []
+        var curPhase = first.phase
+        var curPoints: [CGPoint] = [CGPoint(x: first.x, y: first.y)]
+        for i in 1..<points.count {
+            let p = points[i]
+            if p.phase != curPhase {
+                curPoints.append(CGPoint(x: p.x, y: p.y))
+                out.append((curPhase, curPoints))
+                curPhase = p.phase
+                curPoints = [CGPoint(x: p.x, y: p.y)]
+            } else {
+                curPoints.append(CGPoint(x: p.x, y: p.y))
+            }
+        }
+        out.append((curPhase, curPoints))
+        return out
     }
 }
 

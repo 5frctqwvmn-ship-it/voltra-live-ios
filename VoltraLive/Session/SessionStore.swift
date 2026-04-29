@@ -129,9 +129,15 @@ final class SessionStore: ObservableObject {
             currentDropReps = currentSet!.reps - dropRepBaseline
         }
 
-        // Set-complete heuristic (verbatim logic from app.js)
+        // Set-complete heuristic (verbatim logic from app.js).
+        // b57 V3 §6: also accept `cs.peakLb > 10` so the first set can
+        // finalize even if the BLE rep counter never propagated. Prior
+        // to this fix the very first set after app launch sometimes
+        // skipped the rest timer because reps stayed 0 — the idle
+        // detector was correctly observing idle+force-low but bailing
+        // on the rep gate.
         if let cs = currentSet,
-           phase == .idle && forceLb < 5 && cs.reps > 0 {
+           phase == .idle && forceLb < 5 && (cs.reps > 0 || cs.peakLb > 10) {
             if idleSince == nil { idleSince = now }
             if let since = idleSince, now.timeIntervalSince(since) >= IDLE_GRACE_MS {
                 // v0.4.5: in drop-set mode, defer to the boundary callback.

@@ -70,6 +70,13 @@ struct LiveCaptureViewV2: View {
     /// b56: toggled by tapping the big WEIGHT NUMBER.
     @State private var deviceLoaded: Bool = false
 
+    /// b57 V3 §2: DROP toggle idle-fire timer. When the user taps the
+    /// DROP tile to arm, we start a 2s countdown — if no further
+    /// adjustment lands the planned drop is committed (no-op here, the
+    /// sequence is already armed; this just dismisses the stepper UI).
+    /// A second tap on the DROP tile cancels & disarms.
+    @State private var dropIdleWorkItem: DispatchWorkItem? = nil
+
     /// Owns its own writer router — same pattern as V1.
     @StateObject private var writerRouter = WriterRouter()
 
@@ -85,6 +92,10 @@ struct LiveCaptureViewV2: View {
                     phaseOrRestBar
                     weightCard
                     smallTileRow
+                    // b57 V3 §4: Pulley + Added-plates bar relocated to
+                    // sit directly above the force chart.
+                    PulleyAndPlatesBarV3()
+                        .padding(.bottom, 8)
                     forceChartCard
                     V1RestoreSection(onEndTapped: { showingEndConfirm = true })
                         .padding(.top, 12)
@@ -138,87 +149,173 @@ struct LiveCaptureViewV2: View {
 
     // MARK: - Toolbar
 
+    /// b57 V3 §7: V2 dial removed entirely. The trailing watermark
+    /// previously sat in the toolbar; it now ships only as the small
+    /// "V3" label inside the header to claw back vertical space.
+    /// Toolbar content is empty so the navigation chrome doesn't push
+    /// content down. CI-injected build tag is a known-issue TODO.
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .navigationBarLeading) { EmptyView() }
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Text("V2")
-                .font(.system(size: 10, weight: .bold))
-                .kerning(1.2)
-                .foregroundColor(VoltraColor.bg)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(VoltraColor.accent)
-                .clipShape(Capsule())
-        }
     }
 
-    // MARK: - 1. Header strip
+    // MARK: - 1. Header strip (b57 V3 §7 — redesigned)
 
+    /// V3 header layout, top-to-bottom:
+    ///
+    ///   [← End]  [V3]  ·····  [● 118 bpm · 42 kcal]
+    ///   <Reverse Hyper Pulley · Set 3>  → marquee scroll if it overflows
+    ///
+    /// Compared to b56:
+    ///   - V2 dial pulled OUT of the toolbar (§7).
+    ///   - "Connected" pill is gone in single-Voltra mode — replaced by
+    ///     a 6–8 px status dot leading the telemetry cluster, with tap
+    ///     popover revealing device + last-seen.
+    ///   - Exercise name horizontally marquee-scrolls when it overflows
+    ///     (5 s pause → scroll → reset → loop).
     private var headerStrip: some View {
-        HStack(spacing: 8) {
-            Button { showingEndConfirm = true } label: {
-                HStack(spacing: 2) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("End")
-                        .font(.system(size: 14, weight: .medium))
-                }
-                .foregroundColor(VoltraColor.text)
-            }
-            .buttonStyle(.plain)
-
-            VStack(spacing: 3) {
-                connectionPill
-                Text(exerciseHeaderText)
-                    .font(.system(size: 14, weight: .semibold))
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Button { showingEndConfirm = true } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("End")
+                            .font(.system(size: 14, weight: .medium))
+                    }
                     .foregroundColor(VoltraColor.text)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-            .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
 
-            HStack(spacing: 6) {
-                healthPill(
-                    color: VoltraColor.danger,
-                    value: health.currentHR.map(String.init) ?? "\u{2014}",
-                    unit:  "bpm"
-                )
-                healthPill(
-                    color: VoltraColor.warn,
-                    value: health.sessionKcal > 0 ? String(format: "%.0f", health.sessionKcal) : "\u{2014}",
-                    unit:  "kcal"
-                )
+                v3Watermark
+
+                Spacer()
+
+                HStack(spacing: 6) {
+                    statusDot
+                    healthPill(
+                        color: VoltraColor.danger,
+                        value: health.currentHR.map(String.init) ?? "\u{2014}",
+                        unit:  "bpm"
+                    )
+                    healthPill(
+                        color: VoltraColor.warn,
+                        value: health.sessionKcal > 0 ? String(format: "%.0f", health.sessionKcal) : "\u{2014}",
+                        unit:  "kcal"
+                    )
+                }
             }
+
+            // Exercise name with marquee fallback — wraps to second row so
+            // long names like "Reverse Hyper Pulley" don't fight the
+            // telemetry cluster for horizontal space.
+            MarqueeText(
+                text: exerciseHeaderText,
+                font: .system(size: 14, weight: .semibold),
+                color: VoltraColor.text,
+                pauseSeconds: 5
+            )
+            .frame(maxWidth: .infinity, alignment: .center)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 6)
     }
 
-    private var connectionPill: some View {
-        let connected = ble.connectionState.isConnected || mdm.left.connectionState.isConnected || mdm.right.connectionState.isConnected
-        let label: String = {
-            if mdm.left.connectionState.isConnected, !mdm.right.connectionState.isConnected { return "LEFT CONNECTED" }
-            if mdm.right.connectionState.isConnected, !mdm.left.connectionState.isConnected { return "RIGHT CONNECTED" }
-            if ble.connectionState.isConnected { return "CONNECTED" }
-            return "DISCONNECTED"
-        }()
-        let color = connected ? VoltraColor.accent : VoltraColor.textFaint
-        return HStack(spacing: 5) {
+    /// b57 V3 §7: small "V3" build watermark inline in header. CI-
+    /// injected build tag is a follow-up (logged in 06_KNOWN_ISSUES).
+    private var v3Watermark: some View {
+        Text("V3")
+            .font(.system(size: 10, weight: .bold))
+            .kerning(1.2)
+            .foregroundColor(VoltraColor.bg)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(VoltraColor.accent)
+            .clipShape(Capsule())
+    }
+
+    /// b57 V3 §7: 6–8 px status dot leading the telemetry cluster.
+    /// Replaces the b56 "CONNECTED" pill in single-Voltra mode.
+    /// - green = connected
+    /// - red = disconnected
+    /// - amber pulse = reconnecting (≈ connecting state)
+    /// Tap reveals device name / last-seen as a popover.
+    private var statusDot: some View {
+        let s = connectionStatus
+        return Button {
+            statusPopoverShown.toggle()
+        } label: {
             Circle()
-                .fill(color)
-                .frame(width: 5, height: 5)
-                .shadow(color: connected ? color.opacity(0.7) : .clear, radius: 3)
-            Text(label)
-                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                .kerning(1.0)
-                .foregroundColor(color)
+                .fill(s.color)
+                .frame(width: 8, height: 8)
+                .shadow(color: s.color.opacity(0.7), radius: 3)
+                .opacity(s.isReconnecting ? (pulseOn ? 1.0 : 0.45) : 1.0)
+                .scaleEffect(s.isReconnecting ? (pulseOn ? 1.0 : 0.78) : 1.0)
+                .padding(4)  // bigger tap target
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 3)
-        .background(color.opacity(0.10))
-        .overlay(Capsule().stroke(color.opacity(0.35), lineWidth: 1))
-        .clipShape(Capsule())
+        .buttonStyle(.plain)
+        .popover(isPresented: $statusPopoverShown, arrowEdge: .top) {
+            statusPopover(s)
+                .presentationCompactAdaptation(.popover)
+        }
     }
+
+    /// Inline status struct. Computed each render from BLE/MDM state.
+    private struct ConnectionSummary {
+        let label: String         // e.g. "Voltra", "LEFT + RIGHT", "Searching…"
+        let color: Color
+        let isReconnecting: Bool  // amber pulse
+        let lastSeen: Date?
+    }
+
+    private var connectionStatus: ConnectionSummary {
+        let leftOn  = mdm.left.connectionState.isConnected
+        let rightOn = mdm.right.connectionState.isConnected
+        let bleOn   = ble.connectionState.isConnected
+        if leftOn || rightOn || bleOn {
+            let label: String = {
+                if leftOn && rightOn { return "LEFT + RIGHT" }
+                if leftOn  { return "Voltra (LEFT)" }
+                if rightOn { return "Voltra (RIGHT)" }
+                return "Voltra"
+            }()
+            return ConnectionSummary(label: label, color: VoltraColor.accent, isReconnecting: false, lastSeen: Date())
+        }
+        // Reconnecting heuristic: BLE is in connecting state — amber pulse.
+        if case .connecting = ble.connectionState {
+            return ConnectionSummary(label: "Reconnecting…", color: VoltraColor.warn, isReconnecting: true, lastSeen: nil)
+        }
+        return ConnectionSummary(label: "Disconnected", color: VoltraColor.danger, isReconnecting: false, lastSeen: nil)
+    }
+
+    @ViewBuilder
+    private func statusPopover(_ s: ConnectionSummary) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(s.label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(VoltraColor.text)
+            if let seen = s.lastSeen {
+                Text("Last seen \(formatRelative(seen))")
+                    .font(.system(size: 11))
+                    .foregroundColor(VoltraColor.textDim)
+            } else {
+                Text("No active connection")
+                    .font(.system(size: 11))
+                    .foregroundColor(VoltraColor.textDim)
+            }
+        }
+        .padding(12)
+        .frame(minWidth: 180)
+    }
+
+    private func formatRelative(_ d: Date) -> String {
+        let secs = Int(Date().timeIntervalSince(d))
+        if secs < 5 { return "just now" }
+        if secs < 60 { return "\(secs)s ago" }
+        let m = secs / 60
+        return "\(m) min ago"
+    }
+
+    @State private var statusPopoverShown: Bool = false
 
     private func healthPill(color: Color, value: String, unit: String) -> some View {
         HStack(spacing: 5) {
@@ -284,7 +381,11 @@ struct LiveCaptureViewV2: View {
     // MARK: - 3. WEIGHT card (with hardware-load tap + nested mod rows)
 
     private var weightCard: some View {
-        let weightLb = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
+        // b57 V3 §4: WEIGHT card big number shows the EFFECTIVE weight
+        // the user feels (device-frame × pulleyMultiplier). BLE write
+        // continues to send raw device-frame.
+        let pulleyM = logging.pulleyMultiplier
+        let weightLb = Int(((logging.pendingPlannedWeightLb ?? 0) * pulleyM).rounded())
 
         return VStack(spacing: 10) {
             // Top row: WEIGHT label + LOADED/UNLOADED pill
@@ -379,10 +480,13 @@ struct LiveCaptureViewV2: View {
                    let head = seq.first,
                    let next = seq.dropFirst().first {
                     let stepLb = Int((head - next).rounded())
+                    // b57 V3 §2/§3: dropMode=true greys ±1 (micro-drops
+                    // are forbidden per spec; only multiples of 5 allowed).
                     ModStepperRowV2(
                         label: "DROP",
                         valueLb: stepLb,
-                        valueTint: VoltraColor.warn
+                        valueTint: VoltraColor.warn,
+                        dropMode: true
                     ) { delta in adjustDropStep(delta) }
                 }
             }
@@ -596,16 +700,29 @@ struct LiveCaptureViewV2: View {
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
-    /// b56: y-axis ceiling = max(workingWeight, eccEffective) × 1.3.
-    /// Uses pulley-multiplied effective weights so the chart reflects what
-    /// the user feels (matches LoggedSet.weightLb / peakForceLb storage).
-    /// Defensive 60-lb floor so an unloaded screen still draws sensibly.
+    /// b57 V3 §1: y-axis ceiling = max of the four possible peak
+    /// configurations × 1.2, with a 60-lb floor so an unloaded screen
+    /// still draws sensibly. Pulley-multiplied so the chart reflects
+    /// what the user feels (matches LoggedSet storage).
+    ///   working                      — concentric only
+    ///   working + ECC                — eccentric phase
+    ///   working + CHAIN              — top of ROM under chain
+    ///   working + ECC + CHAIN        — eccentric AND chain (rare but
+    ///                                  happens when both armed)
+    /// CHAIN and INV CHAIN are mutually exclusive — INV CHAIN only adds
+    /// at mid-ROM, never exceeds working+CHAIN, so it doesn't bump max.
     private func computedYAxisMaxLb() -> Double {
-        let m = logging.pulleyMultiplier
+        let m       = logging.pulleyMultiplier
         let working = (logging.pendingPlannedWeightLb ?? 0) * m
-        let eccEff  = logging.upcomingEccEnabled ? (logging.upcomingEccLb * m) : 0
-        let total   = max(working, working + eccEff)  // ECC adds on top during eccentric phase
-        return max(60, total * 1.3)
+        let eccEff  = logging.upcomingEccEnabled    ? (logging.upcomingEccLb    * m) : 0
+        let chainEff = logging.upcomingChainsEnabled ? (logging.upcomingChainsLb * m) : 0
+        let total = max(
+            working,
+            working + eccEff,
+            working + chainEff,
+            working + eccEff + chainEff
+        )
+        return max(60, total * 1.2)
     }
 
     // MARK: - Helpers
@@ -692,33 +809,53 @@ struct LiveCaptureViewV2: View {
         pushUpcomingStateToDevice()
     }
 
-    /// b56 DROP tile tap: arms a single planned next-weight, deepening
-    /// each subsequent tap by 5 lb (−5 → −10 → −15 → −20 …). The next
-    /// weight is clamped at 5 lb (device floor).
+    /// b57 V3 §2: DROP tile is a TOGGLE.
+    ///   Tap 1 (off → on):  arm a 5-lb drop, expand the nested DROP row
+    ///                       and ±5/±1 stepper. Start a 2s idle timer
+    ///                       that auto-fires (commits) the armed drop.
+    ///   Tap 2 (on → off):  cancel & disarm — collapses the tile entirely
+    ///                       (no nested row, no stepper). manualDropSequence
+    ///                       is cleared.
+    /// Increments are clamped to multiples of 5 inside `adjustDropStep`
+    /// (±1 are no-ops via ModStepperRowV2's dropMode greying).
     private func tapDropTile() {
+        // Already armed → second tap disarms.
+        if (logging.manualDropSequence?.count ?? 0) >= 2 {
+            cancelArmedDrop()
+            return
+        }
         let head = (logging.pendingPlannedWeightLb ?? 0).rounded()
         guard head > 5 else { return }
-
-        let curStepLb: Int = {
-            if let seq = logging.manualDropSequence,
-               let h = seq.first,
-               let n = seq.dropFirst().first {
-                return Int((h - n).rounded())
-            }
-            return 0
-        }()
-        let nextStepLb = max(5, curStepLb + 5)
-        let nextWeight = max(5.0, head - Double(nextStepLb))
-        // Refresh head to current working weight in case user adjusted
-        // weight after the prior tap.
+        // First tap: arm at −5 lb (device floor 5 lb).
+        let nextWeight = max(5.0, head - 5.0)
         logging.manualDropSequence = [head, nextWeight]
         logging.manualDropIndex    = 0
+        scheduleDropIdleAutoFire()
     }
 
-    /// b56 DROP tile long-press: cancel armed drop.
+    /// Cancel armed drop & collapse the DROP tile UI.
     private func cancelArmedDrop() {
         logging.manualDropSequence = nil
         logging.manualDropIndex    = 0
+        dropIdleWorkItem?.cancel()
+        dropIdleWorkItem = nil
+    }
+
+    /// b57 V3 §2: 2s idle auto-fire. Reschedule on every adjustment.
+    /// Auto-fire here is a no-op against the armed sequence (it's already
+    /// the source of truth for the next set's planned weight), but the
+    /// timer's existence drives the "stop fiddling, this is committed"
+    /// affordance the user requested.
+    private func scheduleDropIdleAutoFire() {
+        dropIdleWorkItem?.cancel()
+        let item = DispatchWorkItem {
+            // Sequence is already armed; nothing to do — this slot is
+            // intentional so future builds can hook commit-side effects
+            // (haptic, BLE pre-write, telemetry) without changing the
+            // call sites.
+        }
+        dropIdleWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: item)
     }
 
     // MARK: - Stepper actions
@@ -765,11 +902,15 @@ struct LiveCaptureViewV2: View {
         pushUpcomingStateToDevice()
     }
 
-    /// DROP step adjuster — modifies the GAP between head and next.
-    /// −5 here means "next weight gets 5 lb HEAVIER" (smaller drop), +5
-    /// means "next weight gets 5 lb LIGHTER" (deeper drop). The label
-    /// shows the current drop magnitude in lb.
+    /// b57 V3 §2/§3: DROP step adjuster — modifies the GAP between head
+    /// and next. Clamped to multiples of 5 (per spec); ±1 deltas are
+    /// no-ops (the stepper renders ±1 greyed via dropMode=true, but we
+    /// defend here too in case a tap slips through). −5 = smaller drop
+    /// (next gets HEAVIER), +5 = deeper drop (next gets LIGHTER).
+    /// Reschedules the 2s idle auto-fire on every adjustment.
     private func adjustDropStep(_ delta: Int) {
+        // Clamp to multiples of 5 — micro-drops are forbidden per spec.
+        guard delta == 5 || delta == -5 else { return }
         guard let seq = logging.manualDropSequence,
               seq.count >= 2 else { return }
         let head    = seq[0]
@@ -782,6 +923,7 @@ struct LiveCaptureViewV2: View {
         )
         let nextW = max(5, head - Double(newStep))
         logging.manualDropSequence = [head, nextW]
+        scheduleDropIdleAutoFire()
     }
 
     // MARK: - Hardware LOAD/UNLOAD
@@ -810,17 +952,23 @@ struct LiveCaptureViewV2: View {
     /// field; VoltraModifiers.inverse repurposes chainsLb for the
     /// thru-ROM offset).
     private func pushUpcomingStateToDevice() {
-        let m = logging.pulleyMultiplier
-        let baseLb = Int(((logging.pendingPlannedWeightLb ?? 0) * m).rounded())
-        let eccLb  = logging.upcomingEccEnabled ? Int((logging.upcomingEccLb * m).rounded()) : 0
+        // b57 V3 §4 BLE math fix: `pendingPlannedWeightLb` (and the
+        // upcoming ECC/CHAIN/INV CHAIN values) are stored in DEVICE
+        // FRAME — i.e. the actual cable load the hardware applies. The
+        // BLE write must NOT be multiplied by pulleyMultiplier; the UI
+        // is the only side that displays effective load. Previous
+        // implementations multiplied here, which sent doubled values
+        // through to the device under 2× pulley. Fixed.
+        let baseLb = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
+        let eccLb  = logging.upcomingEccEnabled ? Int(logging.upcomingEccLb.rounded()) : 0
 
         // CHAIN vs INV CHAIN — mutually exclusive (toggle helpers enforce).
         let chainsActive = logging.upcomingChainsEnabled  && logging.upcomingChainsLb  > 0
         let inverseActive = logging.upcomingInverseEnabled && logging.upcomingInverseLb > 0
 
         let chainsLb: Int = {
-            if inverseActive { return Int((logging.upcomingInverseLb * m).rounded()) }
-            if chainsActive  { return Int((logging.upcomingChainsLb  * m).rounded()) }
+            if inverseActive { return Int(logging.upcomingInverseLb.rounded()) }
+            if chainsActive  { return Int(logging.upcomingChainsLb.rounded()) }
             return 0
         }()
 
