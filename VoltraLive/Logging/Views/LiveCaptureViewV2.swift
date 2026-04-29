@@ -1,5 +1,38 @@
 // LiveCaptureViewV2.swift
 //
+// b58 (v0.4.36): V4 spec — dropsets ported back to time-driven cascade,
+// Tonal-style force curve, weight-cell auto-fit, L/R + MERGE header strip
+// when 2 Voltras are connected, pulley grey-out in Twin Mode.
+//
+// V4 DROP behavior (b58, ports the b48 / aff322f time-cascade verbatim):
+//   - First tap arms the cascade — IMMEDIATELY fires drop #2 to the device
+//     (−5 lb / −5% via cascadeAnchoredDeviceWeight at tier 1) and starts a
+//     4 s recurring fuse + 10 s no-movement watchdog.
+//   - Subsequent taps WHILE ACTIVE bump the tier (5→10→15→5, mod 3) and
+//     fire an immediate drop at the new tier.
+//   - Telemetry activity (forceLb > 3 lb) resets BOTH the 4 s fuse and the
+//     10 s watchdog so the cable doesn't auto-drop mid-rep.
+//   - 10 s of no rep increment finalizes the chain and transitions the
+//     SessionStore to its normal rest-timer flow. Idle handler in
+//     SessionStore checks the dropset boundary callback BEFORE finalizing
+//     to a normal set — ordering is correct in SessionStore (line 146).
+//   - Long-press (0.8 s) cancels the cascade without finalizing the parent
+//     set (1.5 s arm-cooldown prevents the same gesture from re-arming).
+//   - DROP step buttons are clamped to multiples of 5 (±5 only; ±1 greyed)
+//     and bump the cascade tier rather than mutating a manual sequence.
+//
+// b56 originally introduced a `manualDropSequence` UI sequence that is
+// FINALIZE-driven (commits the queued next weight on rest-timer entry).
+// V4 deprecates that path entirely — it never actually dropped the device
+// weight mid-set, which is what the user wanted.
+//
+// V4 dual-Voltra: when MultiDeviceManager reports both .left and .right
+// connected, the header strip swaps to the L ⋆ MERGE ⋆ R unit selector.
+// Independent mode binds the screen's mod controls to the focused unit;
+// MERGE / Twin Mode mirrors every adjustment to BOTH units (auto twin sync)
+// and greys the pulley toggle (shared attachment doesn't allow pulley).
+// In single-Voltra sessions the header is unchanged from b57.
+//
 // b56 (v0.4.34): full rewrite of the V2 capture screen per the b56 design
 // drop. Locks the layout to the screenshot-driven spec:
 //
@@ -70,12 +103,18 @@ struct LiveCaptureViewV2: View {
     /// b56: toggled by tapping the big WEIGHT NUMBER.
     @State private var deviceLoaded: Bool = false
 
-    /// b57 V3 §2: DROP toggle idle-fire timer. When the user taps the
-    /// DROP tile to arm, we start a 2s countdown — if no further
-    /// adjustment lands the planned drop is committed (no-op here, the
-    /// sequence is already armed; this just dismisses the stepper UI).
-    /// A second tap on the DROP tile cancels & disarms.
+    /// b57 V3 §2: DROP toggle idle-fire timer. b58 V4 retired this in favor
+    /// of LoggingStore's time-driven cascade (`startDropSet`). Kept declared
+    /// only to avoid a churn-y diff if a future build wants finalize-driven
+    /// DROP back; unused at runtime in V4.
     @State private var dropIdleWorkItem: DispatchWorkItem? = nil
+
+    /// b58 V4: which Voltra the screen's mod controls are currently driving.
+    /// Defaults to `.left`; only matters when both `mdm.left` and `mdm.right`
+    /// are connected AND `mdm.workoutMode == .independent`. In `.combined`
+    /// (Twin Mode) every adjustment mirrors to both regardless of focus. In
+    /// single-Voltra sessions this is ignored.
+    @State private var focusedSlot: DeviceSlot = .left
 
     /// Owns its own writer router — same pattern as V1.
     @StateObject private var writerRouter = WriterRouter()
@@ -191,18 +230,28 @@ struct LiveCaptureViewV2: View {
 
                 Spacer()
 
-                HStack(spacing: 6) {
-                    statusDot
-                    healthPill(
-                        color: VoltraColor.danger,
-                        value: health.currentHR.map(String.init) ?? "\u{2014}",
-                        unit:  "bpm"
-                    )
-                    healthPill(
-                        color: VoltraColor.warn,
-                        value: health.sessionKcal > 0 ? String(format: "%.0f", health.sessionKcal) : "\u{2014}",
-                        unit:  "kcal"
-                    )
+                // b58 V4 §4: header telemetry cluster. When both Voltras are
+                // connected, swap to the L ⋆ MERGE ⋆ R unit selector with
+                // the kcal pill trailing. In Independent mode the focused
+                // side's status dot tints accent / the unfocused side dims.
+                // In Twin (combined) mode the [⇄ MERGE] tile lights up and
+                // the two side pills fuse into [● L+R total · max bpm].
+                if bothVoltrasConnected {
+                    dualHeaderCluster
+                } else {
+                    HStack(spacing: 6) {
+                        statusDot
+                        healthPill(
+                            color: VoltraColor.danger,
+                            value: health.currentHR.map(String.init) ?? "\u{2014}",
+                            unit:  "bpm"
+                        )
+                        healthPill(
+                            color: VoltraColor.warn,
+                            value: health.sessionKcal > 0 ? String(format: "%.0f", health.sessionKcal) : "\u{2014}",
+                            unit:  "kcal"
+                        )
+                    }
                 }
             }
 
@@ -317,6 +366,147 @@ struct LiveCaptureViewV2: View {
 
     @State private var statusPopoverShown: Bool = false
 
+    // MARK: - b58 V4 §4: dual-Voltra header cluster
+
+    /// `[● L bpm] [⇄ MERGE] [● R bpm] kcal`
+    /// Tapping a side dot focuses that unit (Independent only — Twin
+    /// always mirrors writes to both). Tapping MERGE flips between
+    /// `.independent` and `.combined`. The kcal pill trails unchanged.
+    /// In Twin mode the side dots fuse into a single [● L+R total · max]
+    /// pill before MERGE.
+    @ViewBuilder
+    private var dualHeaderCluster: some View {
+        if twinModeActive {
+            HStack(spacing: 6) {
+                fusedTwinPill
+                mergeButton
+                healthPill(
+                    color: VoltraColor.warn,
+                    value: health.sessionKcal > 0 ? String(format: "%.0f", health.sessionKcal) : "\u{2014}",
+                    unit:  "kcal"
+                )
+            }
+        } else {
+            HStack(spacing: 6) {
+                sideDot(slot: .left)
+                mergeButton
+                sideDot(slot: .right)
+                healthPill(
+                    color: VoltraColor.warn,
+                    value: health.sessionKcal > 0 ? String(format: "%.0f", health.sessionKcal) : "\u{2014}",
+                    unit:  "kcal"
+                )
+            }
+        }
+    }
+
+    /// Per-side dot + bpm pill. When `focusedSlot == slot` the dot tints
+    /// accent and the pill border highlights. Tap focuses this slot.
+    @ViewBuilder
+    private func sideDot(slot: DeviceSlot) -> some View {
+        let isFocused = (focusedSlot == slot)
+        let label = (slot == .left) ? "L" : "R"
+        Button {
+            // Switch focus only when Independent. Tapping a side in Twin
+            // is a no-op (writes already mirror) but we still allow it to
+            // bias which side's bpm reads in the fused pill, by storing
+            // focus regardless. WriterRouter routing is decided via
+            // focusOverrideAssignment which respects mdm.workoutMode.
+            focusedSlot = slot
+        } label: {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(isFocused ? VoltraColor.accent : VoltraColor.textDim)
+                    .frame(width: 7, height: 7)
+                    .shadow(
+                        color: isFocused ? VoltraColor.accent.opacity(0.7) : .clear,
+                        radius: isFocused ? 3 : 0
+                    )
+                Text(label)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(isFocused ? VoltraColor.text : VoltraColor.textDim)
+                Text(health.currentHR.map(String.init) ?? "\u{2014}")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundColor(VoltraColor.text)
+                Text("bpm")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(VoltraColor.textDim)
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(VoltraColor.bgElev2)
+            .overlay(
+                Capsule().stroke(
+                    isFocused ? VoltraColor.accent.opacity(0.55) : VoltraColor.border,
+                    lineWidth: 1
+                )
+            )
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// `[⇄ MERGE]` button. Tap toggles between `.independent` and
+    /// `.combined`. Reads pressed when `twinModeActive`.
+    @ViewBuilder
+    private var mergeButton: some View {
+        Button {
+            // Toggle. Both modes assume both sides connected (we only show
+            // this cluster under bothVoltrasConnected).
+            mdm.workoutMode = (mdm.workoutMode == .combined) ? .independent : .combined
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("MERGE")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.4)
+            }
+            .foregroundColor(twinModeActive ? VoltraColor.bg : VoltraColor.textDim)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(twinModeActive ? VoltraColor.accent : VoltraColor.bgElev2)
+            .overlay(
+                Capsule().stroke(
+                    twinModeActive ? VoltraColor.accent : VoltraColor.border,
+                    lineWidth: 1
+                )
+            )
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Fused L+R pill shown in Twin mode. Single dot, single bpm reading
+    /// (the screen still shows one HealthKit stream regardless of unit
+    /// count), but the label disambiguates so it doesn't read like a
+    /// single-Voltra session.
+    @ViewBuilder
+    private var fusedTwinPill: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(VoltraColor.accent)
+                .frame(width: 7, height: 7)
+                .shadow(color: VoltraColor.accent.opacity(0.7), radius: 3)
+            Text("L+R")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(VoltraColor.text)
+            Text(health.currentHR.map(String.init) ?? "\u{2014}")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .monospacedDigit()
+                .foregroundColor(VoltraColor.text)
+            Text("bpm")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(VoltraColor.textDim)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(VoltraColor.bgElev2)
+        .overlay(Capsule().stroke(VoltraColor.accent.opacity(0.55), lineWidth: 1))
+        .clipShape(Capsule())
+    }
+
     private func healthPill(color: Color, value: String, unit: String) -> some View {
         HStack(spacing: 5) {
             Circle()
@@ -400,6 +590,12 @@ struct LiveCaptureViewV2: View {
 
             // Big number row + steppers. b56: tapping the number toggles
             // hardware LOAD/UNLOAD. Number is green when deviceLoaded.
+            //
+            // b58 V4 §P1: weight cell auto-fit — single-line, scales down
+            // to 60% to keep 3-digit + TWIN combos legible without
+            // overlapping the steppers. The fade-out gradient on the
+            // trailing edge is intentionally softer than truncating-tail
+            // dots so a value like "4xx" never dead-stops on an ellipsis.
             HStack(spacing: 10) {
                 Button(action: toggleHardwareLoad) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -407,14 +603,42 @@ struct LiveCaptureViewV2: View {
                             .font(.system(size: 44, weight: .bold, design: .monospaced))
                             .monospacedDigit()
                             .foregroundColor(deviceLoaded ? VoltraColor.accent : VoltraColor.text)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .mask(
+                                LinearGradient(
+                                    gradient: Gradient(stops: [
+                                        .init(color: .black,            location: 0.0),
+                                        .init(color: .black,            location: 0.92),
+                                        .init(color: .black.opacity(0), location: 1.0)
+                                    ]),
+                                    startPoint: .leading,
+                                    endPoint:   .trailing
+                                )
+                            )
                         Text("lb")
                             .font(.system(size: 14, weight: .medium, design: .monospaced))
                             .foregroundColor(VoltraColor.textDim)
+                        // b58 V4 §4: TWIN badge inline next to the weight
+                        // when MERGE is active. Surfaces the dual-Voltra
+                        // mode at the place the user looks first.
+                        if twinModeActive {
+                            Text("TWIN")
+                                .font(.system(size: 9, weight: .bold))
+                                .kerning(1.4)
+                                .foregroundColor(VoltraColor.bg)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(VoltraColor.accent)
+                                .clipShape(Capsule())
+                        }
                     }
                 }
                 .buttonStyle(.plain)
+                .layoutPriority(1)
 
-                Spacer()
+                Spacer(minLength: 4)
                 stepperButton("\u{2212}5") { adjustWeight(-5) }
                 stepperButton("\u{2212}1") { adjustWeight(-1) }
                 stepperButton("+1")        { adjustWeight(+1) }
@@ -441,13 +665,26 @@ struct LiveCaptureViewV2: View {
                         inverseLb: Int(logging.upcomingInverseLb.rounded())
                     )
                 }
-                if dropArmed,
-                   let seq = logging.manualDropSequence,
-                   let head = seq.first,
-                   let next = seq.dropFirst().first {
+                if dropArmed {
+                    // b58 V4: cascade head = last anchored device-frame weight
+                    // pushed (or current planned weight if no drop has fired
+                    // yet). The next preview weight comes from the LoggingStore
+                    // anchor-relative preview helper, which honors current
+                    // tier + combined-mode rounding rules. previewNextCascade
+                    // takes EFFECTIVE (user-felt) lb, so we multiply head by
+                    // pulleyMultiplier on the way in.
+                    let pulleyM = logging.pulleyMultiplier
+                    let headDeviceLb = logging.dropChainPlannedLb.last
+                        ?? (logging.pendingPlannedWeightLb ?? 0)
+                    let headEffLb = Int((headDeviceLb * pulleyM).rounded())
+                    let preview = logging.previewNextCascade(
+                        from: headDeviceLb * pulleyM,
+                        count: 1
+                    )
+                    let nextEffLb = Int((preview.first ?? Double(headEffLb)).rounded())
                     NestedModRowV2.drop(
-                        currentLb: Int(head.rounded()),
-                        nextLb:    Int(next.rounded())
+                        currentLb: headEffLb,
+                        nextLb:    max(5, nextEffLb)
                     )
                 }
             }
@@ -475,13 +712,18 @@ struct LiveCaptureViewV2: View {
                         valueLb: Int(logging.upcomingInverseLb.rounded())
                     ) { delta in adjustInverse(delta) }
                 }
-                if dropArmed,
-                   let seq = logging.manualDropSequence,
-                   let head = seq.first,
-                   let next = seq.dropFirst().first {
-                    let stepLb = Int((head - next).rounded())
-                    // b57 V3 §2/§3: dropMode=true greys ±1 (micro-drops
-                    // are forbidden per spec; only multiples of 5 allowed).
+                if dropArmed {
+                    // b58 V4: stepper value = current cascade tier step in lb
+                    // (5/10/15). ±1 buttons are greyed (dropMode=true);
+                    // ±5 cycles the tier forward / backward.
+                    let stepLb: Int = {
+                        switch logging.cascadeTier {
+                        case 1: return 5
+                        case 2: return 10
+                        case 3: return 15
+                        default: return 5
+                        }
+                    }()
                     ModStepperRowV2(
                         label: "DROP",
                         valueLb: stepLb,
@@ -685,7 +927,15 @@ struct LiveCaptureViewV2: View {
                 peakLb:     peak,
                 resting:    resting,
                 idlePhase:  phase,
-                yAxisMaxLb: yMax
+                yAxisMaxLb: yMax,
+                // b58 V4 §1: ECC fill band only when ECC is armed; CHAIN
+                // mirrors the gradient (heaviest at top of ROM). INV CHAIN
+                // is its own gradient direction — here we only flip on
+                // CHAIN to mirror the user-felt build-up; INV CHAIN's
+                // thru-ROM offset is already represented by the polyline
+                // shape itself.
+                eccBandActive:     eccArmed,
+                chainMirrorActive: chainArmed
             )
             .frame(maxWidth: .infinity, minHeight: 175)
         }
@@ -763,7 +1013,57 @@ struct LiveCaptureViewV2: View {
     private var eccArmed:    Bool { logging.upcomingEccEnabled    && logging.upcomingEccLb     > 0 }
     private var chainArmed:  Bool { logging.upcomingChainsEnabled && logging.upcomingChainsLb  > 0 }
     private var invArmed:    Bool { logging.upcomingInverseEnabled && logging.upcomingInverseLb > 0 }
-    private var dropArmed:   Bool { (logging.manualDropSequence?.count ?? 0) >= 2 }
+    /// b58 V4: DROP tile is "armed" whenever a time-cascade is active. The
+    /// b56 manualDropSequence path is deprecated — `dropSetActive` flips on
+    /// the first tap of `tapDropTile()` and stays on until cancellation or
+    /// the 10 s no-movement watchdog finalizes the chain.
+    private var dropArmed:   Bool { logging.dropSetActive }
+
+    // MARK: - b58 V4: dual-Voltra helpers
+
+    /// True only when BOTH MDM slots report a live connection. Single-
+    /// Voltra sessions stay on the b57 header.
+    private var bothVoltrasConnected: Bool {
+        mdm.left.connectionState.isConnected &&
+        mdm.right.connectionState.isConnected
+    }
+
+    /// True when the user has merged both Voltras into a single virtual
+    /// twin (`mdm.workoutMode == .combined`). Drives the TWIN badge, the
+    /// pulley grey-out, and the fused HR pill.
+    private var twinModeActive: Bool {
+        bothVoltrasConnected && mdm.workoutMode == .combined
+    }
+
+    /// b58 V4: BLE manager for whichever side currently owns the screen's
+    /// mod controls. In Twin mode this is read-only — writes broadcast to
+    /// both via `mdm.applyCombined`. In Independent mode this returns the
+    /// focused unit. In single-Voltra sessions this returns the legacy
+    /// `ble` so existing logic keeps working unchanged.
+    private var focusedBle: VoltraBLEManager {
+        if !bothVoltrasConnected { return ble }
+        switch focusedSlot {
+        case .left:  return mdm.left
+        case .right: return mdm.right
+        }
+    }
+
+    /// b58 V4 §5: per-write assignment override.
+    /// In Independent + dual-connected sessions, force the writer to the
+    /// focused unit so weight / ECC / CHAIN / INV CHAIN / DROP edits only
+    /// hit the side the user is looking at. In Twin mode return nil so
+    /// the WriterRouter falls through to its `.combined` branch and
+    /// mirrors writes via `mdm.applyCombined`. In single-Voltra sessions
+    /// return the instance's stored assignment unchanged.
+    private var focusOverrideAssignment: DeviceSlotAssignment? {
+        if bothVoltrasConnected && mdm.workoutMode == .independent {
+            return DeviceSlotAssignment(slot: focusedSlot)
+        }
+        if twinModeActive {
+            return nil
+        }
+        return logging.activeInstance?.assignedVoltra
+    }
 
     // MARK: - Mod toggles (b56 bug fix: tapping any tile arms/disarms)
 
@@ -809,53 +1109,79 @@ struct LiveCaptureViewV2: View {
         pushUpcomingStateToDevice()
     }
 
-    /// b57 V3 §2: DROP tile is a TOGGLE.
-    ///   Tap 1 (off → on):  arm a 5-lb drop, expand the nested DROP row
-    ///                       and ±5/±1 stepper. Start a 2s idle timer
-    ///                       that auto-fires (commits) the armed drop.
-    ///   Tap 2 (on → off):  cancel & disarm — collapses the tile entirely
-    ///                       (no nested row, no stepper). manualDropSequence
-    ///                       is cleared.
-    /// Increments are clamped to multiples of 5 inside `adjustDropStep`
-    /// (±1 are no-ops via ModStepperRowV2's dropMode greying).
+    /// b58 V4: DROP tile = time-driven cascade (port of b48 / aff322f).
+    ///   First tap (inactive): startDropSet — fires drop #2 immediately,
+    ///     starts the 4 s fuse + 10 s no-movement watchdog. The pushWeight
+    ///     callback re-targets the device for every cascade step.
+    ///   Tap while active: bumpCascadeTier — 5→10→15→5, fires immediate
+    ///     drop at the new tier, resets the 4 s fuse.
+    ///   Long-press: cancelDropSet — 1.5 s arm-cooldown prevents the same
+    ///     touch-up from re-arming.
+    /// Telemetry activity (forceLb > 3 lb) is forwarded into
+    /// `LoggingStore.noteTelemetryActivity` from `VoltraLiveApp`'s BLE
+    /// telemetry pipe — nothing for the view to wire here.
     private func tapDropTile() {
-        // Already armed → second tap disarms.
-        if (logging.manualDropSequence?.count ?? 0) >= 2 {
-            cancelArmedDrop()
+        if logging.dropSetActive {
+            // Tap-while-active: bump the tier & fire immediately.
+            logging.bumpCascadeTier()
             return
         }
-        let head = (logging.pendingPlannedWeightLb ?? 0).rounded()
-        guard head > 5 else { return }
-        // First tap: arm at −5 lb (device floor 5 lb).
-        let nextWeight = max(5.0, head - 5.0)
-        logging.manualDropSequence = [head, nextWeight]
-        logging.manualDropIndex    = 0
-        scheduleDropIdleAutoFire()
-    }
-
-    /// Cancel armed drop & collapse the DROP tile UI.
-    private func cancelArmedDrop() {
-        logging.manualDropSequence = nil
-        logging.manualDropIndex    = 0
-        dropIdleWorkItem?.cancel()
-        dropIdleWorkItem = nil
-    }
-
-    /// b57 V3 §2: 2s idle auto-fire. Reschedule on every adjustment.
-    /// Auto-fire here is a no-op against the armed sequence (it's already
-    /// the source of truth for the next set's planned weight), but the
-    /// timer's existence drives the "stop fiddling, this is committed"
-    /// affordance the user requested.
-    private func scheduleDropIdleAutoFire() {
-        dropIdleWorkItem?.cancel()
-        let item = DispatchWorkItem {
-            // Sequence is already armed; nothing to do — this slot is
-            // intentional so future builds can hook commit-side effects
-            // (haptic, BLE pre-write, telemetry) without changing the
-            // call sites.
+        let starting = (logging.pendingPlannedWeightLb ?? 0)
+        guard starting > 0 else { return }
+        // Capture writerRouter + mdm so the cascade can re-target the device.
+        // Pulley-effective math runs inside LoggingStore via
+        // cascadeAnchoredDeviceWeight which already understands
+        // pulleyMultiplier; we just push the device-frame value.
+        logging.startDropSet(startingLb: starting) { [weak ble = ble] lb in
+            // Re-build the upcoming state with the new device-frame base
+            // weight. ECC / CHAIN / INV CHAIN flags are preserved from the
+            // current upcoming state so the chain inherits the parent set's
+            // mods.
+            let baseLb = Int(lb.rounded())
+            let eccLb = logging.upcomingEccEnabled
+                ? Int(logging.upcomingEccLb.rounded()) : 0
+            let chainsActive = logging.upcomingChainsEnabled
+                && logging.upcomingChainsLb > 0
+            let inverseActive = logging.upcomingInverseEnabled
+                && logging.upcomingInverseLb > 0
+            let chainsLb: Int = {
+                if inverseActive { return Int(logging.upcomingInverseLb.rounded()) }
+                if chainsActive  { return Int(logging.upcomingChainsLb.rounded()) }
+                return 0
+            }()
+            let voltraMode: VoltraMode = (logging.upcomingMode == .band) ? .band : .weight
+            let state = VoltraDeviceState(
+                mode: voltraMode,
+                modifiers: VoltraModifiers(
+                    eccentric: eccLb > 0,
+                    chains: chainsActive,
+                    inverse: inverseActive
+                ),
+                weights: VoltraWeights(
+                    baseLb: baseLb,
+                    eccentricLb: eccLb,
+                    chainsLb: chainsLb,
+                    bandMaxForceLb: 0,
+                    damperLevel: 0
+                )
+            )
+            // b58 V4 §5: cascade writes also respect focus / Twin mode.
+            writerRouter.apply(
+                state,
+                mdm: mdm,
+                assignment: focusOverrideAssignment
+            )
+            _ = ble  // silences capture warning when unused
         }
-        dropIdleWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: item)
+    }
+
+    /// Long-press cancel for the DROP tile. Restores the original anchor
+    /// weight on the device (handled inside LoggingStore.cancelDropSet)
+    /// and starts the 1.5 s re-arm cooldown.
+    private func cancelArmedDrop() {
+        logging.cancelDropSet()
+        let gen = UIImpactFeedbackGenerator(style: .medium)
+        gen.impactOccurred()
     }
 
     // MARK: - Stepper actions
@@ -902,28 +1228,24 @@ struct LiveCaptureViewV2: View {
         pushUpcomingStateToDevice()
     }
 
-    /// b57 V3 §2/§3: DROP step adjuster — modifies the GAP between head
-    /// and next. Clamped to multiples of 5 (per spec); ±1 deltas are
-    /// no-ops (the stepper renders ±1 greyed via dropMode=true, but we
-    /// defend here too in case a tap slips through). −5 = smaller drop
-    /// (next gets HEAVIER), +5 = deeper drop (next gets LIGHTER).
-    /// Reschedules the 2s idle auto-fire on every adjustment.
+    /// b58 V4 §2/§3: DROP step adjuster.
+    /// In V4 the step is no longer a freeform value — it's the cascade
+    /// `tier` (1→3, mapping to 5/10/15 lb base steps). ±5 buttons cycle the
+    /// tier forward/backward; ±1 buttons are no-ops (greyed via dropMode).
+    /// Cycling tier mid-cascade fires an immediate drop at the new tier
+    /// (LoggingStore.bumpCascadeTier) so the user sees the device respond.
     private func adjustDropStep(_ delta: Int) {
         // Clamp to multiples of 5 — micro-drops are forbidden per spec.
         guard delta == 5 || delta == -5 else { return }
-        guard let seq = logging.manualDropSequence,
-              seq.count >= 2 else { return }
-        let head    = seq[0]
-        let curStep = Int((head - seq[1]).rounded())
-        let headLb  = Int(head.rounded())
-        let newStep = ModStepperRowV2.clampedDropNext(
-            current: curStep,
-            delta: delta,
-            headLb: headLb - 5  // next-weight floor is 5 lb, so max step is head-5
-        )
-        let nextW = max(5, head - Double(newStep))
-        logging.manualDropSequence = [head, nextW]
-        scheduleDropIdleAutoFire()
+        guard logging.dropSetActive else { return }
+        // bumpCascadeTier rolls 1→2→3→1. For −5 we want the previous tier;
+        // since the cycle is 3-wide, two forward bumps == one backward.
+        if delta == 5 {
+            logging.bumpCascadeTier()
+        } else {
+            logging.bumpCascadeTier()
+            logging.bumpCascadeTier()
+        }
     }
 
     // MARK: - Hardware LOAD/UNLOAD
@@ -988,6 +1310,9 @@ struct LiveCaptureViewV2: View {
                 damperLevel: 0
             )
         )
-        writerRouter.apply(state, mdm: mdm, assignment: logging.activeInstance?.assignedVoltra)
+        // b58 V4 §5: focus-aware routing. Independent + both connected =
+        // writes go to the focused side only; Twin mode returns nil so
+        // WriterRouter falls into the `.combined` mirror branch.
+        writerRouter.apply(state, mdm: mdm, assignment: focusOverrideAssignment)
     }
 }

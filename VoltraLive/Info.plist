@@ -17,15 +17,15 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.4.35</string>
+    <string>0.4.36</string>
     <key>CFBundleVersion</key>
-    <string>57</string>
+    <string>58</string>
     <!-- Build 31: short label for the single feature this build is testing.
          Shown next to the build badge in every screen so the user knows
          exactly what to focus on. Update this each build to match the one
          feature being tested. Empty string disables the label. -->
     <key>VOLTRAFeatureLabel</key>
-    <string>V3 LiveCapture: dynamic Y-axis + DROP toggle + pulley fix</string>
+    <string>V4: dropset port + Tonal force + weight fix + dual-Voltra L/R + Twin</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <!-- v0.4.6.3: Demo Mode trace upload. release.yml replaces these

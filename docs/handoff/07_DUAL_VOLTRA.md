@@ -1,102 +1,142 @@
 # 07 — Dual-VOLTRA Spec
 
-Status: **planned for build 30**. Source files for the implementation
-are stashed in `.dual-voltra-wip/` (gitignored) — restore into
-`VoltraLive/` before resuming this work.
+Status: **Independent + Twin Mode shipped in b58** (V4). Initial
+plumbing landed in b29/b30 under `.dual-voltra-wip/`; b58 wires it
+into the V3 LiveCapture screen.
 
 ## Why dual
 
 The user has two VOLTRAs in their gym. They want to:
 
 - Connect to one (existing flow, unchanged).
-- Connect to two and use them **independently** (e.g. belt squat on one,
-  back extension on the other).
-- Connect to two and use them as a **combined** virtual machine
-  (single-target weight is split across both sides).
+- Connect to two and use them **independently** (e.g. belt squat on
+  one, back extension on the other).
+- Connect to two and use them as a **combined virtual machine**
+  ("Twin Mode") — single-target weight is split across both sides.
 
 Single-Voltra flow must never regress.
 
-## Connect screen — 3 buttons
+## Connect screen — 3 buttons (unchanged from b30 spec)
 
-Replaces the existing single Connect button in `VoltraLive/Views/ConnectView.swift`:
+`VoltraLive/Views/ConnectView.swift`:
 
 1. **Connect VOLTRA** — single-device path.
-   - If exactly one VOLTRA is in range, auto-connect.
-   - If two or more are in range, show a picker (no regression vs today).
-2. **Connect Two VOLTRAs** — dual-device path.
-   - Scanner shows discovered devices.
-   - Tap-to-assign: first tap = Left, second tap = Right.
-   - "Connect 2 strongest" button as a one-tap shortcut (uses RSSI).
+2. **Connect Two VOLTRAs** — dual-device path; tap-to-assign
+   (1st = Left, 2nd = Right) or "Connect 2 strongest" via RSSI.
 3. **Demo Mode** — existing demo controller, unchanged.
 
-## Dual-screen header
+## V3/V4 LiveCapture header — b58
 
-After dual connect succeeds, the live screen has a segmented control in
-the header:
+When **only one** VOLTRA is connected, the V3 single-side header
+renders unchanged (status dot + marquee + V3 watermark).
 
-- **Independent** (default)
-- **Combined**
+When **both Voltras are connected** (`bothVoltrasConnected =
+mdm.left.connectionState.isConnected && mdm.right.connectionState
+.isConnected`), the header swaps to the **dualHeaderCluster**:
 
-Mode is sticky for the session but can be switched mid-session.
+```
+[ L • ]   [ MERGE ]   [ • R ]              ← when independent
+[      [ Twin: L+R ]      ]                ← when twinModeActive
+```
 
-## Independent mode
+- `sideDot(slot:)` — colored dot per side (green = connected,
+  amber = connecting, red = dropped). Tapping a dot sets
+  `focusedSlot = .left|.right` (independent only).
+- `mergeButton` — toggles `mdm.workoutMode` between
+  `.independent` and `.combined`. Disabled if either side is
+  reconnecting.
+- `fusedTwinPill` — replaces the L/MERGE/R cluster while in
+  `.combined`. Tap to fall back to independent.
 
-- Both sides render side-by-side.
-- Each side has its own telemetry tiles, weight controls, and logs to
-  `LoggingStore` independently.
-- Common case: different exercises on each side. The set-complete
-  detector runs per side.
-- All `VoltraWriter` writes are scoped to the side they target.
+## Independent mode (b58)
 
-## Combined mode
+- Both sides connected; `mdm.workoutMode == .independent`.
+- The V3 LiveCapture screen renders as a single-side view but its
+  **focus** follows `focusedSlot` (`@State` in `LiveCaptureViewV2`).
+- All telemetry the user sees (weight card, force chart, rep
+  count, plates) is sourced from `focusedBle`, where:
+  ```
+  focusedBle = (focusedSlot == .left) ? mdm.left : mdm.right
+  ```
+- Writes are scoped via `focusOverrideAssignment`:
+  ```
+  focusOverrideAssignment = DeviceSlotAssignment(slot: focusedSlot)
+  ```
+  This is passed to **both** `writerRouter.apply(...)` call sites
+  in `LiveCaptureViewV2`, ensuring weight / mod changes only fire
+  to the focused side.
+- Set-complete detector runs per side via `LoggingStore`'s existing
+  per-side cascade state. The non-focused side keeps logging in
+  background.
 
-- Single virtual-twin panel, not two side-by-side panels.
-- Weight: target weight is split — each side receives `TOTAL/2`.
-  - **Left rounds up** when `TOTAL` is odd, so the sum stays exact.
-- Eccentric, chains, mode: mirrored across both sides.
-- Telemetry aggregation:
-  - Force: **sum** of both sides.
-  - Reps: **sum** of both sides (assumes synchronized — see watchdog below).
-  - Power: **sum** of both sides.
-  - ROM: **average** of both sides.
-  - Velocity: **average** of both sides.
+## Twin Mode (b58 — formerly "Combined")
+
+- `mdm.workoutMode == .combined`.
+- Single virtual-twin panel (no L/R split tiles).
+- TWIN badge appears next to the big weight number in the WEIGHT
+  card (`twinModeActive` gate).
+- **Pulley control is greyed out** (b58 V4-D5):
+  `PulleyAndPlatesBarV3.pulleyChip.disabled = twinModeActive`,
+  with `lock.fill` icon overlay and 0.55 opacity. The chip is
+  **not hidden** — discoverability preserved. Accessibility label
+  reads "Pulley locked in Twin Mode".
+- Weight split: target weight halved per side, **left rounds up**
+  on odd totals so the sum stays exact. This logic lives in
+  `MultiDeviceManager.applyCombined(_:)`.
+- Telemetry aggregation: force/reps/power = sum, ROM/velocity =
+  average. Unchanged from b30 spec.
 
 ## LOAD / UNLOAD buttons
 
-New tiles on the live screen, **same size** as the existing Drop Set tile.
-
-- **Independent mode:** per-side LOAD and UNLOAD.
-- **Combined mode:** single LOAD and single UNLOAD that fire to both
-  sides simultaneously.
+- Independent: per-side LOAD/UNLOAD, scoped via
+  `focusOverrideAssignment`.
+- Twin: single LOAD and single UNLOAD, fire to both sides via
+  `mdm.applyCombined`.
 - Payloads: see `05_BLE_AND_PROTOCOL.md#load--unload-payloads-build-30`.
 
-## Combined disconnect watchdog
+## Twin disconnect watchdog (b30 — unchanged)
 
-If one of the two devices drops mid-session in Combined mode:
+If one of the two devices drops mid-session in Twin Mode:
 
-1. Immediately send `UNLOAD` to the survivor (don't leave a half-loaded rig).
-2. Start a reconnect attempt to the dropped side with exponential backoff:
-   `0.5 s → 1 s → 2 s → 4 s`.
-3. Total timeout: **30 s** before giving up and surfacing an error.
-4. On reconnect, re-issue the last known device state via `VoltraWriter`
-   (weight, ecc, chains, mode). User-visible toast: "Reconnected Right".
+1. Immediately send `UNLOAD` to the survivor.
+2. Reconnect attempt with exponential backoff: `0.5 s → 1 s → 2 s
+   → 4 s`. Total timeout: 30 s.
+3. On reconnect, re-issue the last known device state via
+   `VoltraWriter`. Toast: "Reconnected Right".
 
-## Files (from `.dual-voltra-wip/`)
+## Files
 
 | File | Role |
 |---|---|
-| `DualMode.swift` | `enum DualMode { case independent, combined }` and helpers. |
-| `MultiDeviceManager.swift` | Coordinator that owns 2 BLE managers + 2 writers, plus the watchdog. |
-| `VoltraDiscoveryScanner.swift` | Scans, surfaces RSSI-sorted candidates, supports tap-to-assign. |
-| `VoltraControlFrames+LoadUnload.swift` | LOAD/UNLOAD payload builders. |
+| `BLE/MultiDeviceManager.swift` | Owns 2 BLE managers + 2 writers + watchdog + `workoutMode`. |
+| `BLE/DualMode.swift` | `enum WorkoutMode { case independent, combined }`. |
+| `BLE/WriterRouter.swift` | `apply(_:mdm:assignment:)` — assignment overrides slot routing in independent focus mode. |
+| `BLE/VoltraDiscoveryScanner.swift` | RSSI-sorted scan, tap-to-assign. |
+| `BLE/VoltraControlFrames+LoadUnload.swift` | LOAD/UNLOAD payload builders. |
+| `Logging/Views/LiveCaptureViewV2.swift` | b58 V4: `focusedSlot`, `bothVoltrasConnected`, `twinModeActive`, `focusedBle`, `focusOverrideAssignment`, `dualHeaderCluster`, `sideDot`, `mergeButton`, `fusedTwinPill`. |
+| `Logging/Views/V2/PulleyAndPlatesBarV3.swift` | b58 V4: `@EnvironmentObject mdm`, pulley chip greys out in Twin Mode. |
 
-`VoltraBLEManager.swift` had a `connectKnown(identifier:fallback:)` helper
-added during build-29 stash work — that edit was reverted before commit.
-Re-add it cleanly in build 30 if `MultiDeviceManager` needs it.
+## Out of scope at b58
 
-## Out of scope for build 30
+- **Per-side history filtering** — today's history view shows both
+  sides interleaved chronologically. Filter UI deferred.
+- **Per-side HR / kcal attribution** — HealthKit data remains
+  global to the session.
+- **Superset support** — deferred to b59+ (see `08_SUPERSET.md`).
+- **Dropset behavior in Twin Mode** — DROP currently anchors to
+  focused side in independent and is undefined for Twin (DROP tile
+  is hidden when `twinModeActive`). Spec for Twin DROP TBD.
 
-- Superset support is **deferred to build 31** (see `08_SUPERSET.md`).
-- Per-side history filtering (today's history view will show both sides
-  in chronological order).
-- Per-side HR / kcal attribution — HealthKit data is global to the session.
+## Verification checklist (b58)
+
+- [x] Header swaps to dualHeaderCluster when both connected.
+- [x] MERGE toggles `mdm.workoutMode`.
+- [x] TWIN pill replaces cluster in combined mode.
+- [x] TWIN badge appears in weight cell.
+- [x] Pulley chip greyed out (lock icon, opacity 0.55) in Twin.
+- [x] Pulley chip NOT hidden in Twin.
+- [x] `focusedSlot` toggles via L/R dot tap (independent only).
+- [x] Both `writerRouter.apply` call sites pass
+  `assignment: focusOverrideAssignment`.
+- [x] Single-VOLTRA flow unchanged (header reverts to V3 chrome
+  when `!bothVoltrasConnected`).

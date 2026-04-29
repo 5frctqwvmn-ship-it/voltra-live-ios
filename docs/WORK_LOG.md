@@ -2359,3 +2359,129 @@ rewrite (~396 lines), 4 modified files, version bump,
   this build. Landscape might wrap weirdly if the exercise
   name is exceptionally long. Not blocking; flag if a user
   reports it.
+
+---
+
+## b58 — V4 LiveCapture: dropset port + Tonal force + weight fix + dual-Voltra (v0.4.36-build58)
+
+### Summary
+
+V4 spec landed in **one** ship, per user instruction. Four P0/P1
+items, all wired into the V3 LiveCapture screen that shipped in
+b57:
+
+1. **P0 Dropset state-machine port.** `LiveCaptureViewV2.swift`
+   no longer owns its own drop-step array. `tapDropTile()` and
+   `adjustDropStep()` now call `LoggingStore`'s existing cascade
+   API (`startDropSet(startingLb:pushWeight:)`,
+   `bumpCascadeTier()`, `cancelDropSet()`). The nested DROP row
+   reads `dropChainPlannedLb` + `previewNextCascade(from:count:)`
+   for the head→next preview. The `dropArmed` flag now sources
+   from `logging.dropSetActive`. Closes KI-F3.
+2. **P0 Tonal-style force curve.** `ForceChartV2.swift` adds an
+   ECC/CON dual-band gradient fill rendered **below** the
+   polyline (z-stack order: fill → polyline → labels). Inline
+   "ECC" / "CON" labels appear at the phase centroid on the
+   current rep only (`repsAgo == 0`). CHAIN mode mirrors the
+   gradient (`.topTrailing → .bottomLeading`). Two new init
+   params: `eccBandActive: Bool`, `chainMirrorActive: Bool`,
+   both defaulting to `false`. Existing single-band call sites
+   continue to work unchanged.
+3. **P1 Weight cell single-line fix.** WEIGHT card big number
+   now `.lineLimit(1)`, `.minimumScaleFactor(0.6)`, with a fade
+   gradient mask and `.layoutPriority(1)` plus
+   `Spacer(minLength: 4)`. No more wrap-overlap with the WEIGHT
+   label. Closes KI-F4.
+4. **P0/P1 Dual-VOLTRA Independent + Twin Mode.** When both
+   sides are connected (`bothVoltrasConnected`), the V3 header
+   swaps to `dualHeaderCluster`: `[ L • ] [ MERGE ] [ • R ]` in
+   independent, fused TWIN pill in combined. New `@State
+   focusedSlot: DeviceSlot` drives which side gets writes —
+   `focusOverrideAssignment` is passed to **both**
+   `writerRouter.apply(...)` call sites. TWIN badge sits inline
+   next to the weight number when `twinModeActive`.
+   `PulleyAndPlatesBarV3` now takes `@EnvironmentObject mdm` and
+   greys out the pulley chip in Twin Mode (lock icon, opacity
+   0.55, `.disabled(true)`). Chip is **not hidden** —
+   discoverability preserved per V4-D5.
+
+### Files
+
+**Modified:**
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` —
+  `focusedSlot` `@State`; `tapDropTile()`/`adjustDropStep()`
+  rewritten against `LoggingStore` cascade; `dropArmed` reads
+  `logging.dropSetActive`; nested DROP row uses cascade preview;
+  weight cell single-line fix; TWIN badge inline; `headerStrip`
+  branches on `bothVoltrasConnected`; new views
+  (`dualHeaderCluster`, `sideDot`, `mergeButton`,
+  `fusedTwinPill`); new computed props (`bothVoltrasConnected`,
+  `twinModeActive`, `focusedBle`, `focusOverrideAssignment`);
+  ForceChartV2 invocation passes `eccBandActive`/`chainMirrorActive`;
+  both `writerRouter.apply` call sites pass
+  `assignment: focusOverrideAssignment`.
+- `VoltraLive/Logging/Views/V2/ForceChartV2.swift` — new init
+  params; new `eccConFill`, `gradientStops`, `inlinePhaseLabels`,
+  `phaseCentroid(...)` helpers; z-order: fill → polyline → labels.
+- `VoltraLive/Logging/Views/V2/PulleyAndPlatesBarV3.swift` —
+  `@EnvironmentObject mdm`; `twinModeActive` computed; pulley chip
+  disabled + lock icon + opacity 0.55 + accessibility label in
+  Twin; preview wires `MultiDeviceManager()`.
+- `docs/handoff/03_CURRENT_FEATURE_SPEC.md` — V4 spec, §8
+  dual-Voltra section.
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` — V4-D1 …
+  V4-D9 appended.
+- `docs/handoff/06_KNOWN_ISSUES.md` — rewritten: 4 open + 4
+  fixed (incl. KI-F3 dropset, KI-F4 weight overlap).
+- `docs/handoff/07_DUAL_VOLTRA.md` — refreshed from "planned for
+  b30" to "Independent + Twin shipped in b58".
+- `docs/handoff/09_NEXT_AGENT_PROMPT.md` — points at V4 spec and
+  b58 ship, lists hard rules incl. "preserve previous builds"
+  and "pulley grey-don't-hide".
+- `docs/research/intensity_metric.md` — beefed up with b58
+  context: ECC/CON segmentation now free, dropset cascade
+  centralized, Twin Mode aggregation declared.
+
+### Sacred files: untouched
+
+`VoltraProtocol.swift`, `TelemetryExtractor.swift`,
+`PacketParser.swift`, `FrameAssembler.swift` — unchanged.
+
+### Critical preservation note (sticky)
+
+User correction this session: **all 110 commits and 57+ build
+tags are preserved in git history** (`v0.1.0` …
+`v0.4.35-build57`). Dropset code archaeology used:
+`0d513e4` (b22), `ec71bcc` (b23), `8a980d6` (b24), `aff322f`
+(b25), `89d43b3` (b38). Dual-Voltra plumbing from `d08b327`
+(b29), `a76994d` (b30), `bb5199e` (b29 tests). Snapshots saved
+to `/home/user/workspace/b58_refs/` for cross-session reference.
+**Future agents: dig in `git log --all` and `git tag` before
+asking the user where prior code is.**
+
+### Cost callout
+
+**Heavy** — heavier than b57. One file rewritten substantially
+(`LiveCaptureViewV2.swift`, ~50 lines changed across header,
+dropset, weight cell, force-chart wiring, write routing), one
+file extended (`ForceChartV2.swift`, +4 helpers / ~70 lines),
+one file extended (`PulleyAndPlatesBarV3.swift`, ~15 lines), 7
+docs touched. One TestFlight ship per user request ("do the
+full v4 build in one build").
+
+### Risks at ship
+
+- **Twin DROP undefined.** DROP tile is hidden when
+  `twinModeActive`; no spec yet for cascading both sides
+  together. Flag if user asks. Documented in
+  `07_DUAL_VOLTRA.md` "Out of scope".
+- **Focus toggle UX.** Tapping L/R dot is the only way to
+  switch focused side in independent mode. If users expect a
+  different interaction (long-press? swipe?), surface and spec.
+- **Force-chart fill performance.** ECC/CON gradient renders
+  per phase segment per rep. Untested on > 30-rep history;
+  fallback is to disable `eccBandActive` for repsAgo > N.
+- **Missing screenshot reference.** `weight-overlap-v3.jpeg`
+  link from user was unreachable; KI-6 logged. The fix is
+  implemented from spec text alone — recheck against the user's
+  actual screenshot when they're back online.

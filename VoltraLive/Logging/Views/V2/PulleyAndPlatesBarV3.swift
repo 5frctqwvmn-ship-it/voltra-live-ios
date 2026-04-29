@@ -1,5 +1,13 @@
 // PulleyAndPlatesBarV3.swift
 //
+// b58 V4 §4 — Pulley toggle GREY-OUT in Twin Mode.
+//
+// When `mdm.workoutMode == .combined` AND both Voltras are connected, the
+// pulley toggle is disabled (greyed, NOT hidden) because a single shared
+// pulley attachment doesn't make physical sense across two devices.
+// The user can still see the pulley state — we just block edits while
+// they're in Twin so they don't accidentally double-count effective load.
+//
 // b57 V3 §4 — Pulley toggle + Added-plates dial pair, relocated to sit
 // directly ABOVE the force-curve card. b56 had these living below the
 // chart inside V1RestoreSection (a verbatim port from V1). The V3 spec
@@ -34,6 +42,16 @@ import SwiftUI
 struct PulleyAndPlatesBarV3: View {
 
     @EnvironmentObject var logging: LoggingStore
+    @EnvironmentObject var mdm:     MultiDeviceManager
+
+    /// b58 V4 §4: Twin Mode — both Voltras paired AND combined. The pulley
+    /// chip greys to communicate “not adjustable here” without removing
+    /// information about the current state.
+    private var twinModeActive: Bool {
+        mdm.left.connectionState.isConnected &&
+        mdm.right.connectionState.isConnected &&
+        mdm.workoutMode == .combined
+    }
 
     /// Local expansion state for the picker, matches V1's @State addWeightOpen.
     @State private var pickerOpen: Bool = false
@@ -112,7 +130,11 @@ struct PulleyAndPlatesBarV3: View {
     /// WEIGHT card reads at 2× the device value (the parent does the
     /// math). This chip is the single source of truth for the multiplier.
     private var pulleyChip: some View {
-        Button {
+        let disabled = twinModeActive
+        return Button {
+            // b58 V4 §4: hard-disable in Twin Mode — the chip stays visible
+            // (so the user can SEE pulley state) but tap is a no-op.
+            guard !disabled else { return }
             logging.pulleyMode.toggle()
         } label: {
             HStack(spacing: 4) {
@@ -120,19 +142,30 @@ struct PulleyAndPlatesBarV3: View {
                       ? "arrow.triangle.2.circlepath.circle.fill"
                       : "arrow.triangle.2.circlepath.circle")
                 Text(logging.pulleyMode ? "Pulley \u{00d7}2" : "Pulley")
+                if disabled {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                }
             }
             .font(.system(size: 12, weight: .semibold))
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(logging.pulleyMode
-                        ? VoltraColor.transition.opacity(0.18)
-                        : VoltraColor.bgElev2)
-            .foregroundColor(logging.pulleyMode
-                             ? VoltraColor.transition
-                             : VoltraColor.text)
+            .background(
+                disabled ? VoltraColor.bgElev2.opacity(0.5)
+                : (logging.pulleyMode
+                    ? VoltraColor.transition.opacity(0.18)
+                    : VoltraColor.bgElev2)
+            )
+            .foregroundColor(
+                disabled ? VoltraColor.textFaint
+                : (logging.pulleyMode ? VoltraColor.transition : VoltraColor.text)
+            )
             .clipShape(Capsule())
+            .opacity(disabled ? 0.55 : 1.0)
         }
         .buttonStyle(.plain)
+        .disabled(disabled)
+        .accessibilityLabel(disabled ? "Pulley locked in Twin Mode" : "Pulley toggle")
     }
 
     // MARK: - Picker
@@ -194,6 +227,7 @@ struct PulleyAndPlatesBarV3: View {
 #Preview("PulleyAndPlatesBarV3") {
     PulleyAndPlatesBarV3()
         .environmentObject(LoggingStore())
+        .environmentObject(MultiDeviceManager())
         .padding()
         .background(VoltraColor.bg)
 }
