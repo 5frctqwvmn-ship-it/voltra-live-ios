@@ -2579,3 +2579,83 @@ checklist" + `docs/handoff/QA_LOG.md`). CI green and altool
 running on real hardware caught that the dual UI never
 rendered. The QA checklist for b58 surfaced this within
 hours of ship — exactly the gap it's meant to close.
+
+---
+
+## 2026-04-29 14:52 UTC — chore: GPT-5.5 track handoff pre-flight
+
+### Goal
+
+Pre-flight / fork-prep for the GPT-5.5 implementation track copy
+(`5frctqwvmn-ship-it/voltra-live-ios-gpt-5-5`). Mark this repo as the
+GPT-5.5 track, save the next-agent handoff prompt (Karpathy LLM Wiki
+pattern) into `docs/handoff/09_NEXT_AGENT_PROMPT.md`, and record a
+pre-flight verification table for the canonical wiki layout the prompt
+expects. **No P0/P1 app changes** — this is metadata + handoff only.
+Original Claude-orchestrated repo (`voltra-live-ios`) is untouched and
+remains the fallback baseline.
+
+### Files changed
+
+- `AGENTS.md` — added GPT-5.5 track-marker callout block at top.
+- `README.md` — added GPT-5.5 track-marker callout block at top.
+- `docs/handoff/09_NEXT_AGENT_PROMPT.md` — overwritten with the V4 UI
+  Layout handoff prompt (Karpathy LLM Wiki method) plus a GPT-5.5
+  track marker section, an in-prompt note that flags the existing
+  numbering-scheme mismatch, and a Pre-Flight Verification table
+  recording PASS/MISMATCH/MISSING for each expected wiki file.
+- `docs/WORK_LOG.md` — this entry.
+
+### What changed
+
+1. **GPT-5.5 track marker** is now visible in three durable locations
+   (AGENTS.md callout, README.md callout, 09 handoff prompt header).
+   None of them disrupts existing build, signing, or sacred-file
+   instructions.
+2. **Handoff prompt** now contains the full V4 UI Layout work order
+   (P0-1 dropset state machine, P0-2 Tonal-style force curve, P0-3
+   dual-Voltra top bar, P1 weight-overlap + first-engage idle) and
+   the Karpathy three-layer wiki architecture. The prompt has a
+   clear "do not modify the original fallback repo" directive.
+3. **Pre-flight verification table** captures the gap between the
+   wiki names the prompt expects (`01_PROJECT_STATE`,
+   `02_ARCHITECTURE`, `05_BUILD_TEST_DEPLOY`, `07_FILE_MAP`,
+   `08_GIT_HISTORY_SUMMARY`) and the actual filenames in this copy
+   (`01_PROJECT_OVERVIEW` + `02_CURRENT_STATE`, `04_ARCHITECTURE`,
+   `09_RELEASE_AND_SIGNING`, and two missing). Also flags missing
+   `entities/`, `screenshots/`, and `raw/` directories. The next
+   agent is told NOT to silently rename — propose the rename or add
+   a mapping table to `00_START_HERE.md`.
+
+### Verification
+
+- `git remote -v` confirms `origin` →
+  `5frctqwvmn-ship-it/voltra-live-ios-gpt-5-5`. The original
+  `voltra-live-ios` is not a remote of this clone, so a stray push
+  cannot reach it.
+- `ls docs/handoff/` confirms the handoff inventory listed in the
+  pre-flight table.
+- `09_RELEASE_AND_SIGNING.md` contains real `xcodebuild` /
+  `xcodegen` / dry-run / tag-push commands — pre-flight item "real
+  iOS build commands" passes.
+- AGENTS.md sacred-files section, BLE control-write rules, 5-gate
+  ship verification, and post-build QA checklist are all unchanged
+  by this commit.
+
+### Risks
+
+- **Low.** No code, no protocol, no CI workflow, no Info.plist /
+  project.yml touched. Three documentation files modified, one
+  appended. Build remains b59 (v0.4.37); no version bump needed
+  for a docs-only commit.
+- The pre-flight table flags wiki-naming drift the next agent
+  must reconcile before writing V4 code. Surfacing it here is the
+  fix; not surfacing it would have been the regression.
+
+### Next step
+
+Hand the GPT-5.5 track to the next agent (fresh Perplexity Computer
+session). They run Step 0 of `09_NEXT_AGENT_PROMPT.md` cold, summarize
+state back to the user, and only then begin V4 implementation —
+starting with the wiki-naming reconciliation called out in the
+pre-flight table.

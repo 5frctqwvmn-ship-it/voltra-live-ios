@@ -1,111 +1,375 @@
-# 09_NEXT_AGENT_PROMPT
+# Handoff Prompt — UI Layout V4 Implementation (Karpathy LLM Wiki Method)
 
-> Read this first. Cold-start prompt for the next agent picking
-> up VOLTRA Live iOS. Skim, then read the docs in the order at
-> the bottom.
+> **Track marker:** This file lives in the **GPT-5.5 implementation track**
+> repository (`5frctqwvmn-ship-it/voltra-live-ios-gpt-5-5`), copied from
+> `5frctqwvmn-ship-it/voltra-live-ios`. The original repository remains the
+> Claude-orchestrated **fallback** and must not be modified by work performed
+> from this prompt. All commits, branches, and PRs from this prompt go to the
+> GPT-5.5 copy only.
 
-## Where things stand (b58, v0.4.36-build58)
+Purpose: One-shot prompt for a fresh Perplexity Computer instance with zero prior context. The new agent follows the Karpathy LLM Wiki pattern: compile knowledge once into versioned markdown, consult those files on every subsequent call, never hold knowledge only in context.
 
-**Last shipped:** v0.4.36-build58 (b58). Tag pushed, altool
-verified. See `docs/WORK_LOG.md` for the build entry.
+Save this prompt to: docs/handoff/09_NEXT_AGENT_PROMPT.md
 
-**The big change in b58 (V4):** four spec items in one ship.
+## GPT-5.5 Track Marker
 
-1. **Dropset state machine port.** `tapDropTile()` and
-   `adjustDropStep()` in `LiveCaptureViewV2.swift` no longer
-   manage their own array — they call `LoggingStore`'s existing
-   cascade API (`startDropSet(startingLb:pushWeight:)`,
-   `bumpCascadeTier()`, `cancelDropSet()`). Nested DROP row
-   reads `dropChainPlannedLb` + `previewNextCascade(from:count:)`.
-   `dropArmed` is now `logging.dropSetActive`. No more split
-   sources of truth.
-2. **Tonal-style force curve.** `ForceChartV2.swift` adds an
-   ECC/CON dual-band gradient fill **under** the polyline, with
-   inline "ECC" / "CON" labels at the phase centroid (when
-   `repsAgo == 0`). CHAIN mode mirrors the gradient
-   (`.topTrailing → .bottomLeading`). New init params:
-   `eccBandActive`, `chainMirrorActive`.
-3. **Weight cell single-line fix.** `.lineLimit(1)`,
-   `.minimumScaleFactor(0.6)`, fade mask, `.layoutPriority(1)`.
-   No more wrap-overlap with the WEIGHT label. TWIN badge sits
-   inline next to the number when `twinModeActive`.
-4. **Dual-VOLTRA Independent + Twin Mode.** When
-   `bothVoltrasConnected`, header swaps to a L/MERGE/R cluster
-   (or fused TWIN pill in combined mode). `focusedSlot`
-   `@State` drives which side gets writes via
-   `focusOverrideAssignment`. Pulley chip greys out (lock icon,
-   not hidden) in Twin Mode via `PulleyAndPlatesBarV3`.
+This repository is the GPT-5.5 implementation track copied from `5frctqwvmn-ship-it/voltra-live-ios`. The original repository remains the Claude-orchestrated fallback and must not be modified by work performed from this prompt.
 
-Full V4 spec in `03_CURRENT_FEATURE_SPEC.md`. Decisions in
-`04_DECISIONS_AND_CONSTRAINTS.md` (entries V4-D1 … V4-D9). Dual-
-VOLTRA details in `07_DUAL_VOLTRA.md`.
+🤖 PROMPT STARTS HERE — Copy everything below into the new computer
 
-## Hard rules (do not violate)
+You are a coding agent inheriting an in-progress iOS app project. Treat the GitHub repo as the source of truth, not chat memory. You have no prior context on this project: everything you need is in the repo.
 
-1. **Sacred files DO NOT MODIFY:** `VoltraProtocol.swift`,
-   `TelemetryExtractor.swift`, `PacketParser.swift`,
-   `FrameAssembler.swift`.
-2. **5-gate ship verification.** CI green is not enough. Pull
-   the run log, confirm altool ≥20s, "UPLOAD COMPLETED
-   SUCCESSFULLY" marker, zero ERROR lines.
-3. **`gh` CLI for GitHub.** Never use a browser for this repo.
-   Bot identity:
-   `git -c user.name="VOLTRA Live Bot" -c user.email="bot@voltralive.app"`
-4. **`docs/WORK_LOG.md` is append-only.**
-5. **No micro-drops.** DROP must always be a multiple of 5 lb.
-6. **CHAIN and INV CHAIN are mutually exclusive** at the UI
-   layer. Don't try to allow both.
-7. **User has no Mac.** All signing is CI-only.
-8. **Preserve previous builds.** All 110 commits and 57+ build
-   tags are in git history. Dig with `git log --all` and
-   `git tag` before asking the user "where is the old code".
-9. **Pulley in Twin Mode: grey, don't hide** (V4-D5).
-10. **One TestFlight build per V-spec.** Don't split a numbered
-    V-release across multiple builds unless the user says so.
+You are working in the GPT-5.5 implementation track. The original `5frctqwvmn-ship-it/voltra-live-ios` repository is preserved as the Claude-orchestrated fallback. Do not modify the original fallback repo from this track.
 
-## Karpathy method
+You will operate under the Karpathy LLM Wiki pattern. Read this section before doing anything else.
 
-Before you start, repeat the user's request back to them so
-they can confirm you're getting it correct. They will catch
-misunderstandings before you waste a build.
+### Operating Philosophy — Karpathy LLM Wiki Method
 
-## Current open issues (post-b58)
+You are a knowledge compiler, not a search engine. Instead of re-deriving knowledge from raw sources every session, you incrementally build and maintain a persistent wiki: a structured, interlinked collection of markdown files that compounds over time.
 
-See `06_KNOWN_ISSUES.md`. At b58 ship:
+### The Prime Directive
 
-- **KI-1:** 2× pulley snaps ±1 by 2 lb. Cosmetic.
-- **KI-3:** V2 dial cleanup (residual references in tests).
-- **KI-4:** CI watermark blocking artifact.
-- **KI-5:** Dropset ordering verified — leave as-is unless user
-  reports regression.
-- **KI-6:** Missing `weight-overlap-v3.jpeg` reference (S3 was
-  unreachable when user dropped the screenshot link). Recreate
-  from local photo if user reposts.
+NEVER hold knowledge only in your context window. Every insight, synthesis, entity, decision, comparison, or finding MUST be written to a file in the wiki. If it's not in a file, it doesn't exist. Your memory is the filesystem.
 
-Closed in b58: KI-F3 (dropset cascade source-of-truth),
-KI-F4 (weight cell wrap-overlap).
+### Three-Layer Architecture
 
-## Read order for cold start
+This repo already maps onto the Karpathy three-layer model. Respect the boundaries.
 
-1. `00_START_HERE.md`
-2. `01_PROJECT_OVERVIEW.md`
-3. `02_CURRENT_STATE.md` (snapshot — may be stale; cross-check
-   `WORK_LOG.md`)
-4. `03_CURRENT_FEATURE_SPEC.md` (V4, b58)
-5. `04_DECISIONS_AND_CONSTRAINTS.md`
-6. `05_BLE_AND_PROTOCOL.md`
-7. `06_KNOWN_ISSUES.md`
-8. `07_DUAL_VOLTRA.md` (b58 Independent + Twin Mode)
-9. `09_RELEASE_AND_SIGNING.md`
-10. `docs/WORK_LOG.md` — last 1-2 entries (b57, b58)
-11. `research/intensity_metric.md` (open research stub)
+#### Layer 1 — raw/ (Immutable Sources)
 
-## When the user asks for a new feature
+Read-only archive. You read from here but NEVER modify.
 
-1. Repeat the spec back (Karpathy).
-2. Ask 1-4 clarifying questions if the spec has holes.
-3. Estimate cost class: small / medium / heavy. Mention it.
-4. Implement, ship, verify all 5 gates.
-5. Append `WORK_LOG.md` entry. Update
-   `03_CURRENT_FEATURE_SPEC.md` and
-   `04_DECISIONS_AND_CONSTRAINTS.md` if anything decided.
+- docs/handoff/screenshots/ — UI bug repros, V2/V3 baselines, Tonal/Beyond Power captures
+- docs/handoff/research/sources/ — pasted excerpts and links to external references
+- Any .har, .log, .json dumps from device sessions
+
+If you need to ingest a new external reference (Tonal blog post, Beyond Power help article, a new screenshot), save the raw content here first with a filename like YYYY-MM-DD_source-slug.md — never inline paraphrase into synthesis docs without an archived source.
+
+#### Layer 2 — wiki/ (Compiled Knowledge — Your Workspace)
+
+Mutable. This is where synthesis lives. The existing handoff docs ARE the wiki:
+
+- docs/handoff/00_START_HERE.md → wiki index
+- docs/handoff/01_PROJECT_STATE.md → current state snapshot
+- docs/handoff/02_ARCHITECTURE.md → system model
+- docs/handoff/03_CURRENT_FEATURE_SPEC.md → active work order
+- docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md → decision log (append-only)
+- docs/handoff/05_BUILD_TEST_DEPLOY.md → runbook
+- docs/handoff/06_KNOWN_ISSUES.md → bug tracker
+- docs/handoff/07_FILE_MAP.md → code index
+- docs/handoff/08_GIT_HISTORY_SUMMARY.md → narrative git log
+- docs/handoff/10_OPEN_QUESTIONS.md → unresolved items
+- docs/handoff/design/force_curve.md → domain-specific design reference
+- docs/handoff/design/ → add new design refs here (dual-unit bar, rest timer, etc.) as you compile them
+- docs/handoff/entities/ → create if you discover atomic concepts worth isolating (e.g., dropset_state_machine.md, twin_mode_sync.md, force_time_rendering.md). Cross-link with relative markdown links.
+- docs/WORK_LOG.md → append-only change journal (the wiki changelog)
+
+> **GPT-5.5 track note:** The actual handoff filenames in this copy currently
+> use the original numbering scheme (e.g. `01_PROJECT_OVERVIEW.md` +
+> `02_CURRENT_STATE.md` instead of `01_PROJECT_STATE.md`;
+> `04_ARCHITECTURE.md` instead of `02_ARCHITECTURE.md`;
+> `09_RELEASE_AND_SIGNING.md` instead of `05_BUILD_TEST_DEPLOY.md`; and
+> `07_FILE_MAP.md` / `08_GIT_HISTORY_SUMMARY.md` do not yet exist). The
+> Karpathy roles above describe the **target** wiki shape. Map each role to
+> the closest existing file when reading, and either create the missing
+> canonical files or document the mapping in `00_START_HERE.md` before
+> writing code. Do not silently rename existing files.
+
+#### Layer 3 — Your context window (Working Memory — Ephemeral)
+
+Transient. Everything in your context window will be lost. The wiki is the only durable memory. Before you finish any logical unit of work, ask yourself: "Is every insight I just derived written to a wiki file?" If no, write it before moving on.
+
+### Wiki Maintenance Rules (non-negotiable)
+
+Read before write. At the start of every task, read the wiki index (00_START_HERE.md) plus any topic-relevant files. Summarize current state back to the user in chat before making changes. This proves the wiki is internally consistent.
+
+Write as you think. Do not batch doc updates to the end of a session. Every meaningful insight, decision, or finding goes to a wiki file in the same commit as the code change (or standalone commit if no code changed).
+
+Compile, don't dump. Wiki entries are synthesis, not transcripts. When you learn something from a raw source or a chat exchange, distill it into the wiki with citations back to raw/. Never paste 50 lines of raw content into a wiki doc.
+
+Cross-link aggressively. When one wiki file references a concept that has its own file, link it: [dropset state machine](entities/dropset_state_machine.md). Linked knowledge compounds; isolated knowledge rots.
+
+Append-only logs, mutable specs. WORK_LOG.md, 04_DECISIONS_AND_CONSTRAINTS.md, and 08_GIT_HISTORY_SUMMARY.md are append-only: never rewrite history there. 03_CURRENT_FEATURE_SPEC.md, 06_KNOWN_ISSUES.md, 07_FILE_MAP.md, and design docs are mutable: update in place as reality changes.
+
+Lint the wiki. Before you close a session or open a PR, run a self-check: broken links, stale file references, contradictions between docs, entries in 10_OPEN_QUESTIONS.md that are now resolved, entries in 06_KNOWN_ISSUES.md that are now fixed. Fix or flag them.
+
+Chat is not persistence. If a fact only exists in your chat exchange with the user, write it to the wiki immediately. Future instances of you will not see the chat.
+
+New sub-agents orient via the wiki, not you. If you spawn or hand off to another agent, point it at 00_START_HERE.md and the relevant entity/design docs: not at a chat summary. Your first loyalty is to the next agent reading these files cold.
+
+### Self-Check Before Every Commit
+
+- Did I read the relevant wiki files before making changes?
+- Is every new insight, decision, or finding written to a wiki file?
+- Did I cross-link new entities to existing files?
+- Did I update the mutable specs (feature spec, known issues, file map) to match reality?
+- Did I append to WORK_LOG.md?
+- Are there raw sources I ingested that aren't archived in raw/?
+- Would a brand-new agent reading only the wiki understand what I did and why?
+
+If any answer is "no," fix it before committing.
+
+## Step 0 — Orient yourself (MANDATORY before writing any code)
+
+Read these files in this exact order. Do not skip. Do not skim. After each file, write a one-sentence summary of what you learned to your own scratch notes.
+
+1. AGENTS.md — how agents must behave in this repo
+2. docs/handoff/00_START_HERE.md
+3. docs/handoff/01_PROJECT_STATE.md
+4. docs/handoff/02_ARCHITECTURE.md
+5. docs/handoff/03_CURRENT_FEATURE_SPEC.md ← the V4 spec; your primary work order
+6. docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md
+7. docs/handoff/05_BUILD_TEST_DEPLOY.md
+8. docs/handoff/06_KNOWN_ISSUES.md
+9. docs/handoff/07_FILE_MAP.md
+10. docs/handoff/08_GIT_HISTORY_SUMMARY.md
+11. docs/handoff/10_OPEN_QUESTIONS.md
+12. docs/handoff/design/force_curve.md — force curve visual design reference
+13. docs/WORK_LOG.md — skim last 10 entries to understand recent direction
+14. docs/handoff/screenshots/ — especially weight-overlap-v3.jpeg and the V2 baseline screenshots
+15. docs/handoff/entities/ — if it exists, read every file
+
+After reading, write a ~200-word summary back to the user confirming:
+
+- What the app is (Voltra iOS companion app for Beyond Power VOLTRA strength-training hardware)
+- What layout V4 is trying to accomplish
+- What's currently broken (P0 items)
+- What reference apps guide design decisions (Tonal + Beyond Power Voltra)
+- Your proposed order of operations
+- Any wiki inconsistencies or stale entries you noticed while reading
+
+Do not start coding until the user confirms your summary is correct.
+
+## Step 1 — The Work Order
+
+You are building UI Layout V4 of the live-workout screen. The full spec is in docs/handoff/03_CURRENT_FEATURE_SPEC.md.
+
+### P0 (Must ship — blocks the build)
+
+#### P0-1. Fix Dropsets (state-machine port, not redesign)
+
+Current bug: when DROP is armed, the 2-second idle triggers the rest timer instead of dropping the weight.
+
+Root cause hypothesis: idle handler evaluates rest-timer branch before dropset-armed branch. Audit ordering.
+
+Required behavior:
+
+- DROP armed + 2s idle → weight drops by configured decrement; idle does NOT start rest timer.
+- Each subsequent idle drops again until weight reaches 5 lb (bottom set).
+- After bottom set completes (or idles out), system transitions to rest timer.
+- First tap on DROP arms (default −5). Second tap disarms cleanly.
+- Port the previous working state machine verbatim. Search git history; reference commits in docs/handoff/08_GIT_HISTORY_SUMMARY.md.
+
+Wiki task: after porting, create/update docs/handoff/entities/dropset_state_machine.md documenting the state diagram, idle-branch ordering, and bottom-set transition.
+
+#### P0-2. Force Curve Redesign (Tonal-style)
+
+Current bug: curve is a single confusing line; doesn't distinguish ECC from CON; doesn't rescale.
+
+Full visual spec: docs/handoff/design/force_curve.md. Follow it exactly.
+
+Requirements:
+
+- Force-time polyline (time X, force Y), 30-second rolling window.
+- Y-axis auto-fits to peak × 1.2, 20% headroom floor, 1–2 s eased rescale.
+- Dual-band fill under the polyline: CON (primary, ~35% opacity) vs. ECC (warm accent, ~55% opacity).
+- Vertical gradient inside fills encodes ROM direction: ECC darker at bottom, CHAIN mirrored (darker at top), INV CHAIN inverse.
+- Dotted horizontal reference line at 80% of set peak force (Tonal pattern).
+- Per-rep peak dots with value labels.
+- Inline CON / ECC labels on first rep of each set, fade after 3s or rep 2.
+- Rep stacking: all reps of current set overlaid, logarithmic fade, cap ~8, reset on set end.
+
+Wiki task: update docs/handoff/design/force_curve.md with any implementation details discovered during build.
+
+#### P0-3. Dual-Voltra Top Bar (fix V1 fallback bug)
+
+Current bug: with 2 Voltras connected, app routes to V1 layout even when 1 unit is active.
+
+Required:
+
+- V3 layout is the universal base. Unit count only toggles the new <DualUnitBar />.
+- Bar: [● L 118 bpm] [⇄ MERGE] [● R 118 bpm] above existing V3 chrome.
+- Active unit pill filled; inactive outlined. Tap to switch focus with horizontal slide animation.
+- MERGE toggles Twin Mode: pills fuse to [● L+R 200 lb base · 400 lb max], weight shows combined total, TWIN badge next to weight, increments mirror to both units, pulley greys out, plates apply symmetrically.
+- Unmerge restores each unit's last-known state.
+- Per-unit state: weight, ecc, chain, invChain, dropset, forceHistory, restTimer, idleState, repCount, exercise.
+- Rest timer and idle detection run per-unit in Independent mode.
+- 1-unit case: bar hidden, zero vertical space consumed.
+- Visual consistency: reuse V3 pill shape, radius, dot tokens, typography, spacing.
+- Root-cause fix: find the numConnectedUnits > 1 branch routing to legacy V1; route both cases to V3; only bar visibility differs.
+
+Wiki task: create docs/handoff/entities/twin_mode_sync.md documenting auto-sync semantics, merge/unmerge lifecycle, and pulley-disable rationale.
+
+### P1 (Ship if time allows)
+
+#### P1-1. Weight text overlap bug (docs/handoff/screenshots/weight-overlap-v3.jpeg)
+
+3-digit weights overlap adjacent icons.
+
+Dynamic font scaling, values 5–400 lb fit one line. minFontScale ≈ 0.6. Right-edge fade truncation below floor.
+
+Test values: 5, 20, 120, 150, 200, 400 TWIN.
+
+#### P1-2. Rest-timer first-engage miss
+
+First idle of session fails; works on subsequent idles.
+
+Likely idle detector not armed before first pull completes. Audit init order.
+
+### Carry-over from V3 (must remain intact — do not regress)
+
+- Unified nested-row increments: −5 −1 +1 +5 for ECC/CHAIN/INV CHAIN/DROP. DROP clamps to multiples of 5 (±1 no-op).
+- Pulley: tap doubles weight across all values; increments adjust displayed (post-pulley) value; engine halves internally.
+- Loaded button: tap weight number physically loads/unloads; green + ✓ LOADED pill active, UNLOADED inactive.
+- Rest timer: 2s idle trigger, L→R sweep, continuous HSL interp (green hsl(140,70%,45%) → amber hsl(40,90%,50%) at 50% → red hsl(0,80%,50%) at 85%), blinking warn + REST · OVER + +MM:SS on overflow, exits on next pull.
+- Connected status dot leads top-right telemetry cluster (1-unit case).
+- Header: V2 dial removed; watermark auto-injected from CI (fallback: "V3"); exercise-name scroll (5s truncated → scroll → reset, loop).
+- End Set, Previous Sets, Add Next Exercise restored from old UI in V3 style.
+
+## Step 2 — Reference Apps (for any tradeoff this spec doesn't answer)
+
+When you hit a UI question not answered here, default to how these apps handle it rather than inventing. Archive any new reference material in raw/ and cite in your wiki synthesis.
+
+- Tonal — primary reference for force visualization, ECC/CON rendering, dropset UX, rep tracking, connected-hardware UX. See docs/handoff/design/force_curve.md.
+- Beyond Power VOLTRA (native) — primary reference for dual-unit "Twin Mode" mental model, L/R naming, pairing, auto-sync semantics.
+
+Do not invent novel UI patterns if Tonal or Beyond Power already solved the problem. Mirror, cite, and record the decision in docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md.
+
+## Step 3 — Build, Test, Deploy
+
+Follow docs/handoff/05_BUILD_TEST_DEPLOY.md exactly. Loop:
+
+git pull → confirm branch per repo convention.
+
+git checkout -b feat/ui-v4-<short-name>.
+
+Implement one P0 at a time. Build after each logical change.
+
+Run the testing matrix below for each P0.
+
+Commit with clear message per repo convention. Every commit that changes behavior also updates the wiki in the same commit.
+
+Open a PR. Do not merge to main without user sign-off.
+
+### Testing Matrix (run all)
+
+| Scenario | Expected |
+|---|---|
+| 1 Voltra connected, V3 layout | Renders identically to current V3; no dual bar |
+| 2 Voltras, L active, not merged | V3 layout + dual bar; L filled; state binds to L |
+| 2 Voltras, R active, not merged | Same; R bound |
+| 2 Voltras, MERGE active | Single L+R pill; combined weight; TWIN badge; pulley greyed |
+| Merge → unmerge | Each unit restored to last-known state |
+| Dropset armed (−5), 2s idle | Weight drops to current−5; no rest timer |
+| Dropset ladder until 5 lb | Drops continue to 5 lb, then rest timer engages |
+| Dropset toggle (tap DROP twice) | Arms first tap, disarms second |
+| Weight 120 / 150 / 200 / 400 display | No overlap; single line; fits container |
+| Force curve with ECC active | ECC band taller/darker, bottom-heavy gradient |
+| Force curve with CHAIN active | CHAIN band top-heavy gradient, mirrored from ECC |
+| Rep 2+ of a set | Previous reps visible with log fade; stack resets on set end |
+| Y-axis rescale | Smooth 1–2s ease from 100 → 20 lb |
+| First-session idle | Rest timer engages correctly |
+| Rest timer exceeded | REST · OVER, +MM:SS, blinking warn |
+| Pulley active, ±1 tap | Displayed weight changes by 1; engine sends halved value |
+| Pulley in Twin Mode | Greyed out, not clickable |
+
+## Step 4 — Documentation Rules (NON-NEGOTIABLE)
+
+Every meaningful change requires wiki updates in the same commit.
+
+After each logical change, update:
+
+- docs/WORK_LOG.md — append: date/time, goal, files changed, what changed, verification (testing-matrix rows + pass/fail), risks, next step.
+- docs/handoff/03_CURRENT_FEATURE_SPEC.md — update sections whose behavior changed.
+- docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md — append decisions with rationale and Tonal/Beyond Power citations.
+- docs/handoff/06_KNOWN_ISSUES.md — mark resolved, add newly discovered.
+- docs/handoff/07_FILE_MAP.md — register new components (<DualUnitBar />, units store module).
+- docs/handoff/08_GIT_HISTORY_SUMMARY.md — one-line per meaningful commit.
+- docs/handoff/10_OPEN_QUESTIONS.md — log anything needing user input.
+- docs/handoff/entities/*.md — create/update atomic concept docs (dropset state machine, twin mode sync, force-time rendering).
+- docs/handoff/design/*.md — update design refs with implementation learnings.
+
+If a fact only exists in chat, write it to the wiki immediately.
+
+## Step 5 — Secrets and Safety
+
+- Never commit secrets. Check .gitignore before adding to /config/, /.env*, /keys/.
+- Never push to main without explicit approval.
+- Never force-push a shared branch.
+- If a file looks like an API key, credential, cert, or private key, stop and ask.
+
+## Step 6 — When to Stop and Ask
+
+Stop and ask the user via chat if:
+
+- A required handoff doc is missing or empty.
+- Build is broken before any changes (document in 06_KNOWN_ISSUES.md first, then ask).
+- A P0 requires a design decision not covered by spec, prompt, or Tonal/Beyond Power precedent.
+- You'd need a new dependency, new architectural pattern, or a module outside the live-workout screen.
+- Git state is unexpected (detached HEAD, uncommitted changes, conflicting branches).
+- The wiki is internally inconsistent (contradicting specs, stale file references, missing cross-links you can't resolve).
+
+Otherwise: proceed autonomously, document as you go, report back with a PR link + testing summary + wiki diff summary.
+
+## Step 7 — Definition of Done
+
+V4 is done when all are true:
+
+- All P0 testing-matrix rows pass on a physical device with 1 and 2 Voltras.
+- All V3 carry-over behaviors still work (no regressions).
+- docs/handoff/03_CURRENT_FEATURE_SPEC.md reflects final shipped behavior.
+- docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md lists every design decision with citations.
+- docs/handoff/06_KNOWN_ISSUES.md has dropset, force curve, V1 fallback, weight overlap marked resolved (or documented if deferred).
+- docs/WORK_LOG.md has complete change trail.
+- docs/handoff/07_FILE_MAP.md lists new <DualUnitBar /> and units store module.
+- docs/handoff/entities/dropset_state_machine.md and twin_mode_sync.md exist and are accurate.
+- Wiki lint passes: no broken links, no stale references, no contradictions, resolved items closed out.
+- PR open with description referencing this prompt + testing results + wiki diff summary.
+
+🤖 PROMPT ENDS HERE
+
+## Pre-Flight Notes for the Current Instance
+
+Before pasting the prompt into a new computer, verify in the repo:
+
+- AGENTS.md exists with durable-context rule and references the Karpathy Wiki method
+- docs/handoff/00_START_HERE.md through 10_OPEN_QUESTIONS.md all exist
+- docs/handoff/design/force_curve.md exists
+- docs/handoff/entities/ directory exists (even if empty — signals the pattern)
+- docs/handoff/screenshots/ contains V2 baseline and V3 weight-overlap bug
+- docs/WORK_LOG.md exists
+- docs/handoff/05_BUILD_TEST_DEPLOY.md has real iOS build commands (not placeholders) — most common handoff failure point
+- Consider creating raw/ at repo root (or docs/handoff/raw/) as the immutable sources layer, and seeding it with any Tonal/Beyond Power excerpts already gathered
+- Recommended pre-flight test: open a fresh Perplexity Computer, paste only the content between the 🤖 markers, and watch Step 0 run cold. If the new instance can't orient from the wiki alone, the wiki needs more work, not the prompt.
+
+If you want me to generate stub content for AGENTS.md, 00_START_HERE.md, 05_BUILD_TEST_DEPLOY.md, or the empty entities/ seeds, say the word and I'll produce them next.
+
+## Pre-Flight Verification — GPT-5.5 Track (run 2026-04-29)
+
+Snapshot of the GPT-5.5 copy at the time this prompt was saved. The next agent should re-run this check and reconcile any drift before writing code.
+
+| Item | Status | Notes |
+|---|---|---|
+| `AGENTS.md` | PASS | Durable-context rule + Karpathy method referenced; sacred files listed. |
+| `docs/handoff/00_START_HERE.md` | PASS | Startup sequence + ship discipline + 5-gate verification. |
+| `docs/handoff/01_PROJECT_STATE.md` | **MISMATCH** | Filename in this copy is `01_PROJECT_OVERVIEW.md`. Snapshot lives in `02_CURRENT_STATE.md`. Map both to the Karpathy `01_PROJECT_STATE` role. |
+| `docs/handoff/02_ARCHITECTURE.md` | **MISMATCH** | Architecture lives in `04_ARCHITECTURE.md`. |
+| `docs/handoff/03_CURRENT_FEATURE_SPEC.md` | PASS | V4 spec present (also `03_ROADMAP.md` alongside it). |
+| `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` | PASS | Append-only decision log. |
+| `docs/handoff/05_BUILD_TEST_DEPLOY.md` | **MISMATCH** | No file with this exact name. `09_RELEASE_AND_SIGNING.md` covers build / sign / TestFlight runbook including `xcodebuild` / `xcodegen` / tag-based release commands. Treat that as the build-test-deploy runbook until renamed. |
+| `docs/handoff/06_KNOWN_ISSUES.md` | PASS | Active KI tracker. |
+| `docs/handoff/07_FILE_MAP.md` | **MISSING** | Not yet authored. Closest equivalent today is the `## Project layout` block in `AGENTS.md`. |
+| `docs/handoff/08_GIT_HISTORY_SUMMARY.md` | **MISSING** | Use `git log --oneline` until authored. |
+| `docs/handoff/10_OPEN_QUESTIONS.md` | PASS | Present. |
+| `docs/handoff/design/force_curve.md` | PASS | Tonal-style force-curve design reference present. |
+| `docs/handoff/entities/` directory | **MISSING** | Karpathy entities layer not yet seeded. Create on first use (`dropset_state_machine.md`, `twin_mode_sync.md`). |
+| `docs/handoff/screenshots/` directory | **MISSING** | No screenshots directory in this copy. KI-6 in `06_KNOWN_ISSUES.md` already flags missing `weight-overlap-v3.jpeg`. V2 baseline images also absent here. Re-attach before P1-1 work. |
+| `docs/handoff/raw/` (immutable sources layer) | **MISSING** | Not seeded. `docs/research/` and `docs/handoff/B52_DIAGNOSIS.md` are the closest existing raw-style archives. |
+| `docs/WORK_LOG.md` | PASS | Append-only journal at repo root path `docs/WORK_LOG.md` (one level above `handoff/`). |
+| Real iOS build commands in build/test/deploy doc | PASS | `09_RELEASE_AND_SIGNING.md` and `AGENTS.md` contain `xcodegen generate`, `xcodebuild test -scheme VoltraLive ...`, tag-based release flow, dry-run dispatch, 5-gate altool verification. Not placeholders. |
+
+### Track-specific guidance for the next agent
+
+- This repo is the **GPT-5.5 implementation track**, branched from the Claude-orchestrated original. Push only here. Do not touch `5frctqwvmn-ship-it/voltra-live-ios`.
+- If the canonical Karpathy filenames (`01_PROJECT_STATE`, `02_ARCHITECTURE`, `05_BUILD_TEST_DEPLOY`, `07_FILE_MAP`, `08_GIT_HISTORY_SUMMARY`) are still missing when you arrive, **do not silently rename existing files** — propose the rename / split in a wiki PR first, or add a mapping table to `00_START_HERE.md` so both schemes resolve.
+- Seed `docs/handoff/entities/` and `docs/handoff/raw/` the first time you need them, not preemptively.
