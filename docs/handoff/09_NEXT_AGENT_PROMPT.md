@@ -362,8 +362,8 @@ Snapshot of the GPT-5.5 copy at the time this prompt was saved. The next agent s
 | `docs/handoff/08_GIT_HISTORY_SUMMARY.md` | **MISSING** | Use `git log --oneline` until authored. |
 | `docs/handoff/10_OPEN_QUESTIONS.md` | PASS | Present. |
 | `docs/handoff/design/force_curve.md` | PASS | Tonal-style force-curve design reference present. |
-| `docs/handoff/entities/` directory | **MISSING** | Karpathy entities layer not yet seeded. Create on first use (`dropset_state_machine.md`, `twin_mode_sync.md`). |
-| `docs/handoff/screenshots/` directory | **MISSING** | No screenshots directory in this copy. KI-6 in `06_KNOWN_ISSUES.md` already flags missing `weight-overlap-v3.jpeg`. V2 baseline images also absent here. Re-attach before P1-1 work. |
+| `docs/handoff/entities/` directory | **PASS (seeded b60)** | Contains `dropset_state_machine.md`. Add `voltra_assignment_panel.md` next to it when implementing the assignment panel. |
+| `docs/handoff/screenshots/` directory | **MISSING (create on first use)** | KI-6 in `06_KNOWN_ISSUES.md` flags missing `weight-overlap-v3.jpeg`. When the user supplies V4.2 screenshots, `mkdir -p docs/handoff/screenshots/` and commit them with descriptive names in the same commit as the implementing code. |
 | `docs/handoff/raw/` (immutable sources layer) | **MISSING** | Not seeded. `docs/research/` and `docs/handoff/B52_DIAGNOSIS.md` are the closest existing raw-style archives. |
 | `docs/WORK_LOG.md` | PASS | Append-only journal at repo root path `docs/WORK_LOG.md` (one level above `handoff/`). |
 | Real iOS build commands in build/test/deploy doc | PASS | `09_RELEASE_AND_SIGNING.md` and `AGENTS.md` contain `xcodegen generate`, `xcodebuild test -scheme VoltraLive ...`, tag-based release flow, dry-run dispatch, 5-gate altool verification. Not placeholders. |
@@ -372,4 +372,115 @@ Snapshot of the GPT-5.5 copy at the time this prompt was saved. The next agent s
 
 - This repo is the **GPT-5.5 implementation track**, branched from the Claude-orchestrated original. Push only here. Do not touch `5frctqwvmn-ship-it/voltra-live-ios`.
 - If the canonical Karpathy filenames (`01_PROJECT_STATE`, `02_ARCHITECTURE`, `05_BUILD_TEST_DEPLOY`, `07_FILE_MAP`, `08_GIT_HISTORY_SUMMARY`) are still missing when you arrive, **do not silently rename existing files** — propose the rename / split in a wiki PR first, or add a mapping table to `00_START_HERE.md` so both schemes resolve.
-- Seed `docs/handoff/entities/` and `docs/handoff/raw/` the first time you need them, not preemptively.
+- Seed `docs/handoff/raw/` the first time you need it, not preemptively.
+
+## V4.2 Clarifications (added 2026-04-29 by Claude release-conduit)
+
+The user pre-resolved the five "missing pieces" questions before the V4.2
+implementation pass. These are not open — do not re-ask. Answers below.
+
+### Q1 — Design tokens (where to get the look-and-feel)
+
+**Answer: use [`VoltraLive/Views/VoltraTheme.swift`](../../VoltraLive/Views/VoltraTheme.swift) as the source of truth.**
+
+The repo *does* have design tokens — they're Swift, not Markdown. `VoltraTheme.swift`
+(83 lines) was extracted from `styles.css` / `design-system/colors_and_type.css`
+and is referenced as the design-tokens layer in [`02_CURRENT_STATE.md` line 65](../handoff/02_CURRENT_STATE.md).
+
+Live token surface (`enum VoltraColor`):
+
+- Backgrounds: `bg #0a0e0c`, `bgElev #11181a`, `bgElev2 #1a2426`, `border #1f2c2e`
+- Text: `text #e8f4f1`, `textDim #8aa39e`, `textFaint #4a5f5b`
+- Mint accent: `accent #00d4aa`, `accentDim #007a62`, `pull #00d4aa`
+- Phase: `returnPhase #ffb84d`, `transition #6c8de0`, `idle`, `warn #ff7a4d`, `danger #ff4d6d`
+- Tints: `pullWash`, `returnWash`, `fresh`, `freshStale`
+- Phase resolver: `VoltraColor.phase(_ p: VoltraPhase)`
+
+**Rules:**
+
+1. Import via `VoltraColor.*` — do not hardcode hex values in new view code.
+2. If V4.2 needs a new token (e.g. `inactiveCardBg`, `assignmentPanelDivider`),
+   add it to `VoltraTheme.swift` in the same commit as the view that uses it.
+   Do not invent a parallel `tokens.md` file — the Swift file is the canonical store.
+3. For radius / spacing / typography that are not yet in `VoltraTheme.swift`,
+   extend the file with `enum VoltraRadius`, `VoltraSpacing`, `VoltraType`
+   blocks (one PR, additive, logged in WORK_LOG).
+
+### Q2 — Entity docs
+
+**Answer: A. Create each entity doc in the same commit as the related code.**
+
+`docs/handoff/entities/` already exists (seeded b60 with [`dropset_state_machine.md`](./entities/dropset_state_machine.md)). Add new
+concept docs alongside it. For V4.2, the expected entity doc is:
+
+- `docs/handoff/entities/voltra_assignment_panel.md` — atomic concept doc for
+  the assignment panel (states, transitions, what data drives it). Link it
+  from `03_CURRENT_FEATURE_SPEC.md` and `04_DECISIONS_AND_CONSTRAINTS.md` the
+  same way the dropset doc is linked.
+
+The pattern is in the [dropset doc header](./entities/dropset_state_machine.md) — copy that linking style.
+
+### Q3 — Screenshots
+
+**Answer: A. Commit renamed screenshots into `docs/handoff/screenshots/` during implementation.**
+
+Directory does not yet exist in the repo. Steps:
+
+1. `mkdir -p docs/handoff/screenshots/` on the first V4.2 commit that consumes a screenshot.
+2. Save each user-supplied V4.2 reference image with a descriptive name:
+   `assignment-panel-armed.png`, `dropset-active-cascade.png`, etc. No spaces, lowercase, kebab-case.
+3. Reference from the relevant entity doc / spec section by relative path.
+4. This closes [KI-6 in `06_KNOWN_ISSUES.md`](./06_KNOWN_ISSUES.md) (`weight-overlap-v3.jpeg`) when seeded.
+
+The three V4.2 screenshots the user uploaded for this session are not yet in
+the repo — the user will paste them into chat at the start of your session
+and expects you to commit them with the implementing code.
+
+### Q4 — Weight buttons while DROP is armed
+
+**Answer: B. Tapping a base-weight button (−5 / −1 / +1 / +5) cancels the dropset, then applies the weight change.**
+
+Rationale: a manual weight tap during armed-DROP is an intentional override.
+Locking the weight (current behavior, option C) is a bug, not a feature.
+Option A (let both coexist) creates an ambiguous device state because the
+dropset cascade math is anchored to the weight at arm time.
+
+**Implementation notes:**
+
+- In [`LoggingStore.swift`](../../VoltraLive/Logging/LoggingStore.swift), the base-weight setters (`bumpWeight(by:)` or equivalent) should
+  call the existing dropset cancel path when `dropSetArmed == true || dropSetActive == true`.
+- Update [`docs/handoff/entities/dropset_state_machine.md`](./entities/dropset_state_machine.md) to add a new
+  transition row: `armed.* → idle (user manually changed base weight)` and
+  `active.* → idle (user manually changed base weight — cancels cascade)`.
+- Add a [KI entry in `06_KNOWN_ISSUES.md`](./06_KNOWN_ISSUES.md) marked RESOLVED in the same commit so the
+  prior locked-buttons behavior is recorded as a fixed bug, not lost history.
+
+### Q5 — Superset top switcher (V1 lift)
+
+**Answer: C. Copy V1 layout/behavior verbatim, recolor with `VoltraTheme` tokens to match V3/V4 mint/dark style.**
+
+The pattern is already established in the repo — b56 ported V1's pulley-mode
+chip, added-plates picker, `LOGGED SETS` swipeable list, Next-exercise nav,
+and End-session button into `V1RestoreSection.swift` using exactly this
+approach (verbatim layout, V3 tokens). Reference files for V4.2 superset
+switcher work:
+
+- [`VoltraLive/Logging/Views/V2/V1RestoreSection.swift`](../../VoltraLive/Logging/Views/V2/V1RestoreSection.swift) — the V1-into-V2 port pattern
+- [`VoltraLive/Views/WorkoutVoltraPickerSheet.swift`](../../VoltraLive/Views/WorkoutVoltraPickerSheet.swift) — V1 exercise switcher source
+- [`VoltraLive/Logging/Views/LiveCaptureViewV2.swift`](../../VoltraLive/Logging/Views/LiveCaptureViewV2.swift) — where the new switcher will mount
+
+Do not rebuild from scratch (option B): the user has explicitly validated the
+V1 interaction structure on hardware. Do not copy V1 verbatim including
+colors (option A): it will look out of place in V3/V4 dark-mint.
+
+### Reference apps the agent should know about (not in repo)
+
+These are workspace assets the user references in chat but that are not in
+the GitHub repo:
+
+- `voltra-v2-preview/index.html` — b55 sign-off render. Layout-of-truth for V2.
+  If you need it, ask the user to paste it.
+- `voltra-proto` and `voltra-live` shared assets — prior preview iterations.
+  Ask the user if you need them.
+
+Do not commit these into the repo unless the user explicitly says to.

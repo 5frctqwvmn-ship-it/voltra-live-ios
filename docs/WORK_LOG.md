@@ -3387,3 +3387,53 @@ state will be: a48cf7c → … → 52c2a14 (FIX) → b79434c (ship-success
 log) → <this commit> (doc update). Hardware QA on b60 still
 outstanding; dual-Voltra / KI-9 / KI-10 / KI-11 unconfirmed on
 real device.
+
+---
+
+## 2026-04-29 18:20 UTC — V4.2 clarifications added to 09_NEXT_AGENT_PROMPT.md
+
+**Goal:** Pre-resolve the five "missing pieces" questions GPT-5.5 asked
+before the V4.2 pass so the next agent does not re-ask. User confirmed
+they will point GPT-5.5 at this file rather than re-paste the answers.
+
+**Files changed:**
+- `docs/handoff/09_NEXT_AGENT_PROMPT.md` —
+  - Updated pre-flight table: `entities/` row flipped from MISSING to
+    PASS (seeded b60). `screenshots/` row reframed as "create on first
+    use" with explicit `mkdir` + naming convention.
+  - Removed the "Seed `docs/handoff/entities/`" bullet since the
+    directory is no longer empty.
+  - Added new `## V4.2 Clarifications (added 2026-04-29 by Claude
+    release-conduit)` section answering Q1–Q5:
+    - Q1: design tokens live in `VoltraLive/Views/VoltraTheme.swift`
+      (Swift, not Markdown). Listed the live `VoltraColor` surface and
+      ruled out hardcoded hex / parallel `tokens.md`.
+    - Q2: A — entities/ already exists; add `voltra_assignment_panel.md`
+      next to `dropset_state_machine.md` in the same commit as code.
+    - Q3: A — create `docs/handoff/screenshots/` on first use, kebab-case
+      filenames, closes KI-6 when seeded.
+    - Q4: B — manual base-weight tap cancels armed/active dropset.
+      Cited `LoggingStore.swift` cancel path + the entity doc transition
+      rows that need updating.
+    - Q5: C — copy V1 layout/behavior verbatim, recolor with VoltraTheme.
+      Cited `V1RestoreSection.swift` (b56 precedent), `WorkoutVoltraPickerSheet.swift`
+      (V1 source), and `LiveCaptureViewV2.swift` (mount site).
+  - Added "Reference apps not in repo" section noting
+    `voltra-v2-preview/index.html`, `voltra-proto`, `voltra-live` are
+    workspace assets the user pastes on demand, not git-tracked.
+- `docs/WORK_LOG.md` — this entry.
+
+**Verification:**
+- File now ends at line 486 with the V4.2 clarifications block. All
+  internal links use relative paths verified against the actual repo
+  layout (entities/ exists, VoltraTheme.swift at
+  VoltraLive/Views/VoltraTheme.swift, V1RestoreSection.swift at
+  VoltraLive/Logging/Views/V2/V1RestoreSection.swift).
+- No code changes. No sacred-file changes. No version bump.
+
+**Risks:** None — docs-only. The clarifications encode user decisions,
+not new engineering work.
+
+**Next step:** Commit + push to release/v0.4.38-build60. User will
+point GPT-5.5 at the updated 09_NEXT_AGENT_PROMPT.md to start the V4.2
+implementation pass.
