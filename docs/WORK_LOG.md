@@ -2645,3 +2645,61 @@ new rule.
   switcher + page badge + MDM extension), mount on
   LoggingHomeView + LiveCaptureViewV2 + ExerciseDetailView,
   delete WorkoutVoltraPickerSheet wiring, then ship.
+
+## 2026-04-29 21:00 UTC — b66 V4.2: 4 new view/extension files
+
+- **Files changed:** `VoltraLive/Views/PageBadgeOverlay.swift` (NEW),
+  `VoltraLive/Views/VoltraAssignmentPanel.swift` (NEW),
+  `VoltraLive/Views/SupersetSwitcherBanner.swift` (NEW),
+  `VoltraLive/BLE/Dual/MultiDeviceManager+V42.swift` (NEW).
+- **What changed:** Recreated the four V4.2 reskin files lost
+  to a sandbox reset earlier in this session. None of these
+  files are mounted yet — that lands in the next commit. Each
+  file has a header comment block recording the user's MC-
+  locked spec verbatim so the rationale survives the next
+  sandbox reset.
+  - `PageBadgeOverlay.swift` — `.pageBadge(name)` modifier;
+    bottom-leading, 9 pt mono, faint mint, always visible in
+    TestFlight. Always-visible by design per user ask.
+  - `VoltraAssignmentPanel.swift` — single-line header
+    `VL1 ⌚ │ L R ⋏ •• │ SS`, single-Voltra UX (⋏ and •• hidden
+    until both paired), per-exercise override scope via
+    `mdm.exerciseAssignmentOverride[name]`, pills lock during
+    live set via `isReadOnly` flag. Mint breathing ring on
+    active pill (1.4 s autoreverse). Fast warn pulse (0.4 s)
+    on greyed pill that the user just tapped to request pair.
+  - `SupersetSwitcherBanner.swift` — V1 supersetBanner
+    (commit e22aaa6) verbatim port + breathing-ring delta on
+    ACTIVE side. Self-hides when supersetTag false or when
+    not both-paired.
+  - `MultiDeviceManager+V42.swift` — extension. Adds
+    `exerciseAssignmentOverride: [String: WorkoutMode]` via
+    static side-store keyed by ObjectIdentifier (extension
+    storage workaround). Adds `requestPairScan(for:)` that
+    emits via `static let scanRequestedSubject` Combine
+    PassthroughSubject so any host can subscribe.
+- **Verification:** None — files compile in isolation but
+  are not yet mounted. Next commit mounts on LoggingHomeView,
+  ExerciseDetailView, and LiveCaptureViewV2.
+- **Risks:**
+  - The MDM extension uses a static side-store dict instead
+    of a real `@Published` property because we are reskinning,
+    not rewriting — the canonical MultiDeviceManager.swift is
+    not modified. Side-store is "nudged" by re-assigning
+    `workoutMode = workoutMode` to force a SwiftUI recompute.
+    If recompute fails to fire on override-only changes, fold
+    the dict into MDM as a real `@Published var` in a follow-
+    up build.
+  - `requestPairScan(for:)` does NOT itself trigger a scan —
+    it just emits on `scanRequestedSubject`. Hosts must
+    subscribe and present a pair sheet. If no host subscribes,
+    a tap on a greyed L or R pill spins the searchingSlot
+    pulse forever. Mounting commit will subscribe in the
+    LoggingHomeView host.
+- **Next step:** Mount the panel on LoggingHomeView (no
+  exerciseName), ExerciseDetailView (per-exercise override
+  scope), and LiveCaptureViewV2 (with isReadOnly bound to
+  isLiveSetInProgress). Mount the switcher banner on
+  LiveCaptureViewV2 only. Add `.pageBadge(...)` to all
+  top-level screens. Subscribe to scanRequestedSubject in
+  LoggingHomeView.
