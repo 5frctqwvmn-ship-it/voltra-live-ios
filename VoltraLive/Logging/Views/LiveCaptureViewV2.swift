@@ -540,7 +540,7 @@ struct LiveCaptureViewV2: View {
     /// Read-only convenience — no mutation.
     private func sessionTotalVolumeLb() -> Double {
         guard let s = logging.activeSession,
-              let insts = s.exerciseInstances else { return 0 }
+              let insts = s.instances else { return 0 }
         var total: Double = 0
         for inst in insts {
             guard let sets = inst.sets else { continue }
