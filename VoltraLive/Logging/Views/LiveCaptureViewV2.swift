@@ -1,33 +1,38 @@
 // LiveCaptureViewV2.swift
 //
-// b53: V2 preview of the live-capture screen. Single-Voltra only.
-// This is a 1:1 port of the design-system spec at:
-//   design-system/ui-kit.html
-//   design-system/preview/index.html (principle 06: REPS PHASE FORCE REST)
-// from the design-studio branch (HEAD 74d0d3b9). The first cut of V2
-// I shipped did NOT match that spec \u2014 it had REPS / PEAK / HR / REST
-// with no phase-tinted PHASE tile, no HR+KCAL paired strip, and no
-// CompareStripView. This rewrite fixes that.
+// b55 (v0.4.33): Rewrite of the V2 single-Voltra capture screen so it
+// MATCHES THE DESIGN-HANDOFF SCREENSHOTS. The b53/b54 V2 was a 2x2
+// REPS/PHASE/FORCE/REST tile grid + HR/KCAL pair + CompareStrip — it
+// did not match the actual A1 spec the design team handed us
+// (screenshots/A1-states.png and A1-drop2.png). The user signed off
+// on a web preview render before this rewrite — that render is the
+// source of truth for the layout below.
 //
-// Layout (top \u2192 bottom inside a scroll view):
-//   1. Header strip       \u2014 LIVE kicker + exercise name + day pill
-//   2. PRIMARY 2x2 GRID   \u2014 REPS / PHASE (wash tint) / FORCE / REST
-//   3. HR / KCAL pair     \u2014 secondary strip with pulse dots
-//   4. CompareStripView   \u2014 LAST REPS / BEST FORCE / TARGET
-//   5. ForceChartView     \u2014 30s rolling, phase-segmented (reused)
-//   6. PLAN + LOG SET CTA \u2014 single primary button
+// Layout (top → bottom):
+//   1. Header strip       — End/back, LEFT CONNECTED pill + "Bench Press · Set 2"
+//                           centered, HR + KCAL pulse pills right
+//   2. Top banner         — Phase strip line (PULL teal / RETURN orange /
+//                           IDLE dim half-fill / WARN full orange when rest
+//                           preset exceeded) + label row; PLUS a second
+//                           rest row beneath when rest is engaged
+//   3. DROP-SET banner    — Visible only when a manual drop sequence is
+//                           armed; shows "DROP-SET 120lb → 110lb [-10 lb]"
+//   4. WEIGHT card        — WEIGHT label + LOADED chip, big mono number,
+//                           ±5/±1 stepper pair; embedded DROP row when armed
+//   5. Mod tile row       — ECC / CHAIN / INV / DROP (4-up grid). DROP tile
+//                           taps open the drop-set configure sheet.
+//   6. Small tiles row    — REPS, TOTAL VOLUME
+//   7. Force chart card   — FORCE · 30s chart with phase-segmented line.
+//                           Sparse single up-tick during idle states (matches
+//                           reference); empty when resting (BOTTOM marker only).
 //
-// Hard rules from design-system/SKILL.md, enforced here:
-//   - Dark canvas only, single accent color (no gradients).
-//   - All live numbers mono + tabular.
-//   - At most 4 primary tiles (REPS / PHASE / FORCE / REST).
-//   - HR + KCAL are SECONDARY (smaller value, pulse dot indicator).
-//   - Tile radius 18px, button radius 12px, 1px hairline borders.
-//   - No emoji, no exclamation marks, operator voice.
+// Container (LiveCaptureContainer) routes here only when the user opted
+// into V2, no chain entries exist, and only one Voltra is paired — so we
+// can safely ignore dual-Voltra and chain UX in this file.
 //
-// Container (LiveCaptureContainer) routes here only when V2 is opted
-// in AND only one Voltra is paired AND chain<2 \u2014 so we can ignore
-// dual / chain UX entirely in this file.
+// Sacred files NOT modified: VoltraProtocol.swift, TelemetryExtractor.swift,
+// PacketParser.swift, FrameAssembler.swift. This view reads BLE telemetry
+// and writes weight changes via WriterRouter — the same path V1 uses.
 
 import SwiftUI
 
@@ -35,66 +40,55 @@ struct LiveCaptureViewV2: View {
 
     // MARK: Environment
 
-    @EnvironmentObject var ble: VoltraBLEManager
+    @EnvironmentObject var ble:     VoltraBLEManager
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var logging: LoggingStore
-    @EnvironmentObject var health: HealthKitStore
-    @EnvironmentObject var mdm: MultiDeviceManager
+    @EnvironmentObject var health:  HealthKitStore
+    @EnvironmentObject var mdm:     MultiDeviceManager
 
     @Environment(\.dismiss) private var dismiss
 
     // MARK: Local state
 
-    @State private var showingEndConfirm = false
+    @State private var showingEndConfirm  = false
     @State private var showingExportSheet = false
     @State private var lastEndedSession: WorkoutSession? = nil
 
-    // Drives the pulse-dot animation on the HR / KCAL secondary tiles.
+    /// Drives the 1Hz pulse-dot animation on HR / KCAL pills.
     @State private var pulseOn: Bool = false
+
+    /// Drives the rest-over blink. Toggled at 1Hz while we're over preset.
+    @State private var blinkOn: Bool = false
+
+    /// Drop-set configure sheet — opened from the DROP mod tile.
+    @State private var showingDropSetConfigure: Bool = false
+
+    /// Owns its own writer router — same pattern as V1. The router survives
+    /// view re-creation cycles via @StateObject.
+    @StateObject private var writerRouter = WriterRouter()
 
     // MARK: Body
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             VoltraColor.bg.ignoresSafeArea()
 
-            ScrollView {
-                VStack(spacing: 14) {
-                    headerStrip
-                    primaryTileGrid
-                    secondaryHRKcalRow
-                    compareStrip
-                    forceChartCard
-                    planCard
-                    Spacer(minLength: 60)
-                }
-                .padding(16)
+            VStack(spacing: 0) {
+                headerStrip
+                topBannerSection
+                dropSetBannerIfArmed
+                weightCard
+                modTileRow
+                smallTileRow
+                forceChartCard
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 22)
         }
         .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    showingEndConfirm = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                        Text("Back")
-                    }
-                    .foregroundColor(VoltraColor.textDim)
-                }
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Text("V2")
-                    .font(.system(size: 10, weight: .bold))
-                    .kerning(1.2)
-                    .foregroundColor(VoltraColor.bg)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(VoltraColor.accent)
-                    .clipShape(Capsule())
-            }
-        }
+        .toolbar { toolbarContent }
         .confirmationDialog(
             "What do you want to do?",
             isPresented: $showingEndConfirm,
@@ -106,7 +100,7 @@ struct LiveCaptureViewV2: View {
                     active.supersetTag = mdm.supersetTag
                 }
                 if let ended = logging.endSession() {
-                    lastEndedSession = ended
+                    lastEndedSession  = ended
                     showingExportSheet = true
                 }
             }
@@ -119,505 +113,487 @@ struct LiveCaptureViewV2: View {
             logging.sessionExitTick &+= 1
         }) {
             if let s = lastEndedSession {
-                ExportSheet(session: s)
-                    .environmentObject(logging)
+                ExportSheet(session: s).environmentObject(logging)
             }
+        }
+        .sheet(isPresented: $showingDropSetConfigure) {
+            DropSetConfigureSheet(
+                startingLb: Int((logging.pendingPlannedWeightLb ?? 0).rounded()),
+                onConfirm:  { steps in startManualDropSequence(steps: steps) },
+                onCancel:   { showingDropSetConfigure = false }
+            )
+            .environmentObject(logging)
         }
         .onAppear {
             health.start()
-            // Kick the pulse-dot animation. 1 Hz, design-system spec.
+            writerRouter.attach(ble: ble)
             withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
                 pulseOn = true
             }
+            // Independent 1Hz blink driver for rest-over UI elements.
+            Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+                Task { @MainActor in self.blinkOn.toggle() }
+            }
+        }
+    }
+
+    // MARK: - Toolbar
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarLeading) { EmptyView() }
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Text("V2")
+                .font(.system(size: 10, weight: .bold))
+                .kerning(1.2)
+                .foregroundColor(VoltraColor.bg)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(VoltraColor.accent)
+                .clipShape(Capsule())
         }
     }
 
     // MARK: - 1. Header strip
 
-    /// b53 V2: minimal header. LIVE kicker, exercise name, day pill.
-    /// No superset kicker because V2 is gated single-Voltra.
+    /// Match the reference layout: [< End]  [LEFT CONNECTED pill / Bench Press · Set 2]  [118 bpm] [42 kcal]
     private var headerStrip: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("LIVE")
-                .font(.system(size: 11, weight: .bold))
-                .kerning(2)
-                .foregroundColor(VoltraColor.accent)
+        HStack(spacing: 8) {
+            Button { showingEndConfirm = true } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("End")
+                        .font(.system(size: 14, weight: .medium))
+                }
+                .foregroundColor(VoltraColor.text)
+            }
+            .buttonStyle(.plain)
 
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(exerciseName)
-                    .font(.system(size: 22, weight: .bold))
+            VStack(spacing: 3) {
+                connectionPill
+                Text(exerciseHeaderText)
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(VoltraColor.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                Spacer(minLength: 8)
-                if let day = logging.activeSession?.dayTypeRaw, !day.isEmpty {
-                    Text(day.uppercased())
-                        .font(.system(size: 10, weight: .bold))
-                        .kerning(1.4)
-                        .foregroundColor(VoltraColor.accent)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .overlay(Capsule().stroke(VoltraColor.accent.opacity(0.5), lineWidth: 1))
-                }
-                Text("SET \(setNumber)")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .kerning(1.4)
+            }
+            .frame(maxWidth: .infinity)
+
+            HStack(spacing: 6) {
+                healthPill(
+                    color: VoltraColor.danger,
+                    value: health.currentHR.map(String.init) ?? "\u{2014}",
+                    unit:  "bpm"
+                )
+                healthPill(
+                    color: VoltraColor.warn,
+                    value: health.sessionKcal > 0 ? String(format: "%.0f", health.sessionKcal) : "\u{2014}",
+                    unit:  "kcal"
+                )
+            }
+        }
+        .padding(.vertical, 10)
+    }
+
+    private var connectionPill: some View {
+        let connected = ble.connectionState.isConnected || mdm.left.connectionState.isConnected || mdm.right.connectionState.isConnected
+        let label: String = {
+            if mdm.left.connectionState.isConnected, !mdm.right.connectionState.isConnected { return "LEFT CONNECTED" }
+            if mdm.right.connectionState.isConnected, !mdm.left.connectionState.isConnected { return "RIGHT CONNECTED" }
+            if ble.connectionState.isConnected { return "CONNECTED" }
+            return "DISCONNECTED"
+        }()
+        let color = connected ? VoltraColor.accent : VoltraColor.textFaint
+        return HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 5, height: 5)
+                .shadow(color: connected ? color.opacity(0.7) : .clear, radius: 3)
+            Text(label)
+                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                .kerning(1.0)
+                .foregroundColor(color)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 3)
+        .background(color.opacity(0.10))
+        .overlay(Capsule().stroke(color.opacity(0.35), lineWidth: 1))
+        .clipShape(Capsule())
+    }
+
+    private func healthPill(color: Color, value: String, unit: String) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+                .shadow(color: color.opacity(0.7), radius: 3)
+                .opacity(pulseOn ? 1.0 : 0.55)
+                .scaleEffect(pulseOn ? 1.0 : 0.85)
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .monospacedDigit()
+                .foregroundColor(VoltraColor.text)
+            Text(unit)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(VoltraColor.textDim)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(VoltraColor.bgElev2)
+        .overlay(Capsule().stroke(VoltraColor.border, lineWidth: 1))
+        .clipShape(Capsule())
+    }
+
+    // MARK: - 2. Top banner (phase strip + optional rest row)
+
+    /// The phase strip is always visible. The rest row only appears when
+    /// `restElapsedSeconds > 0` (i.e. the user has finalized a set and is
+    /// in the rest window). Over-preset state turns the strip warn orange
+    /// and adds a blink to the rest row.
+    private var topBannerSection: some View {
+        let phase = ble.telemetry.phase
+        let restElapsed = Int(session.restElapsedSeconds.rounded())
+        let restPreset  = restPresetSeconds
+        let isResting   = restElapsed > 0
+        let over        = isResting && restElapsed > restPreset
+
+        return TopBannerV2(
+            phase:        phase,
+            isResting:    isResting,
+            restElapsed:  restElapsed,
+            restPreset:   restPreset,
+            over:         over,
+            blinkOn:      blinkOn,
+            setNumber:    setNumber,
+            onTapToStart: { /* tap-to-start is wired by SessionStore via the existing rest UI */ }
+        )
+        .padding(.bottom, 6)
+    }
+
+    // MARK: - 3. DROP-SET banner
+
+    /// Visible when a manual drop sequence is armed (V2-only: configured by
+    /// tapping the DROP mod tile). Mirrors the auto-cascade banner style
+    /// but uses the user's explicit step list.
+    @ViewBuilder
+    private var dropSetBannerIfArmed: some View {
+        if let seq = logging.manualDropSequence,
+           seq.count >= 2,
+           let head = seq.first,
+           let next = seq.dropFirst().first {
+            DropSetBannerV2(
+                fromLb: Int(head.rounded()),
+                toLb:   Int(next.rounded()),
+                stepLb: Int((head - next).rounded()),
+                blinkOn: false  // banner does NOT blink — only rest-over strip does
+            )
+            .padding(.bottom, 6)
+        }
+    }
+
+    // MARK: - 4. WEIGHT card
+
+    private var weightCard: some View {
+        let weightLb = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
+        let isLoaded = ble.connectionState.isConnected || mdm.left.connectionState.isConnected || mdm.right.connectionState.isConnected
+        let dropArmed = (logging.manualDropSequence?.count ?? 0) >= 2
+
+        return VStack(spacing: 0) {
+            // Top row: WEIGHT label + LOADED chip
+            HStack {
+                Text("WEIGHT")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.6)
                     .foregroundColor(VoltraColor.textDim)
+                Spacer()
+                if isLoaded {
+                    HStack(spacing: 5) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("LOADED")
+                            .font(.system(size: 9, weight: .bold))
+                            .kerning(1.4)
+                    }
+                    .foregroundColor(VoltraColor.accent)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .overlay(Capsule().stroke(VoltraColor.border, lineWidth: 1))
+                    .background(VoltraColor.accent.opacity(0.10))
+                    .overlay(Capsule().stroke(VoltraColor.accent.opacity(0.4), lineWidth: 1))
+                    .clipShape(Capsule())
+                }
+            }
+            .padding(.bottom, 6)
+
+            // Big number row + steppers
+            HStack(spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(weightLb)")
+                        .font(.system(size: 44, weight: .bold, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundColor(VoltraColor.text)
+                    Text("lb")
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundColor(VoltraColor.textDim)
+                }
+                Spacer()
+                stepperButton("\u{2212}5") { adjustWeight(-5) }
+                stepperButton("\u{2212}1") { adjustWeight(-1) }
+                stepperButton("+1")        { adjustWeight(+1) }
+                stepperButton("+5")        { adjustWeight(+5) }
+            }
+
+            // Embedded DROP row — only when an explicit drop sequence is armed
+            if dropArmed,
+               let seq = logging.manualDropSequence,
+               let head = seq.first,
+               let next = seq.dropFirst().first {
+                DropRowV2(
+                    fromLb: Int(head.rounded()),
+                    toLb:   Int(next.rounded()),
+                    stepLb: Int((head - next).rounded())
+                )
+                .padding(.top, 10)
             }
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(VoltraColor.bgElev)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(VoltraColor.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.bottom, 8)
     }
 
-    // MARK: - 2. Primary 2x2 grid (REPS / PHASE / FORCE / REST)
-
-    /// b53 V2: the canonical 4 primary tiles per design-system principle
-    /// 06. PHASE tile uses a phase-tinted wash background that follows
-    /// the live BLE phase. All numerals are mono + tabular at 72px.
-    private var primaryTileGrid: some View {
-        let live = ble.telemetry
-        let reps = session.currentSet?.reps ?? 0
-        let force = live.forceLb
-        let rest = Int(session.restElapsedSeconds.rounded())
-        let phase = live.phase
-
-        return VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                bigTile(
-                    label: "REPS",
-                    value: "\(reps)",
-                    unit: nil,
-                    valueColor: VoltraColor.text
-                )
-                phaseTile(phase: phase)
-            }
-            HStack(spacing: 12) {
-                bigTile(
-                    label: "FORCE",
-                    value: force > 0 ? String(format: "%.0f", force) : "\u{2014}",
-                    unit: force > 0 ? "lb" : nil,
-                    valueColor: VoltraColor.phase(phase)
-                )
-                bigTile(
-                    label: "REST",
-                    value: formatRest(rest),
-                    unit: nil,
-                    valueColor: VoltraColor.text,
-                    valueSize: 52  // smaller than 72 because MM:SS has more chars
-                )
-            }
-        }
-    }
-
-    /// Spec-correct primary tile: 18px padding, 18px radius, 1px hairline,
-    /// 11px UPPERCASE label +2 tracked, 72px mono tabular value.
-    private func bigTile(
-        label: String,
-        value: String,
-        unit: String?,
-        valueColor: Color,
-        valueSize: CGFloat = 72
-    ) -> some View {
-        VStack(alignment: .leading) {
+    private func stepperButton(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             Text(label)
-                .font(.system(size: 11, weight: .bold))
-                .kerning(2)
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .foregroundColor(VoltraColor.text)
+                .frame(minWidth: 38, minHeight: 32)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 4)
+        .background(VoltraColor.bgElev2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(VoltraColor.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: - 5. Mod tile row (ECC / CHAIN / INV / DROP)
+
+    private var modTileRow: some View {
+        HStack(spacing: 8) {
+            modTile(systemImage: "arrow.down.to.line", label: "ECC",   active: logging.upcomingEccEnabled && logging.upcomingEccLb > 0)
+            modTile(systemImage: "link",               label: "CHAIN", active: logging.upcomingChainsEnabled && logging.upcomingChainsLb > 0)
+            modTile(systemImage: "arrow.uturn.left",   label: "INV",   active: false /* INV not surfaced in V2 yet */)
+            modTile(systemImage: "chart.bar.fill",     label: "DROP",
+                    active: (logging.manualDropSequence?.count ?? 0) >= 2,
+                    onTap:  { showingDropSetConfigure = true })
+        }
+        .padding(.bottom, 8)
+    }
+
+    private func modTile(systemImage: String, label: String, active: Bool, onTap: (() -> Void)? = nil) -> some View {
+        Button {
+            onTap?()
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundColor(active ? VoltraColor.accent : VoltraColor.textDim)
+                Text(label)
+                    .font(.system(size: 10, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundColor(active ? VoltraColor.accent : VoltraColor.textDim)
+            }
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .background(VoltraColor.bgElev)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(active ? VoltraColor.accent.opacity(0.4) : VoltraColor.border, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .disabled(onTap == nil)
+    }
+
+    // MARK: - 6. Small tile row (REPS / TOTAL VOLUME)
+
+    private var smallTileRow: some View {
+        HStack(spacing: 8) {
+            smallTile(label: "REPS",         value: "\(session.currentSet?.reps ?? 0)",      unit: nil)
+            smallTile(label: "TOTAL VOLUME", value: formattedTotalVolume(),                  unit: "lb", smallNumber: true)
+        }
+        .padding(.bottom, 8)
+    }
+
+    private func smallTile(label: String, value: String, unit: String?, smallNumber: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.system(size: 9, weight: .bold))
+                .kerning(1.6)
                 .foregroundColor(VoltraColor.textDim)
-            Spacer(minLength: 8)
-            HStack(alignment: .lastTextBaseline, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(value)
-                    .font(.system(size: valueSize, weight: .bold, design: .monospaced))
+                    .font(.system(size: smallNumber ? 24 : 32, weight: .bold, design: .monospaced))
                     .monospacedDigit()
-                    .foregroundColor(valueColor)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
+                    .foregroundColor(VoltraColor.text)
                 if let u = unit {
                     Text(u)
-                        .font(.system(size: 22, weight: .medium, design: .monospaced))
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundColor(VoltraColor.textDim)
                 }
             }
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 70, alignment: .topLeading)
         .background(VoltraColor.bgElev)
         .overlay(
-            RoundedRectangle(cornerRadius: 18)
+            RoundedRectangle(cornerRadius: 14)
                 .stroke(VoltraColor.border, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
-    /// Phase tile with wash-tinted background. Spec from ui-kit.html:
-    ///   .phase-pull   { background: rgba(0,212,170,.12); border: rgba(0,212,170,.35); }
-    ///   .phase-return { background: rgba(255,184,77,.12); border: rgba(255,184,77,.35); }
-    ///   .phase-idle   { plain bg-elev }
-    private func phaseTile(phase: VoltraPhase) -> some View {
-        let color = VoltraColor.phase(phase)
-        let washBg: Color
-        let borderColor: Color
-        switch phase {
-        case .pull:
-            washBg = VoltraColor.pullWash
-            borderColor = VoltraColor.pull.opacity(0.35)
-        case .return:
-            washBg = VoltraColor.returnWash
-            borderColor = VoltraColor.returnPhase.opacity(0.35)
-        case .transition, .idle:
-            washBg = Color.clear
-            borderColor = VoltraColor.border
-        }
+    // MARK: - 7. Force chart card
 
-        return VStack(alignment: .leading) {
-            Text("PHASE")
-                .font(.system(size: 11, weight: .bold))
-                .kerning(2)
-                .foregroundColor(color)
-            Spacer(minLength: 8)
-            Text(phaseLabel(phase))
-                .font(.system(size: 52, weight: .bold))
-                .foregroundColor(color)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
-        .background(VoltraColor.bgElev)
-        .background(washBg)
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(borderColor, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .animation(.easeInOut(duration: 0.18), value: phase)
-    }
-
-    // MARK: - 3. HR / KCAL secondary pair
-
-    /// b53 V2: secondary HR + KCAL tile pair with pulse-dot freshness
-    /// indicator. Pulse dot blinks at 1 Hz when the most recent HK
-    /// sample is < 5 s old, goes flat-grey when stale. Spec from
-    /// ui-kit.html "HR / KCAL pair".
-    private var secondaryHRKcalRow: some View {
-        let now = Date()
-        let hrFresh = (health.lastHRSampleAt.map { now.timeIntervalSince($0) } ?? .infinity) < 5
-        let kcalFresh = (health.lastKcalSampleAt.map { now.timeIntervalSince($0) } ?? .infinity) < 5
-
-        return HStack(spacing: 12) {
-            secondaryTile(
-                label: "HR",
-                iconColor: VoltraColor.danger,
-                iconSystemName: "heart.fill",
-                value: health.currentHR.map(String.init) ?? "\u{2014}",
-                unit: "bpm",
-                isFresh: hrFresh
-            )
-            secondaryTile(
-                label: "KCAL",
-                iconColor: VoltraColor.warn,
-                iconSystemName: "flame.fill",
-                value: health.sessionKcal > 0 ? String(format: "%.0f", health.sessionKcal) : "\u{2014}",
-                unit: "kcal",
-                isFresh: kcalFresh
-            )
-        }
-    }
-
-    private func secondaryTile(
-        label: String,
-        iconColor: Color,
-        iconSystemName: String,
-        value: String,
-        unit: String,
-        isFresh: Bool
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: iconSystemName)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(iconColor)
-                Text(label)
-                    .font(.system(size: 11, weight: .bold))
-                    .kerning(2)
-                    .foregroundColor(VoltraColor.textDim)
-                Spacer()
-                pulseDot(isFresh: isFresh)
-            }
-            HStack(alignment: .lastTextBaseline, spacing: 6) {
-                Text(value)
-                    .font(.system(size: 28, weight: .bold, design: .monospaced))
-                    .monospacedDigit()
-                    .foregroundColor(VoltraColor.text)
-                Text(unit)
-                    .font(.system(size: 12))
-                    .foregroundColor(VoltraColor.textDim)
-            }
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(VoltraColor.bgElev)
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(VoltraColor.border, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-    }
-
-    /// 8px circle. Fresh: green with glow + 1Hz blink. Stale: flat grey.
-    private func pulseDot(isFresh: Bool) -> some View {
-        Circle()
-            .fill(isFresh ? VoltraColor.fresh : VoltraColor.freshStale)
-            .frame(width: 8, height: 8)
-            .shadow(color: isFresh ? VoltraColor.fresh.opacity(0.7) : .clear, radius: 4)
-            .opacity(isFresh ? (pulseOn ? 1.0 : 0.45) : 1.0)
-    }
-
-    // MARK: - 4. CompareStripView (LAST REPS / BEST FORCE / TARGET)
-
-    /// b53 V2: 3-cell horizontal strip showing context relative to past
-    /// performance. Spec from ui-kit.html "CompareStripView". When we
-    /// don't have a prior set yet, cells render \u2014 placeholders.
-    private var compareStrip: some View {
-        let priorSet = mostRecentPriorLoggedSet()
-        let bestForce = bestForceForActiveExercise()
-        let target = logging.pendingPlannedWeightLb ?? 0
-        let liveReps = session.currentSet?.reps ?? 0
-        let liveForce = ble.telemetry.forceLb
-
-        return HStack(spacing: 0) {
-            compareCell(
-                label: "LAST · REPS",
-                value: priorSet.map { "\($0.reps)" } ?? "\u{2014}",
-                unit: nil,
-                delta: priorSet.map { p in
-                    let d = liveReps - p.reps
-                    return (text: d == 0 ? "= last" : (d > 0 ? "+\(d) vs last" : "\(d) vs last"),
-                            color: d > 0 ? VoltraColor.pull : (d < 0 ? VoltraColor.returnPhase : VoltraColor.textDim))
-                },
-                showDivider: true
-            )
-            compareCell(
-                label: "BEST · FORCE",
-                value: bestForce > 0 ? String(format: "%.0f", bestForce) : "\u{2014}",
-                unit: bestForce > 0 ? "lb" : nil,
-                delta: bestForce > 0 ? {
-                    let d = liveForce - bestForce
-                    if d >= 0 {
-                        return (text: String(format: "+%.0f vs best", d), color: VoltraColor.pull)
-                    } else {
-                        return (text: String(format: "%.0f vs best", d), color: VoltraColor.returnPhase)
-                    }
-                }() : nil,
-                showDivider: true
-            )
-            compareCell(
-                label: "TARGET",
-                value: target > 0 ? "\(Int(target))" : "\u{2014}",
-                unit: target > 0 ? "lb" : nil,
-                delta: target > 0 ? (text: "on track", color: VoltraColor.textDim) : nil,
-                showDivider: false
-            )
-        }
-        .padding(.vertical, 14)
-        .background(VoltraColor.bgElev)
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(VoltraColor.border, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-    }
-
-    private func compareCell(
-        label: String,
-        value: String,
-        unit: String?,
-        delta: (text: String, color: Color)?,
-        showDivider: Bool
-    ) -> some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(label)
-                    .font(.system(size: 11, weight: .bold))
-                    .kerning(1.5)
-                    .foregroundColor(VoltraColor.textDim)
-                HStack(alignment: .lastTextBaseline, spacing: 4) {
-                    Text(value)
-                        .font(.system(size: 24, weight: .bold, design: .monospaced))
-                        .monospacedDigit()
-                        .foregroundColor(VoltraColor.text)
-                    if let u = unit {
-                        Text(u)
-                            .font(.system(size: 13))
-                            .foregroundColor(VoltraColor.textDim)
-                    }
-                }
-                Text(delta?.text ?? " ")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(delta?.color ?? VoltraColor.textFaint)
-            }
-            .padding(.horizontal, 18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if showDivider {
-                Rectangle()
-                    .fill(VoltraColor.border)
-                    .frame(width: 1)
-            }
-        }
-    }
-
-    // MARK: - 5. Force chart card
-
-    /// b53 V2: same `ForceChartView` the dashboard uses. Wrapped in a
-    /// chart card per ui-kit.html "ForceChartView".
     private var forceChartCard: some View {
+        let phase   = ble.telemetry.phase
+        let force   = ble.telemetry.forceLb
+        let resting = session.restElapsedSeconds > 0
         let samples = session.currentSet?.samples ?? session.lastFinalizedSamples
-        let peak = session.currentSet?.peakLb ?? session.lastFinalizedPeakLb
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("FORCE \u{00B7} 30s")
-                .font(.system(size: 11, weight: .bold))
-                .kerning(2)
-                .foregroundColor(VoltraColor.textDim)
-                .padding(.horizontal, 4)
-            ForceChartView(samples: samples, peakLb: peak)
-                .frame(height: 140)
-                .padding(16)
-                .background(VoltraColor.bgElev)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18)
-                        .stroke(VoltraColor.border, lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-        }
-    }
+        let peak    = session.currentSet?.peakLb ?? session.lastFinalizedPeakLb
 
-    // MARK: - 6. Plan + LOG SET CTA
+        let displayForce: String = {
+            if resting { return "0" }
+            if force > 0 { return String(format: "%.0f", force) }
+            return "\u{2014}"
+        }()
+        let forceColor: Color = resting ? VoltraColor.textFaint : VoltraColor.phase(phase)
 
-    /// b53 V2: plan target + single primary CTA. CTA height is 50px
-    /// per design-system principle 05 (primary CTAs 50px). Disabled
-    /// state uses opacity 0.4 per spec.
-    private var planCard: some View {
-        let planned = logging.pendingPlannedWeightLb ?? 0
-        return VStack(spacing: 12) {
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("PLAN")
-                    .font(.system(size: 11, weight: .bold))
-                    .kerning(2)
+                Text("FORCE \u{00B7} 30 S")
+                    .font(.system(size: 9, weight: .bold))
+                    .kerning(1.6)
                     .foregroundColor(VoltraColor.textDim)
                 Spacer()
-                HStack(alignment: .lastTextBaseline, spacing: 4) {
-                    Text(planned > 0 ? "\(Int(planned))" : "\u{2014}")
-                        .font(.system(size: 22, weight: .bold, design: .monospaced))
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(displayForce)
+                        .font(.system(size: 18, weight: .bold, design: .monospaced))
                         .monospacedDigit()
-                        .foregroundColor(VoltraColor.text)
-                    if planned > 0 {
-                        Text("lb")
-                            .font(.system(size: 13))
-                            .foregroundColor(VoltraColor.textDim)
-                    }
+                        .foregroundColor(forceColor)
+                    Text("lb")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(VoltraColor.textDim)
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
-            .background(VoltraColor.bgElev)
-            .overlay(
-                RoundedRectangle(cornerRadius: 18)
-                    .stroke(VoltraColor.border, lineWidth: 1)
+            ForceChartV2(
+                samples:  samples,
+                peakLb:   peak,
+                resting:  resting,
+                idlePhase: phase
             )
-            .clipShape(RoundedRectangle(cornerRadius: 18))
-
-            Button(action: logSetTapped) {
-                HStack {
-                    Spacer()
-                    Text("LOG SET")
-                        .font(.system(size: 15, weight: .semibold))
-                        .kerning(0.5)
-                        .foregroundColor(Color(red: 0, green: 0.168, blue: 0.133)) // #002b22
-                    Spacer()
-                }
-                .frame(height: 50)
-                .background(VoltraColor.accent)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .opacity(canLogSet ? 1.0 : 0.4)
-            }
-            .buttonStyle(.plain)
-            .disabled(!canLogSet)
+            .frame(maxWidth: .infinity, minHeight: 175)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .background(VoltraColor.bgElev)
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(VoltraColor.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
     // MARK: - Helpers
 
-    private var exerciseName: String {
-        logging.activeInstance?.exercise?.name ?? "\u{2014}"
+    private var exerciseHeaderText: String {
+        let name = logging.activeInstance?.exercise?.name ?? "\u{2014}"
+        return "\(name) \u{00B7} Set \(setNumber)"
     }
 
-    private var setNumber: Int {
-        logging.setNumberForCurrentInstance
+    private var setNumber: Int { logging.setNumberForCurrentInstance }
+
+    /// Default rest preset = 120s (2 min). The session viewmodel doesn't
+    /// expose a per-exercise preset yet; using 120 matches the reference
+    /// screenshots' "01:23 of 02:00" timing.
+    private var restPresetSeconds: Int { 120 }
+
+    private func formattedTotalVolume() -> String {
+        let v = sessionTotalVolumeLb()
+        let nf = NumberFormatter()
+        nf.numberStyle = .decimal
+        nf.maximumFractionDigits = 0
+        return nf.string(from: NSNumber(value: v)) ?? "\(Int(v.rounded()))"
     }
 
-    private var canLogSet: Bool {
-        if let cs = session.currentSet, cs.reps > 0 { return true }
-        if logging.pendingTelemetrySet != nil { return true }
-        return false
-    }
-
-    private func phaseLabel(_ p: VoltraPhase) -> String {
-        switch p {
-        case .pull:       return "PULL"
-        case .return:     return "RETURN"
-        case .transition: return "TRANS"
-        case .idle:       return "IDLE"
+    /// Sum of `weightLb × reps` across logged sets in the active session.
+    /// Read-only convenience — no mutation.
+    private func sessionTotalVolumeLb() -> Double {
+        guard let s = logging.activeSession,
+              let insts = s.exerciseInstances else { return 0 }
+        var total: Double = 0
+        for inst in insts {
+            guard let sets = inst.sets else { continue }
+            for set in sets {
+                total += set.weightLb * Double(set.reps)
+            }
         }
+        return total
     }
 
-    private func formatRest(_ seconds: Int) -> String {
-        let m = seconds / 60
-        let s = seconds % 60
-        return String(format: "%02d:%02d", m, s)
+    // MARK: - Stepper actions (mirror V1's adjustWeight + push)
+
+    private func adjustWeight(_ delta: Int) {
+        let cur  = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
+        let raw  = max(0, min(500, cur + delta))
+        let next = CombinedParity.enforce(raw, mode: mdm.workoutMode)
+        logging.pendingPlannedWeightLb = Double(next)
+        logging.reanchorCascadeIfActive(toLb: Double(next))
+        pushWeightToDevice()
     }
 
-    /// Most recent LoggedSet for the active exercise across the active
-    /// session. Used for the LAST cell of the compare strip.
-    private func mostRecentPriorLoggedSet() -> LoggedSet? {
-        guard let inst = logging.activeInstance,
-              let sets = inst.sets,
-              !sets.isEmpty else { return nil }
-        return sets.sorted { $0.orderIndex > $1.orderIndex }.first
-    }
-
-    /// Best peak force for the active exercise across all sessions in
-    /// this instance. Used for the BEST cell of the compare strip.
-    private func bestForceForActiveExercise() -> Double {
-        guard let inst = logging.activeInstance,
-              let sets = inst.sets else { return 0 }
-        return sets.map(\.peakForceLb).max() ?? 0
-    }
-
-    private func logSetTapped() {
-        let pending: CompletedSet? = logging.pendingTelemetrySet ?? session.currentSet.map { cs in
-            CompletedSet(
-                reps: cs.reps,
-                peakLb: cs.peakLb,
-                startedAt: cs.startedAt,
-                endedAt: cs.endedAt ?? Date()
+    private func pushWeightToDevice() {
+        let m = logging.pulleyMultiplier
+        let baseLb     = Int(((logging.pendingPlannedWeightLb ?? 0) * m).rounded())
+        let eccLb      = logging.upcomingEccEnabled    ? Int((logging.upcomingEccLb    * m).rounded()) : 0
+        let chainsLb   = logging.upcomingChainsEnabled ? Int((logging.upcomingChainsLb * m).rounded()) : 0
+        let voltraMode: VoltraMode = (logging.upcomingMode == .band) ? .band : .weight
+        let state = VoltraDeviceState(
+            mode: voltraMode,
+            modifiers: VoltraModifiers(eccentric: eccLb > 0, chains: chainsLb > 0, inverse: false),
+            weights: VoltraWeights(
+                baseLb: baseLb,
+                eccentricLb: eccLb,
+                chainsLb: chainsLb,
+                bandMaxForceLb: 0,
+                damperLevel: 0
             )
-        }
-        let weight = logging.pendingPlannedWeightLb ?? 0
-        logging.logSet(
-            weightLb: weight,
-            eccentricLb: nil,
-            reps: pending?.reps ?? 0,
-            chainsLb: nil,
-            peakForceLb: pending?.peakLb ?? 0,
-            startedAt: pending?.startedAt,
-            endedAt: pending?.endedAt,
-            mode: .working,
-            labelText: "",
-            notes: nil,
-            autofilledFromTelemetry: pending != nil
         )
+        writerRouter.apply(state, mdm: mdm, assignment: logging.activeInstance?.assignedVoltra)
+    }
+
+    // MARK: - Manual drop sequence (V2-only)
+
+    private func startManualDropSequence(steps: [Int]) {
+        showingDropSetConfigure = false
+        let stepsD = steps.map(Double.init)
+        guard stepsD.count >= 2 else { return }
+        logging.manualDropSequence = stepsD
+        logging.manualDropIndex    = 0
+        // Push the head weight to the device so the user is on it.
+        if let head = stepsD.first {
+            logging.pendingPlannedWeightLb = head
+            pushWeightToDevice()
+        }
     }
 }

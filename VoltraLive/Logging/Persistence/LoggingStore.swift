@@ -172,6 +172,25 @@ final class LoggingStore: ObservableObject {
     /// so the home view can pop the entire navigation stack back to root.
     /// Avoids the user being stranded on the (now-empty) capture screen.
     @Published var sessionExitTick: Int = 0
+
+    // MARK: - V2 manual drop sequence (b55)
+
+    /// b55: V2-only explicit drop-set sequence configured by the user via
+    /// `DropSetConfigureSheet`. Distinct from the `dropChainPlannedLb`
+    /// auto-cascade machinery — that one fires on a timer once the user
+    /// long-presses the DROP SET tile. This list is finalize-driven: each
+    /// time the user logs a set, the V2 view advances `manualDropIndex`
+    /// and pushes the next entry to the device.
+    ///
+    /// Element [0] is the head weight (the user's starting load). The list
+    /// is descending. Cleared on `endSession()` and `cancelDropSet()`.
+    @Published var manualDropSequence: [Double]? = nil
+
+    /// b55: 0-based index into `manualDropSequence`. The current target
+    /// weight is `manualDropSequence?[manualDropIndex]`. UI consumers read
+    /// `manualDropSequence?.first` and `.dropFirst().first` to render the
+    /// FROM / TO pair on the DROP banner / row.
+    @Published var manualDropIndex: Int = 0
     /// When the rest timer should anchor (count up from). Driven by:
     ///   - Telemetry: when the Vulture reports an idle boundary (set ended on
     ///     the device), we set this to that endedAt — so rest starts the
@@ -418,6 +437,10 @@ final class LoggingStore: ObservableObject {
         // LongPressGesture both fire on touch-up, so without a cooldown
         // the cancel is immediately re-armed by the same gesture's tap.
         dropChainArmCooldownUntil = Date().addingTimeInterval(1.5)
+        // b55: also tear down V2 manual drop sequence so the DROP banner
+        // and DROP row disappear when the user cancels.
+        manualDropSequence = nil
+        manualDropIndex = 0
         sessionStore?.endDropChainModeOnly()
     }
 
@@ -1055,6 +1078,9 @@ final class LoggingStore: ObservableObject {
         sessionStore?.completedSets = []
         consumedSetCount = 0
         restAnchor = nil
+        // b55: clear V2 manual drop sequence on session end.
+        manualDropSequence = nil
+        manualDropIndex = 0
         return result
     }
 

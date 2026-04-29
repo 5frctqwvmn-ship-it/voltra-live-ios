@@ -1792,3 +1792,112 @@ churn, no new HK API.
    to V1 (b54 gate change). Backing out of the chain returns V2.
 5. **Both Voltras paired.** V2 never renders even if opted in
    (bothPaired fallback unchanged from b53).
+
+---
+
+## b55 (v0.4.33-build55) — V2 single-Voltra LiveCaptureView, full design-handoff match
+
+**Why.** b53 / b54 had shipped a V2 LiveCaptureView that did not
+match the design handoff. The b54 V2 was a 2x2 REPS / PHASE / FORCE
+/ REST tile grid with HR + KCAL pills and a CompareStrip — clever,
+but unrelated to what `screenshots/A1-states.png` and
+`screenshots/A1-drop2.png` (the design team's reference render)
+actually specified. Before writing any Swift, we rendered a static
+HTML preview at `voltra-v2-preview/index.html` of all six artboards
+(three rest-timer states × drop-set off/on), iterated on the
+phase-strip / force-chart / drop-set rules, and got user sign-off
+on that render. b55 ports that signed-off render to SwiftUI.
+
+**What ships.**
+
+- **Layout (top → bottom).** Header (End / connection pill +
+  exercise · set / HR + KCAL pulse pills) → Top banner (always-
+  visible phase strip + optional rest row) → Drop-set banner (when
+  manual drop sequence armed) → WEIGHT card (mono number + ±5/±1
+  steppers + embedded DROP row) → Mod tile row (ECC / CHAIN / INV
+  / DROP, tap DROP to configure) → Small tile row (REPS / TOTAL
+  VOLUME) → FORCE · 30s chart card.
+- **Phase strip is ALWAYS visible.** PULL → full-width teal glow.
+  RETURN → full-width orange glow. IDLE under-rest → dim half-fill
+  teal. IDLE over-rest → full-width WARN orange. The strip persists
+  through the rest window — that was the central error in the b53/b54
+  V2: rest swallowed the strip.
+- **Rest row.** Sits beneath the strip with a 1px hairline divider
+  when `restElapsedSeconds > 0`. Under preset: green REST + timer.
+  Over preset: orange REST · OVER + +MM:SS, both blink at 1Hz. The
+  drop-set banner does NOT blink — only over-rest does.
+- **Force chart (`ForceChartV2`).** Three modes: ACTIVE (phase-
+  segmented polyline of last 30s, tip dot in current phase color),
+  RESTING (empty — only the BOTTOM dashed danger-color marker), and
+  IDLE-NO-DATA (sparse 5-sample up-tick from BOTTOM, anchored to
+  the leftmost ~14% of the canvas, colored by current phase). The
+  IDLE-NO-DATA mode mirrors the web preview's `buildForceHistory`
+  function and tells the user the line is alive even before they
+  start a rep.
+- **Drop-set creation flow.** Tapping the DROP mod tile opens
+  `DropSetConfigureSheet`, which lets the user enter FROM / TO /
+  STEP and previews the resolved descending step list. On confirm,
+  we stuff the list onto `LoggingStore.manualDropSequence` and push
+  the head weight to the device via the same `WriterRouter` path
+  V1 uses. The DROP banner + DROP row appear automatically.
+- **`LoggingStore` additions.** `manualDropSequence: [Double]?` and
+  `manualDropIndex: Int = 0`. Cleared on `endSession()` and
+  `cancelDropSet()`. Distinct from the existing
+  `dropChainPlannedLb` auto-cascade machinery — `dropChainPlannedLb`
+  is timer-fired on long-press; `manualDropSequence` is finalize-
+  driven from the V2 sheet.
+
+**Files.**
+
+- New: `Logging/Views/LiveCaptureViewV2.swift` (rewritten, 600 lines)
+- New: `Logging/Views/V2/TopBannerV2.swift` (210 lines)
+- New: `Logging/Views/V2/DropSetBannerV2.swift` (105 lines)
+- New: `Logging/Views/V2/DropRowV2.swift` (98 lines)
+- New: `Logging/Views/V2/ForceChartV2.swift` (238 lines)
+- New: `Logging/Views/V2/DropSetConfigureSheet.swift` (283 lines)
+- Modified: `Logging/Persistence/LoggingStore.swift`
+  (+ `manualDropSequence`, `manualDropIndex`; resets in
+   `cancelDropSet` and `endSession`)
+- Modified: `Info.plist` (0.4.33 / 55, label "V2 single-Voltra
+  LiveCapture")
+- Deleted: `Logging/Views/LiveCaptureViewV2_b54.swift.OLD` (b54 backup)
+
+**Container untouched.** `LiveCaptureContainer.swift` already had
+the first-launch picker + `@AppStorage("liveCaptureUIVersion")` +
+`shouldUseV2` gate (false when bothPaired or hasChain ≥ 1) from
+b54. b55 leaves all of that alone — V2 is still opt-in, V1 is still
+the default, and every shape that isn't single-Voltra-no-chain
+silently falls back to V1.
+
+**Sacred files untouched.** No changes to `VoltraProtocol.swift`,
+`TelemetryExtractor.swift`, `PacketParser.swift`,
+`FrameAssembler.swift`. No SwiftData model migration. No BLE
+state-machine changes.
+
+**Test plan**
+
+1. **Single Voltra paired, V2 chosen.** Live screen matches the
+   web-preview render: header strip → phase strip + label →
+   WEIGHT card → mod tiles → REPS + TOTAL VOLUME → FORCE chart.
+   No 2x2 grid, no CompareStrip, no PHASE tile.
+2. **Idle phase strip.** PULL idle shows full-width teal line.
+   RETURN idle shows full-width orange line. Force chart is
+   sparse single up-tick in matching phase color.
+3. **Resting under preset.** Strip becomes half-fill teal, label
+   "IDLE" faint; rest row appears under hairline with green REST +
+   timer. Force chart goes empty (BOTTOM marker only).
+4. **Resting over preset.** Strip turns warn orange full-width;
+   rest row blinks 1Hz with orange REST · OVER + +MM:SS.
+5. **Tap DROP mod tile.** Configure sheet opens, FROM defaults to
+   current weight. Adjust TO / STEP, see live preview. Confirm →
+   sheet dismisses, DROP banner appears between header and WEIGHT
+   card, DROP row appears inside WEIGHT card. Device weight pushed
+   to head value.
+6. **Cancel drop-set (long-press DROP tile, V1 cascade) or end
+   session.** `manualDropSequence` cleared, banner + row vanish.
+7. **Mid-session chain add.** Second exercise added → V2 silently
+   swaps to V1 (container gate unchanged).
+
+**Cost callout.** Medium. Six new SwiftUI files (~1530 lines), one
+LoggingStore addition (+15 lines + 2 resets), one Info.plist bump.
+No protocol churn, no SwiftData migration, no new HK API.

@@ -17,7 +17,7 @@ history is ephemeral — anything that should survive across sessions lives here
 6. Skim `docs/WORK_LOG.md` (tail — last 200 lines is enough) — recent activity in append-only form.
 7. Summarize state back to the user. Then start work.
 
-**Last shipped: v0.4.32-build54 ("V2 spec match"), HEAD `eae659f`.** If `02_CURRENT_STATE.md` shows a different latest build than this line, the file is stale — trust `git log` and `gh run list` over either source and surface the discrepancy to the user before coding.
+**Last shipped: v0.4.33-build55 ("V2 single-Voltra LiveCapture").** b55 rewrote the V2 LiveCaptureView to match the design-handoff render after a sign-off pass on `voltra-v2-preview/index.html`. b54's "V2 spec match" turned out to be a 2x2 tile grid that didn't actually match `screenshots/A1-states.png` — b55 ports the signed-off web preview to SwiftUI: header → phase strip (always-visible) → optional rest row → WEIGHT card with stepper + DROP row → 4-up mod tiles → REPS + TOTAL VOLUME → FORCE chart. New V2-only DROP-SET creation flow: tap DROP mod tile to open `DropSetConfigureSheet`. If `02_CURRENT_STATE.md` shows a different latest build than this line, the file is stale — trust `git log` and `gh run list` over either source and surface the discrepancy to the user before coding.
 
 ## Mandatory commit discipline
 

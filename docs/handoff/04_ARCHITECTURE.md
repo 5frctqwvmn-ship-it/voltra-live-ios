@@ -34,7 +34,13 @@ VoltraLive/
 │   └── Views/
 │       ├── LiveCaptureContainer.swift  V1/V2 gate by @AppStorage (b53/b54)
 │       ├── LiveCaptureView.swift       V1 — full feature surface, all chain handling
-│       └── LiveCaptureViewV2.swift     V2 — 1:1 port of design-system/ui-kit.html (b54)
+│       ├── LiveCaptureViewV2.swift     V2 — design-handoff render port (b55)
+│       └── V2/                         V2 component subviews (b55)
+│           ├── TopBannerV2.swift            phase strip + optional rest row
+│           ├── DropSetBannerV2.swift        warn-tinted banner above WEIGHT
+│           ├── DropRowV2.swift              DROP row inside WEIGHT card
+│           ├── ForceChartV2.swift           sparse-idle / empty-rest / active polyline
+│           └── DropSetConfigureSheet.swift  tap-to-configure FROM/TO/STEP
 │
 ├── Views/
 │   └── ConnectView.swift          Single Connect button (build-30: replace with 3 buttons)
@@ -82,7 +88,7 @@ FrameAssembler ──► PacketParser ──► TelemetryExtractor
 Control writes flow the other direction: UI → `VoltraWriter` → BLE
 characteristic write → device. See `05_BLE_AND_PROTOCOL.md#control-writes`.
 
-## LiveCapture V1/V2 split (b54)
+## LiveCapture V1/V2 split (b54 gate, b55 V2 rewrite)
 
 `LiveCaptureContainer` is the entry point from the rest of the app.
 It reads `@AppStorage("liveCaptureUIVersion")` (values: `"v1"`,
@@ -96,14 +102,42 @@ Any other state — 2 Voltras paired, Combined, Superset, ≥1 chain
 entry — falls through to V1 regardless of stored preference. V1 is
 the full feature surface; V2 is intentionally narrower.
 
-V2 (`LiveCaptureViewV2.swift`) is a 1:1 port of
-`design-system/ui-kit.html` from the `design-studio` branch (HEAD
-`74d0d3b9` at b54 ship). Layout: header strip → 2×2 tile grid
-(REPS / PHASE / FORCE / REST) → HR/KCAL pulse-dot pair →
-CompareStripView → force chart card → plan + LOG SET CTA. Uses
-VoltraTheme tokens added in b54: `pullWash`, `returnWash`, `fresh`,
-`freshStale`. **Any V2 change must re-read the spec verbatim before
-coding** — see `00_START_HERE.md` external-spec discipline.
+**b55 V2 rewrite.** The b54 V2 was a 2x2 tile grid (REPS / PHASE
+/ FORCE / REST + HR/KCAL pills + CompareStrip). It was discarded
+in b55 because it didn't match the design handoff. The new V2 is a
+port of `voltra-v2-preview/index.html` (the user-signed-off render)
+and maps to `screenshots/A1-states.png` + `A1-drop2.png`. Layout:
+
+- **Header.** End ← button + connection pill + "Bench Press ·
+  Set 2" + HR / KCAL pulse pills.
+- **Top banner.** Always-visible phase strip (PULL teal full /
+  RETURN orange full / IDLE under-rest dim half-fill / IDLE
+  over-rest WARN orange full); optional rest row beneath with
+  1px hairline divider when `restElapsedSeconds > 0`.
+- **DROP-SET banner.** Visible only when `manualDropSequence` is
+  armed (V2-only manual drop list, distinct from V1 timer-fired
+  cascade). Sits between header and WEIGHT card.
+- **WEIGHT card.** WEIGHT label + LOADED chip, big mono number,
+  ±5 / ±1 stepper pair, embedded DROP row when armed.
+- **Mod tile row.** ECC / CHAIN / INV / DROP, 4-up grid. DROP
+  tile is tap-to-configure (opens `DropSetConfigureSheet`).
+- **Small tiles.** REPS, TOTAL VOLUME.
+- **Force chart.** `ForceChartV2` — ACTIVE polyline / RESTING
+  empty / IDLE-NO-DATA sparse 5-sample up-tick.
+
+Uses VoltraTheme tokens added in b54 plus the existing
+`pull` / `returnPhase` / `warn` / `transition` / `idle` / `danger`
+set. **Any V2 change must re-read the spec verbatim before coding**
+— see `00_START_HERE.md` external-spec discipline. The web preview
+at `voltra-v2-preview/index.html` is the source of truth; do not
+rebuild it from screenshots without re-rendering and getting a new
+sign-off.
+
+**V2-only `LoggingStore` state (b55).**
+`manualDropSequence: [Double]?` (nil when no drop armed; descending
+step list otherwise) and `manualDropIndex: Int = 0`. Cleared on
+`endSession()` and `cancelDropSet()`. Distinct from
+`dropChainPlannedLb` which is the V1 timer-fired cascade.
 
 All b53 chain features (per-instance `assignedVoltra` routing, 3-way
 L/R/Both picker, header rewrite, SWAP-no-auto-LOAD) live in V1. V2
