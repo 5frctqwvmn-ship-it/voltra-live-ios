@@ -4,6 +4,18 @@
 > `docs/WORK_LOG.md` and are deleted from here. Unfixed items
 > stay until shipped.
 
+## b68 Bug Batch — OPEN (cycle started Apr 29 2026 PDT)
+
+New bug cycle opened immediately after b67 TestFlight ship
+verify. See `B68_BUG_QUEUE.md` for the live queue + held
+questions. Cycle target: v0.4.41 / build 68 on
+`feat/ui-v4-2-claude`.
+
+- **B68-01** — OPEN — Demo mode should auto-engage in Live View
+  when no Voltra is connected (regression caused by B67-01
+  cold-launch flip; `DemoModeButton(.prePair)` in `ConnectView`
+  is unreachable from the root flow).
+
 ## b67 Bug Batch — SHIPPED in v0.4.40 / build 67
 
 All 9 entries in `B67_BUG_QUEUE.md` are CLOSED in b67. See

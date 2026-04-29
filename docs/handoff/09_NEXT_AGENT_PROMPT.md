@@ -4,7 +4,19 @@
 > up VOLTRA Live iOS. Skim, then read the docs in the order at
 > the bottom.
 
-## Where things stand (b67 fixed in-tree, awaiting altool ship)
+## Where things stand (b68 cycle opened; b67 SHIPPED)
+
+**ACTIVE CYCLE:** b68 / v0.4.41 / build 68 — cycle opened
+Apr 29 2026 (PDT) immediately after b67 TestFlight ship
+verify. First bug **B68-01** (demo mode auto-engage regression)
+is logged in `B68_BUG_QUEUE.md` with held questions Q1–Q5
+embedded inline. User has invoked HR#2 ("hold questions until I
+say done") — do not start fix execution until the user says
+"done". When unblocked, ask Q1–Q5 via multiple choice, then
+implement on `feat/ui-v4-2-claude`, ship as build 68 via
+`release.yml dry_run=false` + 5-gate altool verify.
+
+## Previous cycle (b67) — SHIPPED to TestFlight
 
 **ACTIVE CYCLE:** b67 / v0.4.40 / build 67 — all 9 user-reported
 bugs (Apr 29 2026 batch) are **fixed and committed** on
