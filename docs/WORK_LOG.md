@@ -2935,6 +2935,22 @@ Zero matches in non-comment in-app chrome.
 `VoltraProtocol.swift`, `TelemetryExtractor.swift`, `PacketParser.swift`,
 `FrameAssembler.swift`, `release.yml`, `build.yml` all clean.
 
-### Ship verification
+### Ship verification (5-gate altool, b67)
 
-(See "Ship verification" subsection below — populated post-altool.)
+Workflow run: [25137426370](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25137426370)
+status = success.
+
+1. **Exit code 0** — confirmed (`altool upload succeeded`).
+2. **Wall-clock duration ≥20 s** — 33 s.
+3. **Positive success marker** — both `UPLOAD SUCCEEDED with no errors`
+   and `No errors uploading archive at 'build/export/VoltraLive.ipa'`
+   present in the altool log.
+4. **Zero failure markers** — blocklist grep clean against the live
+   altool stdout (UPLOAD FAILED / Validation failed / ERROR ITMS- /
+   Failed to upload package / ERROR: [ContentDelivery / ERROR:
+   [altool / `(-NNNN)`).
+5. **Delivery UUID:** `db338dcf-9c67-4d47-8853-c415bf62797a`.
+
+**TestFlight surface:** v0.4.40 (build 67) uploaded to App Store
+Connect at 22:42 UTC on Apr 29 2026. Awaiting Apple processing
+before the build appears in TestFlight.
