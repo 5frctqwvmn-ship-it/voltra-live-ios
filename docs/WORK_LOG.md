@@ -2703,3 +2703,64 @@ new rule.
   LiveCaptureViewV2 only. Add `.pageBadge(...)` to all
   top-level screens. Subscribe to scanRequestedSubject in
   LoggingHomeView.
+
+## 2026-04-29 21:30 UTC — b66 V4.2: mount panel + page badges + supersede WorkoutVoltraPickerSheet
+
+- **Files changed:**
+  - `VoltraLive/Logging/Views/LoggingHomeView.swift` — mount panel
+    between header and "PICK A DAY"; subscribe to
+    `MultiDeviceManager.scanRequestedSubject` and present
+    `DualConnectView` as a sheet on greyed L/R pill tap; add
+    `.pageBadge("LoggingHomeView")`. Imported Combine for
+    `AnyCancellable`.
+  - `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — added
+    `isLiveSetInProgress` computed property gated on
+    `ble.telemetry.forceLb > 3.0` (mirrors engine
+    `cascadeIdleForceFloorLb`). Mounted panel (with
+    exerciseName + isReadOnly bindings) and superset switcher
+    banner at top of scroll, before headerStrip. Added
+    `.pageBadge("LiveCaptureViewV2")`.
+  - `VoltraLive/Logging/Views/ExerciseDetailView.swift` —
+    mounted panel at top of scroll VStack with per-exercise
+    override scope (exerciseName). Added
+    `.pageBadge("ExerciseDetailView")`.
+  - 12 other top-level views (`ContentView`, `ConnectView`,
+    `DashboardView`, `DualCaptureView`, `DualConnectView`,
+    `ExercisePickerView`, `LiveCaptureView`, `SetLogView`,
+    `ExportSheet`, `ExerciseStartView`, `DebugView`,
+    `LiveCaptureContainer`) — added `.pageBadge("<TypeName>")`
+    by automated brace-balanced insertion at the body close.
+  - `VoltraLive/Views/WorkoutVoltraPickerSheet.swift` —
+    superseded-status header banner. File kept on disk; no
+    live call sites (b49 unified-flow refactor already pulled
+    the wiring from LoggingHomeView).
+- **What changed:** All three primary mount points wired up
+  per mirror rule 1A + lock rule 2A. Page-name badge applied
+  to every top-level View struct (per user ask: "I want you
+  to put on the bottom left of every page what you name that
+  page on the app"). The greyed L/R pill flow now reaches the
+  existing `DualConnectView` pair sheet via the
+  `scanRequestedSubject` Combine bridge.
+- **Verification:** None on hardware yet. Files compile in
+  isolation; no API references invented (all checked against
+  `MultiDeviceManager`, `LoggingStore`, `BLEConnectionState`,
+  `WorkoutMode`, `DeviceSlot` definitions on `main`).
+- **Risks:**
+  - The page-badge auto-patcher inserted a comment + modifier
+    line at the body-close brace of each view. If any view
+    had a non-trivial trailing modifier chain that needed to
+    stay last (e.g. an environment value that gates child
+    views), the badge now sits below it. Spot-checked
+    LiveCaptureView, ContentView, DebugView — all clean.
+    Build will catch any remaining issues.
+  - The MDM extension's static `scanRequestedSubject` has a
+    single subscriber (LoggingHomeView). LiveCaptureViewV2
+    does not subscribe — pills are read-only there during
+    a live set. ExerciseDetailView does not subscribe either
+    because greyed-pill taps from that screen are still
+    unusual; if QA finds them needed, add an identical
+    subscribe-block.
+- **Next step:** Stage commit + push (durability turn 2),
+  then move to bug fixes B1/B2 (DROP ±5/±1 stepper behavior),
+  P1-1 (3-digit weight + TWIN badge overlap), P1-2 (rest-
+  timer first-engage), F1 (sine-wave per-rep — scope-first).

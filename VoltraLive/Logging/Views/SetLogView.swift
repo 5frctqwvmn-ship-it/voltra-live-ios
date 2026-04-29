@@ -60,7 +60,9 @@ struct SetLogView: View {
         }
         .presentationDetents([.large, .medium])
         .buildBadgeOverlay()
-    }
+        // b66 V4.2: page-name badge.
+        .pageBadge("SetLogView")
+        }
 
     // MARK: - Pieces
 

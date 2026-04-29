@@ -105,7 +105,9 @@ struct ExerciseStartView: View {
         .onChange(of: logging.setNumberForCurrentInstance) { _, _ in
             refreshSuggestion()
         }
-    }
+        // b66 V4.2: page-name badge.
+        .pageBadge("ExerciseStartView")
+        }
 
     // MARK: - Pieces
 

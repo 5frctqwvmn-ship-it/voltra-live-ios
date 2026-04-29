@@ -40,7 +40,9 @@ struct ConnectView: View {
                         .environmentObject(mdm)
                 }
         }
-    }
+        // b66 V4.2: page-name badge.
+        .pageBadge("ConnectView")
+        }
 
     private var content: some View {
         VStack(spacing: 0) {

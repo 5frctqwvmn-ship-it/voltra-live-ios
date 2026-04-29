@@ -92,6 +92,16 @@ struct ExerciseDetailView: View {
             VoltraColor.bg.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    // b66 V4.2: ASSIGN TO VOLTRA panel — per-exercise
+                    // override scope. Mirror rule 1A: the day-screen
+                    // mount writes the default; this mount writes the
+                    // per-exercise override into
+                    // `mdm.exerciseAssignmentOverride[name]`.
+                    VoltraAssignmentPanel(
+                        mdm: mdm,
+                        exerciseName: logging.activeInstance?.exercise?.name
+                    )
+
                     if showsDualVoltraPanel {
                         dualVoltraTopPanel
                     }
@@ -112,6 +122,9 @@ struct ExerciseDetailView: View {
         }
         .navigationTitle(navTitle)
         .navigationBarTitleDisplayMode(.inline)
+        // b66 V4.2: page-name badge — bottom-leading, faint mint,
+        // Swift type name verbatim. Always visible in TestFlight.
+        .pageBadge("ExerciseDetailView")
         .navigationDestination(isPresented: $navigateToCapture) {
             // b53: route through the V1/V2 container instead of pinning
             // V1. Container reads @AppStorage("liveCaptureUIVersion")

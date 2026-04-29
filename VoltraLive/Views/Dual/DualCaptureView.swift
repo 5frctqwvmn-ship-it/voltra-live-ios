@@ -52,7 +52,9 @@ struct DualCaptureView: View {
         .background(VoltraColor.bg)
         .preferredColorScheme(.dark)
         .onAppear { wireTelemetry() }
-    }
+        // b66 V4.2: page-name badge.
+        .pageBadge("DualCaptureView")
+        }
 
     // MARK: - Subviews
 

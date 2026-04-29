@@ -85,7 +85,9 @@ struct DashboardView: View {
         .sheet(isPresented: $showHistory) {
             HistoryDrawerView(isPresented: $showHistory)
         }
-    }
+        // b66 V4.2: page-name badge.
+        .pageBadge("DashboardView")
+        }
 
     // MARK: - Subviews
 

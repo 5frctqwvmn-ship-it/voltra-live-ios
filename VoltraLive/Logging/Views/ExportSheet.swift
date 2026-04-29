@@ -80,7 +80,9 @@ struct ExportSheet: View {
         }
         .presentationDetents([.large])
         .buildBadgeOverlay()
-    }
+        // b66 V4.2: page-name badge.
+        .pageBadge("ExportSheet")
+        }
 
     // MARK: - v0.4.4 summary cards
 

@@ -8,6 +8,7 @@
 // a new one."
 
 import SwiftUI
+import Combine
 
 struct LoggingHomeView: View {
 
@@ -35,6 +36,13 @@ struct LoggingHomeView: View {
 
     @State private var pickedDayType: DayType? = nil
     @State private var customLabel: String = ""
+
+    /// b66 V4.2: present DualConnectView as a sheet when the assignment
+    /// panel emits a `scanRequestedSubject` event (greyed L/R pill tap).
+    /// The pair flow lives in DualConnectView already; we just surface
+    /// it on demand without changing the canonical pair UX.
+    @State private var showingPairSheet: Bool = false
+    @State private var pairSheetSubBag: AnyCancellable? = nil
     /// Build 42: pre-workout Voltra picker. When both Voltras are paired,
     /// tapping a day tile (or starting a custom workout) defers calling
     /// `logging.startSession` until the user picks a WorkoutMode in the
@@ -77,6 +85,11 @@ struct LoggingHomeView: View {
                 ScrollView {
                     VStack(spacing: 24) {
                         header
+
+                        // b66 V4.2: ASSIGN TO VOLTRA panel — day-default
+                        // scope (no exerciseName). Mirror rule 1A.
+                        VoltraAssignmentPanel(mdm: mdm)
+                            .padding(.horizontal, 18)
 
                         VStack(spacing: 14) {
                             Text("PICK A DAY")
@@ -188,6 +201,29 @@ struct LoggingHomeView: View {
             // so we have to nudge `now` once a second or the pill stays
             // stuck on "LIVE" after the stream stalls.
             .onReceive(pulseTimer) { t in self.now = t }
+            // b66 V4.2: page-name badge — bottom-leading, faint mint,
+            // Swift type name verbatim. Always visible in TestFlight.
+            .pageBadge("LoggingHomeView")
+            // b66 V4.2: subscribe to assignment-panel pair-scan requests.
+            // Greyed L/R pill tap surfaces the existing DualConnectView
+            // pair sheet. Subscription lives for the view's lifetime.
+            .onAppear {
+                pairSheetSubBag = MultiDeviceManager.scanRequestedSubject
+                    .receive(on: RunLoop.main)
+                    .sink { _ in
+                        showingPairSheet = true
+                    }
+            }
+            .onDisappear {
+                pairSheetSubBag?.cancel()
+                pairSheetSubBag = nil
+            }
+            .sheet(isPresented: $showingPairSheet) {
+                NavigationStack {
+                    DualConnectView()
+                }
+                .preferredColorScheme(.dark)
+            }
         }
     }
 

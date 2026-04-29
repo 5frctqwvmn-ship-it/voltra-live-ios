@@ -222,7 +222,9 @@ struct DebugView: View {
             }
         }
         .buildBadgeOverlay()
-    }
+        // b66 V4.2: page-name badge.
+        .pageBadge("DebugView")
+        }
 
     // MARK: - Actions
 

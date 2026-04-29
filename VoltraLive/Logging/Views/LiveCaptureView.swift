@@ -274,7 +274,9 @@ struct LiveCaptureView: View {
         .onDisappear {
             health.stop()
         }
-    }
+        // b66 V4.2: page-name badge.
+        .pageBadge("LiveCaptureView")
+        }
 
     /// b47: when entering (or already in) Combined mode, round the standing
     /// pendingPlannedWeightLb DOWN to the nearest even pound. Per user choice

@@ -1,5 +1,16 @@
 // WorkoutVoltraPickerSheet.swift
 //
+// b66 V4.2 STATUS: SUPERSEDED. The unified `VoltraAssignmentPanel`
+// (`Views/VoltraAssignmentPanel.swift`) now owns the L/R/⋏/••/SS
+// assignment UX inline on the day, exercise, and live screens. The
+// b49 "unified-flow" refactor already removed the only live call site
+// of this sheet from `LoggingHomeView`. The file is kept on disk so
+// the b42-b59 reference comments survive for archaeology, but no
+// production code path constructs an instance. If a future build needs
+// a separate sheet UX, copy what is needed and delete this file.
+//
+// ---- HISTORICAL HEADER (pre-b66) ----
+//
 // Build 42 "Workout Voltra picker".
 //
 // When both Voltras are paired (MultiDeviceManager has left + right both

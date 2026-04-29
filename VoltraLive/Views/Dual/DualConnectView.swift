@@ -51,7 +51,9 @@ struct DualConnectView: View {
         .navigationDestination(isPresented: $showCapture) {
             DualCaptureView()
         }
-    }
+        // b66 V4.2: page-name badge.
+        .pageBadge("DualConnectView")
+        }
 
     // MARK: - Subviews
 

@@ -76,7 +76,9 @@ struct ExercisePickerView: View {
         .navigationDestination(isPresented: $navigateToStart) {
             ExerciseDetailView()
         }
-    }
+        // b66 V4.2: page-name badge.
+        .pageBadge("ExercisePickerView")
+        }
 
     // MARK: - Rows
 

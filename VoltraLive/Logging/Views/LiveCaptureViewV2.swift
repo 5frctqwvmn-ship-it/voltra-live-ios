@@ -119,6 +119,21 @@ struct LiveCaptureViewV2: View {
     /// Owns its own writer router — same pattern as V1.
     @StateObject private var writerRouter = WriterRouter()
 
+    // MARK: - b66 V4.2: live-set lock helpers
+
+    /// True while the lift is above the cascade idle force floor (3 lb).
+    /// Mirrors the gate `LoggingStore.noteTelemetryActivity(forceLb:)`
+    /// uses so the V4.2 ASSIGN TO VOLTRA panel locks pills at exactly the
+    /// same moment the engine considers the lift "engaged". Locked via MC
+    /// answer 2A: pills lock during live set.
+    ///
+    /// 3 lb is the engine constant `cascadeIdleForceFloorLb` — hard-coded
+    /// here because the constant is private to LoggingStore. If the
+    /// engine's floor changes, update this in lockstep.
+    private var isLiveSetInProgress: Bool {
+        ble.telemetry.forceLb > 3.0
+    }
+
     // MARK: Body
 
     var body: some View {
@@ -127,6 +142,23 @@ struct LiveCaptureViewV2: View {
 
             ScrollView {
                 VStack(spacing: 0) {
+                    // b66 V4.2: ASSIGN TO VOLTRA panel — per-exercise
+                    // override scope (exerciseName) + live-set lock
+                    // (isReadOnly). Mirror rules 1A + 2A.
+                    VoltraAssignmentPanel(
+                        mdm: mdm,
+                        exerciseName: logging.activeInstance?.exercise?.name,
+                        isReadOnly: isLiveSetInProgress
+                    )
+                    .padding(.bottom, 8)
+
+                    // b66 V4.2: V1 supersetBanner verbatim port +
+                    // breathing-ring delta on ACTIVE side. Self-hides
+                    // when supersetTag is false or both Voltras are
+                    // not paired.
+                    SupersetSwitcherBanner(mdm: mdm, logging: logging)
+                        .padding(.bottom, 8)
+
                     headerStrip
                     phaseOrRestBar
                     weightCard
@@ -184,6 +216,9 @@ struct LiveCaptureViewV2: View {
                 Task { @MainActor in self.blinkOn.toggle() }
             }
         }
+        // b66 V4.2: page-name badge — bottom-leading, faint mint,
+        // Swift type name verbatim. Always visible in TestFlight.
+        .pageBadge("LiveCaptureViewV2")
     }
 
     // MARK: - Toolbar

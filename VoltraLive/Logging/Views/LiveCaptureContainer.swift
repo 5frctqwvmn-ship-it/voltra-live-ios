@@ -62,7 +62,9 @@ struct LiveCaptureContainer: View {
             )
             .interactiveDismissDisabled(false)
         }
-    }
+        // b66 V4.2: page-name badge.
+        .pageBadge("LiveCaptureContainer")
+        }
 
     /// Decide whether to render V2. As of b59:
     ///   - V1 still wins for chain/superset sessions (V2 has no chain UI).

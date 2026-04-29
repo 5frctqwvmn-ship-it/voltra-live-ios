@@ -35,7 +35,9 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .tint(VoltraColor.accent)
         .buildBadgeOverlay()
-    }
+        // b66 V4.2: page-name badge.
+        .pageBadge("ContentView")
+        }
 
     private var shouldShowHome: Bool {
         if ble.connectionState.isConnected { return true }
