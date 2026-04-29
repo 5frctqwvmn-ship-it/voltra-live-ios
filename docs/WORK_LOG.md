@@ -2485,3 +2485,97 @@ full v4 build in one build").
   link from user was unreachable; KI-6 logged. The fix is
   implemented from spec text alone — recheck against the user's
   actual screenshot when they're back online.
+
+---
+
+## b59 — hotfix: route to V2 when both Voltras paired (v0.4.37-build59)
+
+### Why this is a separate build
+
+Post-b58 QA caught a critical regression: with both Voltras paired
+on TestFlight (b58, v0.4.36), the user saw the **legacy V1
+ACTIVE/NEXT header** instead of the new b58 dualHeaderCluster
+(L • / MERGE / • R) — meaning every dual-Voltra change in b58 was
+silently invisible. Confirmed via user-supplied IMG_2400 (showing
+V1 chrome) and IMG_2401 (Left ● Right ● dots, both connected).
+
+### Root cause
+
+`LiveCaptureContainer.shouldUseV2` (b53/b54) had a stale gate:
+
+```swift
+let bothPaired = mdm.left.connectionState.isConnected
+    && mdm.right.connectionState.isConnected
+return !bothPaired && !hasChain && uiVersion == "v2"
+```
+
+When b53 wrote that, V2 was explicitly single-Voltra and falling
+back to V1 for two Voltras was correct. b58 made V2 **the only
+view with dual-Voltra-aware chrome** (dualHeaderCluster, MERGE
+button, fused TWIN pill, focusedSlot routing, pulley grey-out in
+Twin) but never updated this gate. Result: V2 was reachable with
+one Voltra, but the moment a second paired the container flipped
+to V1 — which has zero b58 changes — and hid every dual-Voltra
+addition.
+
+This is a pure routing fix. The b58 V2 code itself was correct;
+nothing in `LiveCaptureViewV2.swift`, `ForceChartV2.swift`, or
+`PulleyAndPlatesBarV3.swift` needed to change.
+
+### Fix
+
+`VoltraLive/Logging/Views/LiveCaptureContainer.swift` —
+`shouldUseV2` rewritten:
+
+```swift
+let bothPaired = mdm.left.connectionState.isConnected
+    && mdm.right.connectionState.isConnected
+let hasChain = !mdm.supersetChain.isEmpty
+if hasChain  { return false }   // V1 still owns chain/superset
+if bothPaired { return true }   // V2 is the only dual-aware view
+return uiVersion == "v2"        // single-Voltra: respect preference
+```
+
+Doc-comment above the function rewritten to match the new rules.
+
+### Routing matrix (post-b59)
+
+| Voltras paired | Chain entries | Routes to | Reason |
+|---|---|---|---|
+| 1 | 0 | user pref (V1 or V2) | unchanged |
+| 1 | ≥1 | V1 | chain has no V2 affordance |
+| 2 | 0 | **V2** (was V1) | only view with dual-Voltra chrome |
+| 2 | ≥1 | V1 | chain regression > dual UI gain |
+
+### Files
+
+- `VoltraLive/Logging/Views/LiveCaptureContainer.swift` — gate
+  rewritten + doc-comment updated.
+- `project.yml` — bumped 0.4.36/58 → 0.4.37/59, feature label.
+- `VoltraLive/Info.plist` — same.
+
+### Sacred files: untouched.
+
+### Risks
+
+- Single-Voltra users are unaffected (gate still defers to
+  `uiVersion`).
+- Chain users are unaffected (chain still routes to V1).
+- Dual-Voltra users on V1 preference now get V2. **This is the
+  intended behavior of b58.** If they hate the V2 dual UI, they
+  can disconnect a Voltra and the gate falls back to their
+  preference.
+- V1's `LiveCaptureView.swift` still contains its own legacy
+  dual-Voltra ACTIVE/NEXT header. We are NOT removing it —
+  someone in chain mode with two Voltras still ends up there.
+  That code stays as-is for b59; don't churn it.
+
+### Lessons
+
+This is exactly why post-build QA exists (rule established
+earlier in this session, now in `AGENTS.md` "Post-build QA
+checklist" + `docs/handoff/QA_LOG.md`). CI green and altool
+5-gate verification proved b58 *uploaded*; only the user
+running on real hardware caught that the dual UI never
+rendered. The QA checklist for b58 surfaced this within
+hours of ship — exactly the gap it's meant to close.

@@ -64,19 +64,29 @@ struct LiveCaptureContainer: View {
         }
     }
 
-    /// Decide whether to render V2. V2 is single-Voltra by design; if
-    /// the session is using two Voltras or has a superset chain, fall
-    /// back to V1 even when the user opted into V2.
+    /// Decide whether to render V2. As of b59:
+    ///   - V1 still wins for chain/superset sessions (V2 has no chain UI).
+    ///   - V2 wins when both Voltras are paired (only dual-aware view).
+    ///   - Single-Voltra sessions respect the user's persistent preference.
     private var shouldUseV2: Bool {
-        guard uiVersion == "v2" else { return false }
+        // b59 (fixing a b58 oversight): V2 is now the only view with
+        // dual-Voltra-aware chrome (dualHeaderCluster, MERGE button,
+        // fused TWIN pill, focusedSlot routing, pulley grey-out in
+        // Twin). The previous gate sent the user to V1 the moment
+        // both Voltras paired, which silently hid every b58 dual-
+        // Voltra change. Confirmed via IMG_2400 (b58 on TestFlight,
+        // both Voltras connected, legacy V1 ACTIVE/NEXT header still
+        // showing). New rule:
+        //   - If a chain/superset entry exists \u2192 V1 (V2 has no
+        //     chain UI, that regression matters more than dual UI).
+        //   - Else if both Voltras paired \u2192 V2 (only dual-aware view).
+        //   - Else \u2192 respect the user's persistent V1/V2 preference.
         let bothPaired = mdm.left.connectionState.isConnected
             && mdm.right.connectionState.isConnected
-        // b54: tighten the gate. Was `chain.count >= 2` in b53, but a
-        // user who's mid-add of the second exercise has chain.count == 1
-        // and is mentally already in chain mode \u2014 V2 has no chain
-        // affordances, so we fall back the moment any chain entry exists.
         let hasChain = !mdm.supersetChain.isEmpty
-        return !bothPaired && !hasChain
+        if hasChain { return false }
+        if bothPaired { return true }
+        return uiVersion == "v2"
     }
 }
 

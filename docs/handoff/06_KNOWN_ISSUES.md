@@ -86,6 +86,95 @@ re-uploaded into the repo before the b58 build kicked off.
 this file. Until then, the ASCII description in
 `03_CURRENT_FEATURE_SPEC.md` §P1 is the canonical reference.
 
+### KI-7 (b58 → b59 QA) — Dropset cascade timer is 4 s, user wants 2 s
+
+**Surfaced:** b58 post-build QA wave 1.
+**File(s):** `VoltraLive/Logging/Persistence/LoggingStore.swift` —
+search for the cascade fire interval (`nextDropFiresAt`,
+`dropFinalizeAt`).
+**What:** Currently each cascade tier fires ≈ 4 s after the lift
+enters idle. User wants the interval set to **2 s**.
+**Severity:** P1 — dropset feels sluggish; reduces the "snap" the
+feature is supposed to convey.
+**Owner:** Next session.
+
+### KI-8 (b58 → b59 QA) — Idle bar should morph into dropset progress bar, then rest timer
+
+**Surfaced:** b58 post-build QA wave 1.
+**File(s):** `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
+(idle/rest bar component) + `LoggingStore` (state machine driving
+the cascade).
+**What:** While DROP is armed, the existing idle bar should morph
+into a **dropset progress bar** showing the 2 s countdown to the
+next cascade tier. Once cascade reaches floor, that same bar
+morphs into the **rest timer**. Right now the idle bar stays
+generic and the dropset progress isn't surfaced visually.
+Must be a single bar across all three states (idle / dropset
+progress / rest), not three separate components.
+**Severity:** P1 — dropsets work mechanically but the user can't
+*see* the cascade timing.
+**Owner:** Next session. Pairs with KI-7 (the new bar must reflect
+the correct 2 s interval).
+
+### KI-9 (b58 → b59 QA) — DROP tap pre-lowers weight; should arm-only
+
+**Surfaced:** b58 post-build QA wave 1.
+**File(s):** `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
+`tapDropTile()` + `LoggingStore.startDropSet(...)`.
+**What:** Tapping DROP currently calls into the cascade and the
+weight drops immediately. User wants tap-to-arm only: weight
+should stay at the working number until the lift goes idle AND
+the (KI-7) 2 s timer elapses, then the cascade fires the next
+tier. This matches how dropsets actually work in a gym — you
+finish the rep, *then* the weight drops.
+**Severity:** P0 — changes the felt behavior of the feature; users
+will think the DROP tile is a regular weight stepper.
+**Owner:** Next session. Refactors `startDropSet` into
+`armDropSet` (no-op weight) + a separate `fireNextCascade` driven
+by the idle-detector + KI-8 progress bar.
+
+### KI-10 (b58 → b59 QA) — Phantom -5 lb weight drop during reps
+
+**Surfaced:** b58 post-build QA wave 1.
+**File(s):** Unknown. Likely `LoggingStore.noteTelemetryActivity`
+or a writer-router callback.
+**What:** During a normal exercise (DROP not engaged), the
+resistance was observed dropping by 5 lb spontaneously. No user
+input, not a manual stepper press. Possibly tied to KI-5
+(idle-branch ordering) firing a cascade tier when the lift
+briefly went idle between reps; possibly an unrelated writer
+race. Needs telemetry repro.
+**Severity:** P0 — breaks every set where the user is paused
+between reps.
+**Owner:** Next session. Add a temporary debug log on every
+resistance-write call site, ship as a debug build, capture a
+real session, then patch.
+
+### KI-11 (b58 → b59 QA) — Force-curve full spec not yet implemented
+
+**Surfaced:** b58 post-build QA wave 1; user delivered the full
+design in `docs/handoff/design/force_curve.md`.
+**File(s):** `VoltraLive/Logging/Views/V2/ForceChartV2.swift`.
+**What:** b58 ForceChartV2 only landed §3b dual-band fill + §3c
+basic inline labels + §3d corner-mirror gradient. Still missing:
+- §3b: 200 ms blended phase transition (current is hard-cut).
+- §3c: label fade timing (3 s OR rep 2, whichever first;
+  re-surface on mid-set mode change). Today only suppresses for
+  `repsAgo > 0`.
+- §3d: vertical gradient *within* the fill encoding ROM-position
+  (b58 only flips the outer corner direction).
+- §3e: dotted 80%-of-peak reference line, per-rep peak dots +
+  labels, optional target line hook.
+- §3f: rep stacking with logarithmic opacity decay, cap ·8.
+- §3g: compact mode-aware legend in top-left.
+- §6: low-weight Y floor `max(peak × 1.2, 15 lb)`; mid-set
+  mode-change rule (historical reps keep prior rendering).
+**Severity:** P1 — the chart works, but doesn't yet match the
+design target.
+**Owner:** Next session. Tracked as a single epic; do not split
+the §3e/§3f/§3g rendering passes across builds unless explicitly
+asked. `force_curve.md` is the source of truth.
+
 ## Recently fixed (move to WORK_LOG before deleting)
 
 ### KI-F3 (b58, fixed) — DROP tile never actually dropped the cable
