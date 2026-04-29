@@ -4,6 +4,31 @@
 > `docs/WORK_LOG.md` and are deleted from here. Unfixed items
 > stay until shipped.
 
+## b67 Bug Batch (queued, fix-mode active)
+
+User ran b66 on hardware and reported 9 bugs across 8 paste blocks
+on Apr 29 2026. All entries with full evidence + open-Q lists live
+in **`B67_BUG_QUEUE.md`** — that file is the source of truth for
+the b67 cycle. Summary index here so cold-start agents see the
+landscape:
+
+- **B67-01** — Cold launch → ConnectView (should be `WorkoutSelectionScreen`)
+- **B67-02** — Footer watermark cluttered (verbose b58-era `buildBadgeOverlay`)
+- **B67-03** — `WorkoutSelectionScreen` header has 4-pill row + duplicate sub-row + 3-state HR pill regression
+- **B67-04+05** — Delete `DualConnectView` + `DualCaptureView`; pairing model flips from select-then-connect to tap = connect
+- **B67-06** — ONE `LiveWorkoutScreen` for all modes (single / merged / superset = mode prop) + extract shared `VoltraUnitHeader`
+- **B67-07** — Pairing tap from `ExerciseDetailScreen` fails silently → shared `PairingCoordinator` covering all three header mount points
+- **B67-08** — Duplicate unit-status rows everywhere (3 surfaces home / 2 each on live + detail) → collapse to single `VoltraUnitHeader` (`L`/`R`/`⋏`/`●●`, no `SS`)
+- **B67-09** — (skipped/reserved — user numbered the force-curve bug as Bug 10; see Q10.5)
+- **B67-10** — Force curve on `LiveWorkoutScreen` not a sine wave; restore parametric per-rep sine geometry with log-faded history overlay; flag #8 flipped to `BROKEN`
+
+Cross-cutting flags + lint-gate grep invariants live in `B67_BUG_QUEUE.md`.
+All 9 are entangled (touch the same view files) — ship together as
+b67 v0.4.40 / build 67 unless otherwise decided.
+
+Closed by b67 will be moved to `WORK_LOG.md` and deleted from here
+at ship time.
+
 ## Open
 
 ### KI-1 (b57) — 2× pulley snap on ±1 displayed

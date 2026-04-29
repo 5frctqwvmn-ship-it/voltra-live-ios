@@ -4,6 +4,31 @@
 > up VOLTRA Live iOS. Skim, then read the docs in the order at
 > the bottom.
 
+## Where things stand (b67 active, b66 shipped)
+
+**ACTIVE CYCLE:** b67 / v0.4.40 / build 67 — user delivered 9-bug
+batch on Apr 29 2026 after running b66 on hardware. Bug-collection
+phase is **closed**, fix phase is **active**. All 9 bug entries
+with evidence + open-Q lists live in **`B67_BUG_QUEUE.md`** — read
+that next.
+
+b67 scope (entangled, ship together):
+1. B67-01 cold-launch routing fix
+2. B67-02 footer cleanup (kill verbose `buildBadgeOverlay`)
+3. B67-03 `WorkoutSelectionScreen` header consolidation
+4. B67-04+05 delete `DualConnectView` + `DualCaptureView`; pairing model flip
+5. B67-06 ONE `LiveWorkoutScreen` (mode = prop)
+6. B67-07 shared `PairingCoordinator`
+7. B67-08 collapse to single `VoltraUnitHeader` (`L`/`R`/`⋏`/`●●`)
+8. B67-09 skipped/reserved (numbering, see Q10.5)
+9. B67-10 force curve sine-wave restoration + log-faded history overlay
+
+Lint-gate grep invariants from B67-08 must pass post-fix:
+```
+grep -rni "VL1\|VOLTRA Live\|Left .* Right .*\|LiveStatusPill\|LeftRightStatusPill\|DeviceStatusStrip\|VoltraWordmark" VoltraLive/Views/
+```
+→ must return zero matches.
+
 ## Where things stand (b66, v0.4.39-build66)
 
 **Last shipped:** v0.4.39-build66 (b66) on branch

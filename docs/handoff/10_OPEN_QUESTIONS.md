@@ -6,6 +6,40 @@ Things blocked on the user. Resolve before the dependent task can ship.
 > commit** as the code change that uses the answer. Don't let stale
 > questions accumulate.
 
+## b67 — unblocking questions (asked Apr 29 2026, awaiting answer)
+
+Full bug-by-bug Q lists live in `B67_BUG_QUEUE.md`. The two
+questions below are the **only blockers for starting code**; every
+other queue Q can be resolved from codebase + spec without user
+input.
+
+### Q10.1 — Sine-wave force-curve geometry source
+
+Git history search shows the live force chart has **never** been
+parametric sine since v0.4.5. Where does the "earlier working"
+geometry come from? Options:
+
+- **A.** Reimplement from `docs/handoff/design/force_curve.md` spec (recommended)
+- **B.** Search release tags `v0.4.30`–`v0.4.38` for an earlier sine impl (slow, may turn up nothing)
+- **C.** User points to a specific commit SHA
+- **D.** Port Demo Mode `sin(progress * .pi)` envelope (`fef3d6d`) to render layer
+
+**Status:** awaiting answer. **Blocks:** B67-10 implementation.
+**Fallback if user delays:** proceed with A.
+
+### Q10.5 — Numbering + scope
+
+User paste block labeled the force-curve bug as Bug 10; queue had a
+Bug 09 placeholder I skipped. Also: ship all 9 bugs in one b67
+release, or split? Options:
+
+- **A.** Keep Bug 10 numbering, ship all 9 in b67 (recommended)
+- **B.** Renumber to Bug 09, ship all 9 in b67
+- **C.** Split: chrome cleanup (01/02/03/04+05/06/07/08) in b67, force chart (10) in b68
+
+**Status:** awaiting answer. **Blocks:** branch / commit naming, release notes.
+**Fallback if user delays:** proceed with A.
+
 ## V2 promotion
 
 ### Should V2 become the default?
