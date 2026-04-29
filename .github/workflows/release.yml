@@ -683,9 +683,19 @@ jobs:
           API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
         run: |
           set -euo pipefail
-          # altool sometimes returns exit 0 even when validation fails (409 etc).
-          # Tee output and grep for the failure marker so the workflow actually
-          # fails when Apple rejects the build.
+          # altool sometimes returns exit 0 even when validation fails (409, -19232,
+          # entity-already-used, etc). Tee output and grep for the failure markers so
+          # the workflow actually fails when Apple rejects the build.
+          #
+          # b55-fix: previous regex only caught Application Loader-era patterns
+          # (UPLOAD FAILED|Validation failed|ERROR ITMS-). Modern xcrun altool emits:
+          #   - "Failed to upload package."
+          #   - "ERROR: [ContentDelivery.Uploader.<addr>]"
+          #   - "ERROR: [altool.<addr>]"
+          #   - parenthesised numeric error codes like (-19232), (-19241)
+          # We also do a duration sanity-check: real IPA uploads take >=20s. If altool
+          # exits in <10s the request never made it to Apple.
+          UPLOAD_START=$(date +%s)
           set +e
           xcrun altool --upload-app \
             --type ios \
@@ -694,15 +704,33 @@ jobs:
             --apiIssuer "${API_ISSUER_ID}" 2>&1 | tee /tmp/altool.log
           ALTOOL_EXIT=${PIPESTATUS[0]}
           set -e
+          UPLOAD_END=$(date +%s)
+          UPLOAD_SECS=$((UPLOAD_END - UPLOAD_START))
+          echo "altool wall-clock duration: ${UPLOAD_SECS}s"
           if [ "$ALTOOL_EXIT" -ne 0 ]; then
             echo "::error::altool exited with code $ALTOOL_EXIT"
             exit $ALTOOL_EXIT
           fi
-          if grep -qiE 'UPLOAD FAILED|Validation failed|ERROR ITMS-' /tmp/altool.log; then
+          if grep -qiE 'UPLOAD FAILED|Validation failed|ERROR ITMS-|Failed to upload package|ERROR: \[ContentDelivery|ERROR: \[altool|\(-[0-9]+\)' /tmp/altool.log; then
             echo "::error::altool reported a failure in its output (see log above)"
+            grep -nE 'UPLOAD FAILED|Validation failed|ERROR ITMS-|Failed to upload package|ERROR: \[ContentDelivery|ERROR: \[altool|\(-[0-9]+\)' /tmp/altool.log || true
             exit 1
           fi
-          echo "altool upload succeeded."
+          if [ "$UPLOAD_SECS" -lt 10 ]; then
+            echo "::error::altool exited in ${UPLOAD_SECS}s — too fast for a real IPA upload (expect >=20s). Treating as failure."
+            exit 1
+          fi
+          # Positive confirmation. Real altool/avtool success prints one of:
+          #   - "UPLOAD COMPLETED SUCCESSFULLY"  (modern ContentDelivery.Uploader)
+          #   - "No errors uploading"            (older altool message)
+          #   - "package was successfully uploaded" / "successfully uploaded"
+          # See fastlane/fastlane#29743 (Xcode 26 silent-fail) for why this matters.
+          if ! grep -qiE 'UPLOAD COMPLETED SUCCESSFULLY|No errors uploading|package was successfully uploaded|successfully uploaded' /tmp/altool.log; then
+            echo "::error::altool log missing positive success marker (UPLOAD COMPLETED SUCCESSFULLY / No errors uploading / successfully uploaded). Treating as failure."
+            exit 1
+          fi
+          echo "altool upload succeeded (duration ${UPLOAD_SECS}s, success marker present)."
+
 
       # On dry-run, surface the IPA as a workflow artifact instead of uploading
       - name: Upload IPA as workflow artifact (dry-run only)

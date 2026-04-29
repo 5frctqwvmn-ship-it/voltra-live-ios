@@ -17,7 +17,7 @@ history is ephemeral — anything that should survive across sessions lives here
 6. Skim `docs/WORK_LOG.md` (tail — last 200 lines is enough) — recent activity in append-only form.
 7. Summarize state back to the user. Then start work.
 
-**Last shipped: v0.4.33-build55 ("V2 single-Voltra LiveCapture").** b55 rewrote the V2 LiveCaptureView to match the design-handoff render after a sign-off pass on `voltra-v2-preview/index.html`. b54's "V2 spec match" turned out to be a 2x2 tile grid that didn't actually match `screenshots/A1-states.png` — b55 ports the signed-off web preview to SwiftUI: header → phase strip (always-visible) → optional rest row → WEIGHT card with stepper + DROP row → 4-up mod tiles → REPS + TOTAL VOLUME → FORCE chart. New V2-only DROP-SET creation flow: tap DROP mod tile to open `DropSetConfigureSheet`. If `02_CURRENT_STATE.md` shows a different latest build than this line, the file is stale — trust `git log` and `gh run list` over either source and surface the discrepancy to the user before coding.
+**Last shipped: v0.4.33-build55 ("V2 single-Voltra LiveCapture").** b55 rewrote the V2 LiveCaptureView to match the design-handoff render after a sign-off pass on `voltra-v2-preview/index.html`. b54's "V2 spec match" turned out to be a 2x2 tile grid that didn't actually match `screenshots/A1-states.png` — b55 ports the signed-off web preview to SwiftUI: header → phase strip (always-visible) → optional rest row → WEIGHT card with stepper + DROP row → 4-up mod tiles → REPS + TOTAL VOLUME → FORCE chart. New V2-only DROP-SET creation flow: tap DROP mod tile to open `DropSetConfigureSheet`. **b55 had to ship twice** — the first push went green on CI but did not reach TestFlight because (a) `project.yml` was the version source of truth and still said `0.4.32 / 54`, so xcodegen overwrote the bumped `Info.plist`, and (b) the release-workflow's altool success-grep was Application-Loader-era and missed `Failed to upload package` / `ERROR: [ContentDelivery.Uploader` / `(-19232)` style errors. The b55-fix commit moved version-of-truth to `project.yml` and hardened the workflow with a 3-layer altool guard (failure-grep, ≥10s wall-clock duration, mandatory positive `UPLOAD COMPLETED SUCCESSFULLY` marker). See WORK_LOG b55-fix entry. If `02_CURRENT_STATE.md` shows a different latest build than this line, the file is stale — trust `git log` and `gh run list` over either source and surface the discrepancy to the user before coding.
 
 ## Mandatory commit discipline
 
@@ -42,6 +42,20 @@ If you skip steps 1-4, the next agent's session-resume summary will be wrong, wh
 ## Mandatory external-spec discipline
 
 If a build ports an external spec (HTML, CSS, design doc, screenshot, RFC, etc.), **open and read the spec verbatim before writing any code.** Do not rely on prose summaries from prior sessions. Cite the exact file path and commit hash of the spec in the WORK_LOG entry. b53 violated this rule and produced a build that did not match its claimed source.
+
+## Mandatory TestFlight ship-verification (added b55-fix)
+
+A TestFlight ship is **not** considered shipped until all five of these are confirmed. CI green is a necessary but **not sufficient** signal — Xcode 26's `xcrun altool` can exit 0 while Apple rejects the upload.
+
+1. Release workflow polled to `conclusion: success`.
+2. Raw job log pulled via `gh api -H "Accept: application/vnd.github.raw" repos/<owner>/<repo>/actions/jobs/<job_id>/logs`.
+3. The "Upload to TestFlight via altool" step shows wall-clock duration ≥ 20 seconds. A 4-second altool exit means the request never reached Apple's servers (this is the b55 silent-fail signature).
+4. The altool log contains a positive success marker — one of: `UPLOAD COMPLETED SUCCESSFULLY`, `No errors uploading`, `package was successfully uploaded`, `successfully uploaded`.
+5. The altool log contains zero `ERROR:`, `Failed to upload package`, `ERROR: [ContentDelivery`, or parenthesised numeric error code (`(-NNNNN)`) lines.
+
+If any of (1)–(5) fails, report "build status unconfirmed, investigating" — never "shipped". The release.yml workflow now enforces (3)–(5) inside the altool step itself (see `.github/workflows/release.yml:679–732`), so a re-shipped b55-fix-and-later build that turns the workflow green has by definition passed all three checks. (1)–(2) are still on the agent.
+
+This rule exists because in the b55 first-ship, CI reported green and the agent told the user the build had shipped. The user pulled up TestFlight, did not see the build, and corrected the agent: "You've been trained to process. Are you sure you sent it?" They were right. Don't repeat that.
 
 ## Mandatory secrets discipline
 

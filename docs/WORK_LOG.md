@@ -1901,3 +1901,197 @@ state-machine changes.
 **Cost callout.** Medium. Six new SwiftUI files (~1530 lines), one
 LoggingStore addition (+15 lines + 2 resets), one Info.plist bump.
 No protocol churn, no SwiftData migration, no new HK API.
+
+
+## 2026-04-29 — b55-fix (v0.4.33 / 55) — TestFlight upload fix: project.yml override + altool silent-fail guard
+
+**What broke and why this entry exists.** The b55 push at commit
+`6f45640` reported CI green on both Build IPA (`25089160910`) and
+Release-to-TestFlight (`25089164206`), so I told the user the build
+shipped. The user pulled up TestFlight and the build was not there.
+They pushed back — "I don't see this build on TestFlight. I don't
+see it. You've been trained to process. Are you sure you sent it?"
+— and they were right. The Release workflow's altool step had
+exit-code-zeroed and the success-grep had matched, but the upload
+had in fact failed at Apple's side.
+
+I pulled the raw `altool` log via
+`gh api repos/.../actions/jobs/73511287096/logs` and found, at line
+1996 of the 2068-line log:
+
+```
+ERROR: [ContentDelivery.Uploader.10175EFA0] The provided entity
+includes an attribute with a value that has already been used
+(-19232) The bundle version must be higher than the previously
+uploaded version: '54'.
+ERROR: [altool.10175EFA0] Failed to upload package.
+```
+
+…followed 28 lines later by my own workflow's misleading
+`altool upload succeeded.` echo at line 2024. Two independent
+defects had to line up for that to happen, and both are fixed in
+this entry.
+
+### Defect 1 — `project.yml` was the version source of truth, not `Info.plist`
+
+xcodegen regenerates `VoltraLive.xcodeproj` from `project.yml` at
+the start of every CI build. Two places in `project.yml`
+hard-coded the version:
+
+- Lines 64–65 — `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`
+  build settings on the `VoltraLive` target. xcodebuild's
+  `expandbuildsettings` step on Info.plist substitutes these
+  values into the binary's plist, so they win over anything in
+  the repo's `Info.plist`.
+- Lines 92–93 — Info.plist `CFBundleShortVersionString` /
+  `CFBundleVersion` properties. xcodegen also rewrites the
+  on-disk `VoltraLive/Info.plist` from this `info.properties`
+  block on every regeneration.
+
+The b55 commit only bumped `VoltraLive/Info.plist` to
+`0.4.33` / `55`. The CI job ran `xcodegen generate`, which
+overwrote my Info.plist back to `0.4.32` / `54`, and built/signed
+an IPA whose `CFBundleVersion` was `54`. Apple rejected the
+upload because build 54 was already on TestFlight from the
+previous ship.
+
+**Fix:** bumped `project.yml` to `0.4.33` / `55` in **both**
+places (lines 64–65 build settings and lines 92–93
+`info.properties`), and updated the `VOLTRAFeatureLabel` at line
+96 to `"V2 single-Voltra LiveCapture"` to match `Info.plist`.
+The repo `Info.plist` was already on `0.4.33` / `55`, so the two
+sources are now consistent. Going forward, **`project.yml` is
+the source of truth for version**; `Info.plist` is the mirror
+that xcodegen writes.
+
+### Defect 2 — release.yml altool success-detection was Application-Loader-era
+
+The pre-fix grep at `.github/workflows/release.yml:701` was:
+
+```bash
+if grep -qiE 'UPLOAD FAILED|Validation failed|ERROR ITMS-' \
+   /tmp/altool.log; then
+  echo "::error::altool reported a failure..."
+  exit 1
+fi
+echo "altool upload succeeded."
+```
+
+That regex catches Application-Loader-era and ITMS-validator
+failures, but Xcode 26's `xcrun altool` upload pipeline (which
+internally calls `avtool` / `ContentDelivery.Uploader`) emits a
+totally different failure vocabulary:
+
+- `Failed to upload package.`
+- `ERROR: [ContentDelivery.Uploader.<addr>] ...`
+- `ERROR: [altool.<addr>] ...`
+- `(-19232)`, `(-19241)` — parenthesised numeric error codes
+
+None of those match `UPLOAD FAILED|Validation failed|ERROR ITMS-`,
+so the grep returned non-match, the workflow echoed "altool upload
+succeeded.", the step exited 0, and the workflow turned green.
+This is exactly the failure mode tracked in upstream
+`fastlane/fastlane#29743` (Xcode 26 silent-fail) — the avtool
+migration broke every CI pipeline that was relying on exit-code
+or pre-Xcode-26 grep patterns.
+
+A second, independent smoking gun was timing: the altool step
+took **4 seconds** wall-clock (03:22:05 → 03:22:09). A real IPA
+upload to ASC takes 20s–2min minimum. A 4-second altool exit
+means the request never made it onto the wire.
+
+**Fix (`.github/workflows/release.yml:679–732`).** Three layers
+of defense, all of which must pass before the step echoes
+success:
+
+1. **Failure-marker grep, expanded.** Now matches:
+
+   ```
+   UPLOAD FAILED|Validation failed|ERROR ITMS-
+   |Failed to upload package
+   |ERROR: \[ContentDelivery
+   |ERROR: \[altool
+   |\(-[0-9]+\)
+   ```
+
+   On match, the step prints the offending lines (with `grep -n`)
+   for the build log and exits 1.
+
+2. **Wall-clock duration sanity check.** Capture
+   `UPLOAD_START=$(date +%s)` before altool, `UPLOAD_END` after,
+   and fail if `UPLOAD_SECS < 10`. The 4-second silent-fail case
+   is rejected even if the failure-marker grep somehow misses.
+
+3. **Positive success marker required.** Real successful
+   altool/avtool uploads always print one of:
+
+   ```
+   UPLOAD COMPLETED SUCCESSFULLY
+   No errors uploading
+   package was successfully uploaded
+   successfully uploaded
+   ```
+
+   The step now requires one of those to be present in
+   `/tmp/altool.log`. Absence ⇒ fail, regardless of exit code or
+   error grep result.
+
+Only after all three checks pass does the step echo the final
+"altool upload succeeded (duration ${UPLOAD_SECS}s, success
+marker present)." line.
+
+### Behavioral correction (sticky for all future TestFlight ships)
+
+I had told the user b55 shipped on the strength of CI's green
+checkmark alone. The user's correction:
+
+> "I don't see this build on TestFlight. I don't see it. You've
+> been trained to process. Are you sure you sent it?"
+
+Going forward — recorded here for every future build — a
+TestFlight ship is **not** considered shipped until I have:
+
+1. Polled the Release workflow to `conclusion: success`.
+2. Pulled the raw job log via `gh api ... /actions/jobs/<id>/logs`.
+3. Verified the altool step log shows wall-clock duration ≥ 20s.
+4. Verified the altool step log contains a positive success
+   marker (`UPLOAD COMPLETED SUCCESSFULLY` or equivalent).
+5. Verified the altool step log contains zero `ERROR:` /
+   `Failed to upload package` / `(-NNNNN)` lines.
+
+Anything less and the report to the user is "build status
+unconfirmed, investigating," not "shipped."
+
+### Files touched in this fix
+
+- `project.yml` — lines 64–65, 92–93, 96 (version + label)
+- `.github/workflows/release.yml` — lines 679–732 (Upload to
+  TestFlight via altool step, hardened)
+- `docs/WORK_LOG.md` — this entry
+- `docs/handoff/00_START_HERE.md` — last-shipped + lessons
+- `docs/handoff/04_ARCHITECTURE.md` — CI ship-verification
+  protocol noted
+
+No app-side code change. No protocol / Sacred-file change. No
+SwiftData migration. The b55 V2 LiveCaptureView code from the
+prior commit (`6f45640`) is unchanged — only the version source
+of truth and the CI ship-verification logic moved.
+
+**Test plan.**
+
+1. Re-tag `v0.4.33-build55` at the new fix commit, push.
+2. Watch Release workflow. The xcodegen step should now write
+   `0.4.33` / `55` into the Xcode project, and the archive's
+   embedded Info.plist should carry `CFBundleVersion = 55`.
+3. The altool step should run for ≥ 20s and the log should
+   contain `UPLOAD COMPLETED SUCCESSFULLY` (or equivalent).
+4. ASC build history should show `0.4.33 (55)` as a new
+   processing build within ~5 minutes of step completion.
+5. Negative test, deferred — next time altool fails (e.g.
+   another duplicate-version, a cert expiry), the workflow must
+   now exit 1 and surface the matching error lines in the build
+   log.
+
+**Cost callout.** Tiny. Two YAML/yml edits and a doc append.
+No app code shipped.
+
