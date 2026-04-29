@@ -2836,3 +2836,51 @@ new rule.
 - **Next step:** Push branch; run `release.yml` workflow
   with `dry_run=false`; 5-gate altool ship verify; confirm
   TestFlight v0.4.39 / build 66 live.
+
+## 2026-04-29 20:41 UTC — b66 SHIPPED to TestFlight (v0.4.39 / build 66)
+
+- **Branch:** `feat/ui-v4-2-claude` @ `c0723b1` (head-to-head with
+  GPT-5.5 fork, intentionally unmerged for side-by-side review).
+- **CI run:** `25132430893` — 6m22s, conclusion `success`.
+- **Two CI hotfixes were needed before the third run greened:**
+  - `8e629f1` — Swift 6 actor-isolation fixes for the V4.2 files
+    (MultiDeviceManager+V42 extension, VoltraAssignmentPanel,
+    SupersetSwitcherBanner). Under Xcode 26 / Swift 6 strict
+    concurrency, members on extensions of `@MainActor` classes
+    are NOT automatically main-actor-isolated; explicit `@MainActor`
+    annotation was required at three sites. PassthroughSubject's
+    static let kept `nonisolated` so non-main-actor subscribers
+    can still emit.
+  - `c0723b1` — `PageBadgeOverlay` referenced `VoltraTheme.textFaint`;
+    the codebase's theme namespace is `VoltraColor` (the file
+    happens to be named VoltraTheme.swift, but the enum is
+    `VoltraColor`). Two-line symbol fix.
+- **5-gate altool ship verify:**
+  1. Workflow conclusion: `success`.
+  2. altool exit code: 0 (no `::error::` line emitted by the
+     workflow's exit-trap step).
+  3. altool wall-clock duration: 36s (≥20s threshold).
+  4. Positive success marker: present — both
+     "UPLOAD SUCCEEDED with no errors" and
+     "No errors uploading archive at 'build/export/VoltraLive.ipa'".
+  5. Zero failure markers: confirmed clean grep against the full
+     blocklist (UPLOAD FAILED / Validation failed / ERROR ITMS- /
+     Failed to upload package / ERROR: [ContentDelivery / ERROR:
+     [altool / (-NNNN)).
+- **Delivery UUID:** `1ad7fa3a-2991-4533-8756-1b43b38086a0`.
+- **What's in this build:**
+  - V4.2 reskin: VoltraAssignmentPanel, SupersetSwitcherBanner,
+    PageBadgeOverlay (15 screens).
+  - Cherry-picked b60-prep dropset arm-only refactor.
+  - Cascade timer cadence T1: 2.0s → 3.0s.
+  - Bug fixes P1-1 (TWIN badge overlap on 3-digit weights) and
+    P1-2 (rest-timer first-engage view race).
+  - WorkoutVoltraPickerSheet superseded; file kept on disk.
+- **NOT in this build (deferred):** F1 sine-wave per-rep overlay
+  (skipped per the user's "skip if it touches telemetry" rule;
+  ForceChartV2 already does Tonal-style rep-map gradients).
+- **Sacred files:** untouched. Confirmed by audit before shipping.
+- **Hardware QA pending:** Once b66 surfaces in TestFlight, the
+  user installs and re-tests KI-10 (phantom -5 lb), the rest-bar
+  first-engage path on a fresh launch, and 3-digit + TWIN layout
+  on a real device. Results captured in `docs/handoff/QA_LOG.md`.
