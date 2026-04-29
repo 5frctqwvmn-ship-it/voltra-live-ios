@@ -3054,3 +3054,63 @@ from the bump prompt).
 
 **Cost callout:** Re-ship adds another medium block (one more
 release.yml run + altool + poll). Total session is now medium-heavy.
+
+---
+
+## b65 — skip past Apple's contaminated 60–64 range (v0.4.38-build65)
+
+**Date/time:** 2026-04-29 16:55 UTC
+
+**Why:** Apple rejected b60 AND b61 with the same -19232 / 409
+ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE error on
+`/data/attributes/cfBundleVersion`. User screenshot of ASC
+TestFlight confirms highest visible CFBundleVersion is 59 — yet
+Apple's validation backend rejects both 60 and 61 as "already
+used."
+
+**Diagnosis:** Apple's ASC backend reserves CFBundleVersion on
+upload *attempt*, not just on success. The b60 and b61 failed
+attempts likely reserved their numbers in Apple's system but the
+slots never became visible in the TestFlight UI. This is a known
+Apple-side wart; the standard fix is to skip past the contaminated
+range and let Apple's reservations expire (~24h) before reusing.
+
+**Strategy:** bump CFBundleVersion 61 → 65, leaving a 4-build gap
+to clear any phantom reservations. If 65 ALSO collides, the issue
+is structural (not a phantom slot) and we stop again.
+
+**Files changed:**
+- `project.yml` — `CURRENT_PROJECT_VERSION` 61 → 65.
+- `VoltraLive/Info.plist` — matching `CFBundleVersion`; updated
+  `VOLTRAFeatureLabel` to mention both prior collisions.
+- `docs/WORK_LOG.md` — this entry.
+
+`MARKETING_VERSION` stays at `0.4.38`. The b60 and b61 tags both
+remain in repo as failed-upload audit trail. A jump from 61 → 65
+in the build-number sequence is intentional and documented here
+so the next agent doesn't think a build went missing.
+
+**Build-number ledger (post-b65 attempt):**
+
+| Tag | CFBundleVersion | Apple status |
+|---|---|---|
+| v0.4.36-build58 | 58 | Complete (visible in ASC) |
+| v0.4.37-build59 | 59 | Complete (visible in ASC) |
+| v0.4.38-build60 | 60 | -19232 rejected; phantom reservation |
+| v0.4.38-build61 | 61 | -19232 rejected; phantom reservation |
+| (unused) | 62, 63, 64 | reserved as gap |
+| v0.4.38-build65 | 65 | this attempt |
+
+**Sacred files:** untouched. **Source payload:** unchanged
+(gpt55/feat/ui-v4-dropset-armonly @ 59a3c05).
+
+**Risks:**
+- If 65 also rejects, we have a structural issue (e.g. signing
+  cert change, bundle ID issue, Apple account state) that the
+  build-number bump won't fix. STOP at that point.
+- All hardware-QA risks from b60 still apply unchanged.
+
+**Next step:** commit, push, tag, ship, poll, 5-gate verify.
+
+**Cost callout:** Third release.yml run this session = adds
+another medium block. Cumulative session is solidly heavy.
