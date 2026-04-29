@@ -28,7 +28,7 @@ These interlock and should be resolved together when user says **done**:
 
 7. **Bug 06 cross-cut:** All live workouts (single, merged, superset) route through ONE live screen — mode is a prop, not a separate view. `DualCaptureView` deletion is already covered in Bug 04+05; Bug 06 adds the single-screen rule + extracts `VoltraUnitHeader` as a shared component used on `WorkoutSelectionScreen` AND `LiveWorkoutScreen`.
 
-8. **⚠ CONTRADICTION FLAG — sine-wave FORCE trace status DISPUTED.** Earlier read of the b66 V3 live target image (Bug 06 evidence `targets/06-live-workout-screen-target.jpeg`) suggested the proper sine-wave force curve was already rendering in `FORCE · 30 S`. **Bug 09 (incoming) directly contradicts this** — user reports the curve is NOT a sine wave and must be restored to the earlier working sine-wave geometry with logarithmic-fade history overlay. Resolution deferred until Bug 09 entry is logged; do NOT treat F1 as 'skipped/validated' until that bug is filed and reconciled. The b66 page-badge / chrome / VL1 strip readings from that image remain valid — only the FORCE-card waveform claim is in doubt.
+8. **⚠ BROKEN — sine-wave FORCE trace status (resolved by Bug 10).** Earlier read of the b66 V3 live target image claimed the sine-wave force curve was already rendering correctly. **That reading was wrong.** Bug 10 (filed) confirms `LiveWorkoutScreen` is rendering raw-sample polyline with phase coloring, not parametric per-rep sine waves. Git history search shows the live force chart has *never* been parametric sine since at least v0.4.5 — only Demo Mode (`fef3d6d`) uses `sin(progress * .pi)` and that's data synthesis, not render. F1 telemetry-rule skip from b66 is **NOT** validated and is subsumed by Bug 10. The b66 page-badge / chrome / VL1 strip readings from `targets/06-live-workout-screen-target.jpeg` remain valid — only the FORCE-card waveform claim was wrong. See Bug 10 Q10.1 for the implementation blocker (where does the 'earlier working' geometry actually live?).
 
 9. **Footer Bug 02 confirmed on multiple screens.** The verbose b58-era watermark `v0.4.39 (66) · b66: V4.2 ASSIGN TO VOLTRA panel + superset switcher (HARDWARE-QA-PENDING)` plus `ContentView` page-badge bleed-through appears on `WorkoutSelectionScreen` (Bug 02), `LiveWorkoutScreen` (Bug 06 target), AND `ExerciseDetailScreen` (Bug 07 image). Single fix to `buildBadgeOverlay` removal + `pageBadge` two-sided footer covers all screens.
 
@@ -598,13 +598,131 @@ grep -rni "VL1\|VOLTRA Live\|Left .* Right .*\|LiveStatusPill\|LeftRightStatusPi
 
 ---
 
-## Bug 09 — (PLACEHOLDER, awaiting full report)
+## Bug 10 — Force curve on `LiveWorkoutScreen` is not a sine wave; restore earlier sine-wave geometry with log-fade history overlay
 
-**User tease:** "Force curve is not a sine wave; must be restored to earlier working sine-wave geometry with logarithmic-fade history overlay."
+> **⚠ NUMBERING NOTE:** User paste block labeled this entry as **Bug 10**, even though the queue placeholder for the sine-wave bug was previously slot **Bug 09**. Going with the user's numbering — Bug 09 is now skipped/reserved (see Q10.5 below). The skip is explicit so future search for Bug 09 finds this note.
 
-**⚠ Contradiction with cross-cutting flag #8:** Bug 09 will directly overturn the prior reading that "sine-wave FORCE trace is live" in the b66 V3 target image. Flag #8 has been updated to `DISPUTED`. When Bug 09 lands, this placeholder gets replaced with the full entry and flag #8 is rewritten with Bug 09's resolution.
+> **⚠ SCREENSHOT ID SWAP CONFIRMED (5th paste block in a row):** User paste block referenced `IMG_2433.jpeg` as the broken `FORCE · 30 S` panel. Verification: `IMG_2433` is actually a different `FORCE` panel — spiky polyline, peak `38.3 lb`, axis labels `43/32/21/10/0 lb`, NO `BOTTOM` dashed floor, NO `· 30 S` in title. The image matching the user's prose description ("blocky/flat-top polyline + `BOTTOM` dashed floor") is `IMG_2432`. Both saved as evidence — same bug, two different live-screen states.
 
-**Action:** User to send (a) screenshot of the broken curve as it appears in b66, (b) screenshot or reference of the earlier working sine-wave geometry with logarithmic-fade history overlay, (c) one-sentence note on whether the regression is a math change (waveform generator) or a render change (chart smoothing / sample rate) so I can scope the fix correctly. → I'll produce the Bug 09 entry.
+### The problem in one sentence
+
+The `FORCE` panel on `LiveWorkoutScreen` currently renders as raw sensor samples (blocky polyline / spiky polyline depending on rep activity) instead of one clean sine wave per rep with prior reps fading behind via logarithmic opacity.
+
+### Evidence
+
+| File | What it shows |
+|---|---|
+| `bugs/10-force-curve-broken-30s-panel.jpeg` (saved from `IMG_2432`) | `FORCE · 30 S` panel during/post-rep — blocky flat-top polyline, mint+orange overlapping fills, `BOTTOM` dashed floor at zero, no per-rep separation, no axis labels visible |
+| `bugs/10-force-curve-broken-spiky.jpeg` (saved from `IMG_2433`) | Different `FORCE` panel state on `LiveWorkoutScreen` (`Back Extension · Set 1`, IDLE, target 10 reps, weight `25 lb`, ECC `+13`) — spiky polyline, peak `38.3 lb`, axis ticks `43/32/21/10/0 lb`, header reads `● Pull ● Return  peak 38.3 lb`, no `BOTTOM` floor, no `· 30 S` in title |
+
+### What's wrong (per evidence)
+
+- The curve is a polyline of raw sensor samples per phase — `ForceChartView.swift` plots `ChartPoint` per `ForceSample` with phase-colored segments. This produces a literal sample-time line, not a parametric per-rep shape.
+- Eccentric vs concentric phases share the same canvas with no per-rep envelope; reps bleed into one continuous trace.
+- No history overlay of prior reps with logarithmic opacity fade.
+- The two screenshots show DIFFERENT axis chrome (`· 30 S` window + `BOTTOM` floor in IMG_2432 vs lb-tick axis + Pull/Return legend + peak readout in IMG_2433) — implying TWO different `Force*` views are mounted in different contexts. Need to confirm which is live on `LiveWorkoutScreen` post-Bug 06 consolidation.
+- `BOTTOM` dashed floor and y-axis scaling are fine; rep geometry is the bug.
+
+### What's right (required behavior, per user spec)
+
+1. **Per-rep shape:** one full sine wave per rep.
+   - Concentric half = rising half (0 → π/2 → π mapped to peak force)
+   - Eccentric half = falling half (π → 3π/2 → 2π)
+   - Peak amplitude = rep's peak force; time axis normalized per rep.
+2. **History overlay:** all prior reps of the current set overlaid on the same canvas.
+   - Logarithmic opacity fade: newest ≈100%, oldest ≈15%.
+   - Cap at ≈8 overlay reps visible at once.
+3. **ECC / CHAIN fill:**
+   - ECC active → eccentric half rendered with higher fill opacity, darker shade.
+   - CHAIN / INV CHAIN active → gradient mirrors or amplifies the rising half.
+4. **Y-axis:** auto-fits to `peak × 1.2` with 20% headroom floor (keep current).
+5. **X-axis:** `· 30 S` window stays; rep shapes laid out in time, not tiled.
+
+### Codebase reconnaissance (already run)
+
+Git history search results from this session, captured here so the next agent doesn't repeat the work:
+
+```
+git log --all --oneline -- "*ForceCurve*" "*force_curve*"
+  59a3c05 feat(v4): KI-11 force-curve full spec — 80% line, peak dots, legend (b60-prep)
+  592131f b59 v0.4.37: hotfix — route to V2 when both Voltras paired
+
+git log --all -S "sine" --oneline -- VoltraLive/
+  fef3d6d feat(demo): Demo Mode + structured trace (v0.4.6.3 / build 26)
+```
+
+Current force-curve files in tree:
+- `VoltraLive/Views/ForceChartView.swift` (Swift Charts, raw sample polyline, phase-colored segments — b58/b66 mainline)
+- `VoltraLive/Logging/Views/V2/ForceChartV2.swift` (V2 variant, presumably what KI-11 / 59a3c05 enhanced)
+
+Doc: `docs/handoff/design/force_curve.md` exists (need to re-read its current contents before editing — user paste block claims it documents sine-wave geometry; current code path doesn't match that, so the doc is either out of date or aspirational).
+
+### ⚠ Critical finding — "earlier sine-wave commit" may not exist
+
+**The git search found no commit where the live force chart rendered as parametric sine waves.** What it found:
+- `fef3d6d` (Demo Mode, build 26, v0.4.6.3) uses `sin(progress * .pi)` — but that is the **demo data synthesis** envelope (generates fake force samples for demo mode), NOT the **rendering layer**.
+- `59a3c05` (KI-11) added 80% line, peak dots, legend chip on top of `ForceChartV2` — still raw-sample-polyline data path underneath.
+- `ForceChartView.swift` has been a `Swift Charts` line chart over `ChartPoint` per-sample since at least v0.4.5 ("chart now spans the entire set (no 30s rolling window)") — **never** parametric per-rep.
+
+**Implication:** The "earlier working sine-wave geometry" the user remembers may be (a) demo-mode-only synthesis confused with live render, (b) a never-shipped design from `force_curve.md`, or (c) genuinely earlier than `fef3d6d` (build 26) in a commit not captured by the `*ForceCurve*` / `*force_curve*` glob. Need user input before implementing — see Q10.1.
+
+### Implementation requirements (once Q10.1 is resolved)
+
+- Rendering function takes: array of per-rep `{ peakForce, eccDuration, conDuration, phase }` plus current live rep's partial samples.
+- Per-rep path = `sin(t)` parametric over rep time range, scaled to peak force.
+- Previous reps rendered first with log-faded opacity; current rep on top at 100%.
+- ECC phase shading driven by current `ECC` / `CHAIN` / `INV CHAIN` / `DROP` state from the nested row.
+- Do **NOT** change the data pipeline or sensor smoothing — only the path geometry.
+- Likely files to touch:
+  - `VoltraLive/Views/ForceChartView.swift` (or `ForceChartV2.swift` — depends on which is live on `LiveWorkoutScreen` post-Bug 06)
+  - `docs/handoff/design/force_curve.md` (update to reflect restored geometry + new ADR)
+
+### Verification checklist
+
+1. Screen recording of live workout with 5+ reps showing each rep as a distinct sine shape, older reps visibly faded behind current.
+2. Screenshot at rep 8 showing ≈8 overlays visible with oldest at ≈15% opacity.
+3. Screenshot with ECC mode active showing eccentric half darkened/fuller.
+4. `git log -p -- VoltraLive/Views/ForceChartView.swift` shows the restored sine-path function (or new `drawRep(path:phase:peak:opacityIndex:)`).
+5. No regressions to y-axis auto-fit, `BOTTOM` floor, or `· 30 S` window.
+
+### Doc updates (ship in same commit as code per Karpathy rule)
+
+- `docs/handoff/06_KNOWN_ISSUES.md` — Bug 10 entry referencing both evidence files.
+- `docs/handoff/design/force_curve.md` — update:
+  - Rep geometry: sine wave per rep, concentric rising + eccentric falling
+  - Overlay: ≤8 prior reps with log opacity fade
+  - ECC/CHAIN shading rules
+  - Reference commit SHA of restored implementation
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` — ADR: "Force curve rep geometry is a sine wave per rep with log-faded history overlay; flat polyline rendering of raw samples is a regression that ships disabled."
+- `docs/handoff/entities/live_workout_screen.md` — reference `force_curve.md` for `FORCE · 30 S` panel spec.
+- `docs/WORK_LOG.md` — append entry with restored commit SHA.
+
+### Cross-cutting flag #8 reconciliation
+
+Flag #8 currently reads `DISPUTED`. With Bug 10 logged, it can be flipped to `BROKEN` — the b66 V3 target image (Bug 06 evidence) does NOT in fact render proper sine waves; that earlier reading of `targets/06-live-workout-screen-target.jpeg` was incorrect. F1 telemetry-rule skip from b66 is **not** validated and is now subsumed by Bug 10. Flag #8 will be rewritten when this entry is committed.
+
+### Open questions (Bug 10)
+
+- **Q10.1 (BLOCKER for implementation):** Where is the "earlier working sine-wave geometry"? Three options to pick from:
+  - **A.** Search tag history (`release/v0.4.3x` branch tags) for the last build where the chart was sine-shaped — I haven't gone tag-by-tag yet because git history search showed only sample-polyline implementations back to v0.4.5.
+  - **B.** Reimplement from scratch following the spec in `docs/handoff/design/force_curve.md` (need to re-read that doc — it may already contain the formula).
+  - **C.** User points to a specific commit SHA they remember.
+  - **D.** It never actually shipped — the user is recalling Demo Mode (`fef3d6d` `sin(progress * .pi)` envelope) and conflating it with live render. In which case implementation = port the demo synthesis to a render-layer overlay.
+- **Q10.2:** Which `Force*` view is mounted on `LiveWorkoutScreen` post-Bug 06? `ForceChartView` or `ForceChartV2`? Bug 06 spec said "one live screen"; need to confirm which chart it uses.
+- **Q10.3:** Two evidence screenshots show two different chart chromes. Which is the canonical post-Bug 06 chart? The `FORCE · 30 S` + `BOTTOM` floor variant (IMG_2432) or the `● Pull ● Return  peak 38.3 lb` + axis ticks variant (IMG_2433)? Both must be reconciled to one chart per Bug 06.
+- **Q10.4:** Per-rep sine — should the current in-progress rep (incomplete) be rendered partially as a growing sine arc, or held at zero until the rep completes and then drawn? Smoother UX = partial arc; cleaner code = post-rep only.
+- **Q10.5 (numbering):** Going forward, is this Bug 10 (user's labeling) or Bug 09 (queue's prior placeholder)? I went with **Bug 10** here. If user prefers Bug 09, easy renumber — just swap the section header. The next bug from the user's tease is **Bug 11** (3-digit weight overlap) which assumes Bug 10 numbering stuck.
+- **Q10.6:** Bug 02 footer-clutter reproduces in IMG_2433 (`v0.4.39 (66) · b66: V4.2 ASSIGN TO VOLTRA panel + superset switcher (HARDWARE-QA-PENDING)` overlapping the `Eccentric / Band / Pause` modifier chip row). Already covered by Bug 02 cross-cutting flag #9; logging here as additional evidence.
+
+---
+
+## Bug 11 — (PLACEHOLDER, awaiting screenshot)
+
+**User tease:** "3-digit weight number overlaps the icon / increment buttons at high weights."
+
+**Note:** P1-1 in b66 work log claims a "3-digit weight + TWIN badge overlap fix" already shipped. Bug 11 may be a regression of that fix on a *different* surface (the `UPCOMING SET` panel weight cell vs the live in-set weight cell), or it may be the same surface re-broken.
+
+**Action:** User to send (a) screenshot of the live workout screen at a 3-digit weight (100, 225, etc.) showing the overlap, (b) one-sentence on whether the overlap is on `UPCOMING SET` panel or in-set live row → I'll produce the Bug 11 entry. Target solution: dynamic font scaling, `minFontScale ≈ 0.6`, right-edge fade truncation below the floor.
 
 ---
 
