@@ -588,8 +588,17 @@ struct LiveCaptureViewV2: View {
     @ViewBuilder
     private var phaseOrRestBar: some View {
         let phase = ble.telemetry.phase
-        let restElapsed = Int(session.restElapsedSeconds.rounded())
-        if restElapsed > 0 {
+        // P1-2 (b66): key on `session.restActive` rather than the
+        // rounded elapsed seconds. The previous predicate
+        // (`Int(restElapsedSeconds.rounded()) > 0`) made the rest bar
+        // miss the very first set finalize after launch, because
+        // `restElapsedSeconds` is 0 until the 0.25s ticker next fires
+        // — the bar would silently fail to mount on engage. Sourcing
+        // mount state from `restActive` (which is set synchronously
+        // inside `finalizeSet()` and `tapRestTile()`) is honest to
+        // intent and removes the race.
+        let restElapsed = max(0, Int(session.restElapsedSeconds.rounded()))
+        if session.restActive {
             RestTimerBarV2(
                 restElapsedSec: restElapsed,
                 restPresetSec:  restPresetSeconds,
@@ -720,11 +729,17 @@ struct LiveCaptureViewV2: View {
             // Big number row + steppers. b56: tapping the number toggles
             // hardware LOAD/UNLOAD. Number is green when deviceLoaded.
             //
-            // b58 V4 §P1: weight cell auto-fit — single-line, scales down
-            // to 60% to keep 3-digit + TWIN combos legible without
-            // overlapping the steppers. The fade-out gradient on the
-            // trailing edge is intentionally softer than truncating-tail
-            // dots so a value like "4xx" never dead-stops on an ellipsis.
+            // b66 V4.2 P1-1 fix: 3-digit weight + TWIN badge overlap.
+            // Pre-b66 the TWIN capsule shared an HStack with the
+            // shrink-to-fit weight number; on "4xx lb TWIN" the gradient
+            // fade-out mask leaked over the lb suffix and visually
+            // crashed into the badge. Fix: TWIN now lives in the OUTER
+            // HStack as a fixed-size sibling AFTER the steppers spacer,
+            // and the weight `Text` is wrapped in a `frame(maxWidth:
+            // .infinity, alignment: .leading)` so it owns its own slot
+            // and can compress without dragging the lb suffix or TWIN
+            // along with it. The fade-out mask now applies ONLY to the
+            // number (not the trailing label cluster).
             HStack(spacing: 10) {
                 Button(action: toggleHardwareLoad) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -746,26 +761,33 @@ struct LiveCaptureViewV2: View {
                                     endPoint:   .trailing
                                 )
                             )
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         Text("lb")
                             .font(.system(size: 14, weight: .medium, design: .monospaced))
                             .foregroundColor(VoltraColor.textDim)
-                        // b58 V4 §4: TWIN badge inline next to the weight
-                        // when MERGE is active. Surfaces the dual-Voltra
-                        // mode at the place the user looks first.
-                        if twinModeActive {
-                            Text("TWIN")
-                                .font(.system(size: 9, weight: .bold))
-                                .kerning(1.4)
-                                .foregroundColor(VoltraColor.bg)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(VoltraColor.accent)
-                                .clipShape(Capsule())
-                        }
+                            .layoutPriority(2)
+                            .fixedSize()
                     }
                 }
                 .buttonStyle(.plain)
                 .layoutPriority(1)
+
+                // b66 V4.2 P1-1: TWIN badge promoted out of the weight
+                // button so it can never be visually clipped by the
+                // weight gradient mask. Sits between the weight cluster
+                // and the steppers; only renders when MERGE is active.
+                if twinModeActive {
+                    Text("TWIN")
+                        .font(.system(size: 9, weight: .bold))
+                        .kerning(1.4)
+                        .foregroundColor(VoltraColor.bg)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(VoltraColor.accent)
+                        .clipShape(Capsule())
+                        .fixedSize()
+                        .layoutPriority(2)
+                }
 
                 Spacer(minLength: 4)
                 stepperButton("\u{2212}5") { adjustWeight(-5) }
@@ -1022,7 +1044,10 @@ struct LiveCaptureViewV2: View {
     private var forceChartCard: some View {
         let phase   = ble.telemetry.phase
         let force   = ble.telemetry.forceLb
-        let resting = session.restElapsedSeconds > 0
+        // P1-2 (b66): align with the rest-bar mount predicate; key
+        // on `restActive` so the chart's resting-display kicks in on
+        // the same run loop as finalize, not 0.25s later.
+        let resting = session.restActive
         let samples = session.currentSet?.samples ?? session.lastFinalizedSamples
         let peak    = session.currentSet?.peakLb ?? session.lastFinalizedPeakLb
         let yMax    = computedYAxisMaxLb()

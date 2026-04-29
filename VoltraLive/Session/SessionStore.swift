@@ -238,7 +238,15 @@ final class SessionStore: ObservableObject {
         // user's perspective; surfacing 2 of those in the rest counter
         // makes the wall-clock feel honest. (User feedback: rest timer
         // felt "-2s out of sync" with their phone clock.)
-        restStartedAt = Date().addingTimeInterval(-2.0)
+        let restAnchor = Date().addingTimeInterval(-2.0)
+        restStartedAt = restAnchor
+        // P1-2 (b66): publish restElapsedSeconds NOW so SwiftUI mounts
+        // the rest bar on the same run loop as finalize. Without this,
+        // the value stays at 0 until the 0.25s ticker next fires,
+        // which caused the very first set after launch to silently
+        // miss the rest-bar engagement (the LiveCaptureViewV2
+        // mount predicate is `Int(restElapsedSeconds.rounded()) > 0`).
+        restElapsedSeconds = Date().timeIntervalSince(restAnchor)
         setRestActive(true)
         persistDraft()
         // v0.4.5: clear drop-set mode after finalize so the next set isn't
@@ -265,7 +273,15 @@ final class SessionStore: ObservableObject {
     }
 
     func tapRestTile() {
-        restStartedAt = Date()
+        let now = Date()
+        restStartedAt = now
+        // P1-2 (b66): kick `restElapsedSeconds` so SwiftUI sees a
+        // published change on this run loop. The view-side mount
+        // predicate now keys on `restActive` (not the rounded-seconds
+        // value) so the bar appears immediately on tap; this assignment
+        // is just to ensure observers re-fire if the value happens to
+        // already be 0.
+        restElapsedSeconds = 0
         setRestActive(true)
     }
 
