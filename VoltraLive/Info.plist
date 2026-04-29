@@ -19,13 +19,13 @@
     <key>CFBundleShortVersionString</key>
     <string>0.4.38</string>
     <key>CFBundleVersion</key>
-    <string>60</string>
+    <string>61</string>
     <!-- Build 31: short label for the single feature this build is testing.
          Shown next to the build badge in every screen so the user knows
          exactly what to focus on. Update this each build to match the one
          feature being tested. Empty string disables the label. -->
     <key>VOLTRAFeatureLabel</key>
-    <string>b60: dropset arm-only + unified bar + KI-11 force-curve full spec (from GPT-5.5 fork)</string>
+    <string>b61: dropset arm-only + unified bar + KI-11 force-curve full spec (from GPT-5.5 fork; b60 hit ASC duplicate-build collision)</string>
     <key>ITSAppUsesNonExemptEncryption</key>
     <false/>
     <!-- v0.4.6.3: Demo Mode trace upload. release.yml replaces these

@@ -62,7 +62,7 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         DEVELOPMENT_TEAM: "${APPLE_TEAM_ID:-}"
         MARKETING_VERSION: "0.4.38"
-        CURRENT_PROJECT_VERSION: "60"
+        CURRENT_PROJECT_VERSION: "61"
     dependencies:
       - sdk: CoreBluetooth.framework
       - sdk: CloudKit.framework

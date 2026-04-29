@@ -2991,3 +2991,66 @@ this WORK_LOG entry deliberately does not re-paste them.
 **Cost callout:** This entire ship cycle is **medium** —
 checkout + 2 file edits + WORK_LOG append + commit + push + PR
 open + tag + release.yml polling loop + ASC polling loop.
+
+---
+
+## b61 — bump-and-retry after Apple rejected b60 (v0.4.38-build61)
+
+**Date/time:** 2026-04-29 16:42 UTC
+
+**Why this exists:** b60 upload failed at altool with Apple error
+`-19232 ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE`:
+
+```
+The bundle version must be higher than the previously uploaded
+version: '59'. The provided entity includes an attribute with a
+value that has already been used.
+```
+
+This is App Store Connect telling us build `60` was already taken
+on Apple's side (origin unknown — possibly a prior CI run, fork
+CI run, or local archive). The 5-gate altool guard caught it at
+gate 4 (no positive success marker) and gate 5 (failure regex
+matched). CI failed loudly — no false-positive ship.
+
+The b60 tag `v0.4.38-build60` is preserved in repo history as a
+failed-upload audit trail per user direction.
+
+**Fix:** single bump commit on top of the b60 release branch.
+Same payload (3 fork commits + b60 conduit commit), version 61.
+
+**Files changed (this commit only):**
+- `project.yml` — `CURRENT_PROJECT_VERSION` 60 → 61.
+- `VoltraLive/Info.plist` — matching `CFBundleVersion`; updated
+  `VOLTRAFeatureLabel` to mention the collision.
+- `docs/WORK_LOG.md` — this entry.
+
+`MARKETING_VERSION` stays at `0.4.38` per user choice (Option 1
+from the bump prompt).
+
+**Source payload unchanged:** still gpt55/feat/ui-v4-dropset-armonly
+@ 59a3c05. Same three implementation commits ride this re-ship.
+
+**Verification:**
+- Tag `v0.4.38-build61` confirmed unused (no such tag on origin).
+- Sacred files still untouched.
+- Branch `release/v0.4.38-build60` retained as the working branch
+  (no rename — keeps PR #3 stable). Tag and PR title carry the
+  build-61 marker; branch name is now slightly stale but harmless.
+
+**Risks:**
+- If `61` is ALSO taken on ASC, we'll see the same `-19232` and
+  bump to 62. There is no API call from this environment to
+  enumerate ASC's existing builds before the fact. User has been
+  informed of this.
+- All hardware-QA risks from b60 still apply unchanged.
+
+**Next step:**
+1. Commit + push to release branch.
+2. Tag `v0.4.38-build61`, push tag.
+3. Run release.yml, poll, 5-gate verify.
+4. If altool succeeds, poll ASC for processing.
+5. Report status as "uploaded to TestFlight, awaiting hardware QA."
+
+**Cost callout:** Re-ship adds another medium block (one more
+release.yml run + altool + poll). Total session is now medium-heavy.
