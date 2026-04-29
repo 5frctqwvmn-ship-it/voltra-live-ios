@@ -3228,3 +3228,102 @@ since release.yml triggers on both `push: tags` and
 If dry-run passes, real ship adds another ~1 medium. Cumulative
 session is very-heavy now.
 
+
+---
+
+## 2026-04-29 — b60 SHIPPED to TestFlight (awaiting hardware QA)
+
+**Status:** UPLOAD SUCCEEDED. Apple is processing. Hardware QA pending.
+
+**Ground-truth verification (dry-run, run 25123263886):**
+
+Downloaded the signed IPA artifact from the dry-run, unzipped, and
+read the embedded Info.plist with plistlib. Confirmed:
+
+```
+CFBundleVersion            : '60'
+CFBundleShortVersionString : '0.4.38'
+CFBundleIdentifier         : 'com.voltralive.app'
+VOLTRAFeatureLabel         : 'b60: V4 dropset arm-only + KI-10/11 force curve (HARDWARE-QA-PENDING)'
+```
+
+Macros propagated correctly through xcodegen → xcodebuild → archive →
+IPA. Fix verified before any altool burn.
+
+**Real ship (run 25123591351, workflow_dispatch dry_run=false):**
+
+- Branch: release/v0.4.38-build60 @ commit 52c2a14
+- altool wall-clock: 40 seconds (b59 was 35s — within normal range)
+- Result: UPLOAD SUCCEEDED with no errors
+- Delivery UUID: 75da41b6-b52b-43f7-8999-acafb8e171d7
+- Bytes transferred to Apple: 2,640,225
+
+**5-gate altool ship verification:**
+
+| Gate | Check | Result |
+|---|---|---|
+| 1 | workflow conclusion = success | ✅ |
+| 2 | raw log pulled (>0 lines) | ✅ 2075 lines |
+| 3 | altool duration ≥ 20s | ✅ 40s |
+| 4 | "UPLOAD SUCCEEDED with no errors" present | ✅ 1 occurrence |
+| 5 | zero ERROR: [altool|ContentDelivery] lines | ✅ (2 matches were inside bash echo of regex docs, not real errors) |
+
+**Apple's view of the build chain:**
+
+| ASC build | CFBundleShortVersionString | CFBundleVersion | Status |
+|---|---|---|---|
+| (existing) | 0.4.36 | 58 | Complete |
+| (existing) | 0.4.37 | 59 | Complete |
+| (this ship) | 0.4.38 | 60 | Processing → TestFlight |
+
+**Tags / branches state:**
+
+- Branch `release/v0.4.38-build60` at commit `52c2a14` (the fix +
+  this WORK_LOG entry will land in a follow-up doc-only commit).
+- Tags `v0.4.38-build60`, `v0.4.38-build61`, `v0.4.38-build65` all
+  preserved as audit trail of the xcodegen-regen bug. They point at
+  pre-fix commits that produced IPAs containing CFBundleVersion=59.
+  None of those tags reflect the actual shipped artifact, so they
+  must NOT be re-used for downstream tooling that resolves "what's
+  on TestFlight as 0.4.38(60)" — that is `52c2a14`, not the tag.
+- main: untouched.
+- Fork: untouched.
+- PR #3 against main: open, ready for review/merge after hardware QA.
+
+**HARDWARE-QA-PENDING (carried forward from b60 brief — none of these
+are real-hardware-confirmed yet, only software-verified on simulator):**
+
+- [ ] Dual-Voltra routing (b59 carry-over): correctly routes to V2
+      LiveCapture when both Voltras paired
+- [ ] DROP arm-only behavior (KI-9): only the active arm's drops
+      count toward the dropset cascade
+- [ ] KI-10 phantom -5lb drop: no synthetic drop event fires when
+      weight stays constant
+- [ ] KI-11 force-curve full spec: 80% line, peak dots, legend
+      display correctly across full rep range
+
+**Sacred files audit:**
+
+- VoltraProtocol.swift / TelemetryExtractor.swift / PacketParser.swift /
+  FrameAssembler.swift: untouched (same contents as b59).
+- .github/workflows/release.yml: untouched (the diagnostic edit drafted
+  during debug was reverted before commit; the real fix landed in
+  project.yml + Info.plist only).
+
+**Cost callout:** Two release.yml runs this turn (1 dry-run + 1 real
+ship) = 1 medium block. Total session cost: very-heavy (5 release runs
++ extensive log analysis + IPA artifact extraction + plistlib
+inspection). Root cause now permanently fixed; future bumps will
+just touch project.yml's CURRENT_PROJECT_VERSION line.
+
+**Lesson learned (for future agents):**
+
+When xcodegen has both `info.path` AND `info.properties` set, that
+plist file is REGENERATED on every `xcodegen generate` from the
+properties block. Bumping the source plist file directly is a no-op.
+Always either (a) bump the values in `info.properties` itself, or
+(b) use `$(MARKETING_VERSION)` / `$(CURRENT_PROJECT_VERSION)` macros
+in `info.properties` and bump only the target build settings.
+Pattern (b) — now in effect — is single-source-of-truth and prevents
+this drift class entirely.
+
