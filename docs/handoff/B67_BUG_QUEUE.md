@@ -703,26 +703,18 @@ Flag #8 currently reads `DISPUTED`. With Bug 10 logged, it can be flipped to `BR
 
 ### Open questions (Bug 10)
 
-- **Q10.1 (BLOCKER for implementation):** Where is the "earlier working sine-wave geometry"? Three options to pick from:
-  - **A.** Search tag history (`release/v0.4.3x` branch tags) for the last build where the chart was sine-shaped — I haven't gone tag-by-tag yet because git history search showed only sample-polyline implementations back to v0.4.5.
-  - **B.** Reimplement from scratch following the spec in `docs/handoff/design/force_curve.md` (need to re-read that doc — it may already contain the formula).
-  - **C.** User points to a specific commit SHA they remember.
-  - **D.** It never actually shipped — the user is recalling Demo Mode (`fef3d6d` `sin(progress * .pi)` envelope) and conflating it with live render. In which case implementation = port the demo synthesis to a render-layer overlay.
+- **Q10.1 → ANSWERED Apr 29 2026: B (reimplement from `force_curve.md` spec).** Per user response. Implementation path: re-read `docs/handoff/design/force_curve.md`, build fresh per-rep sine-wave renderer, replace raw-sample polyline in `ForceChartView.swift` / `ForceChartV2.swift`. Add ADR to `04_DECISIONS_AND_CONSTRAINTS.md` in same commit.
 - **Q10.2:** Which `Force*` view is mounted on `LiveWorkoutScreen` post-Bug 06? `ForceChartView` or `ForceChartV2`? Bug 06 spec said "one live screen"; need to confirm which chart it uses.
 - **Q10.3:** Two evidence screenshots show two different chart chromes. Which is the canonical post-Bug 06 chart? The `FORCE · 30 S` + `BOTTOM` floor variant (IMG_2432) or the `● Pull ● Return  peak 38.3 lb` + axis ticks variant (IMG_2433)? Both must be reconciled to one chart per Bug 06.
 - **Q10.4:** Per-rep sine — should the current in-progress rep (incomplete) be rendered partially as a growing sine arc, or held at zero until the rep completes and then drawn? Smoother UX = partial arc; cleaner code = post-rep only.
-- **Q10.5 (numbering):** Going forward, is this Bug 10 (user's labeling) or Bug 09 (queue's prior placeholder)? I went with **Bug 10** here. If user prefers Bug 09, easy renumber — just swap the section header. The next bug from the user's tease is **Bug 11** (3-digit weight overlap) which assumes Bug 10 numbering stuck.
+- **Q10.5 → ANSWERED Apr 29 2026: keep Bug 10 numbering; ship all 9 in b67 (v0.4.40 / build 67).** Bug 09 stays explicitly skipped/reserved. Branch stays `feat/ui-v4-2-claude`. (Bug 11 placeholder below was a pre-emptive tease that user has now closed by saying 'these are all the bugs' — see Bug 11 status note.)
 - **Q10.6:** Bug 02 footer-clutter reproduces in IMG_2433 (`v0.4.39 (66) · b66: V4.2 ASSIGN TO VOLTRA panel + superset switcher (HARDWARE-QA-PENDING)` overlapping the `Eccentric / Band / Pause` modifier chip row). Already covered by Bug 02 cross-cutting flag #9; logging here as additional evidence.
 
 ---
 
-## Bug 11 — (PLACEHOLDER, awaiting screenshot)
+## Bug 11 — CLOSED (not filed; user signaled "these are all the bugs" Apr 29 2026)
 
-**User tease:** "3-digit weight number overlaps the icon / increment buttons at high weights."
-
-**Note:** P1-1 in b66 work log claims a "3-digit weight + TWIN badge overlap fix" already shipped. Bug 11 may be a regression of that fix on a *different* surface (the `UPCOMING SET` panel weight cell vs the live in-set weight cell), or it may be the same surface re-broken.
-
-**Action:** User to send (a) screenshot of the live workout screen at a 3-digit weight (100, 225, etc.) showing the overlap, (b) one-sentence on whether the overlap is on `UPCOMING SET` panel or in-set live row → I'll produce the Bug 11 entry. Target solution: dynamic font scaling, `minFontScale ≈ 0.6`, right-edge fade truncation below the floor.
+Bug 11 was a forward-looking tease in my response asking for a 3-digit weight overlap screenshot. User responded "these are all the bugs; let's go fix them" — closing the queue at Bug 10. No Bug 11 will be filed in this cycle. If a 3-digit overlap regression surfaces in b67 hardware QA, it will be filed as B68-01 (b66 KI-F4 / V4-D9 already covered the original 3-digit fix; any regression would be a re-open).
 
 ---
 

@@ -6,39 +6,37 @@ Things blocked on the user. Resolve before the dependent task can ship.
 > commit** as the code change that uses the answer. Don't let stale
 > questions accumulate.
 
-## b67 — unblocking questions (asked Apr 29 2026, awaiting answer)
+## b67 — unblocking questions (asked + ANSWERED Apr 29 2026)
 
-Full bug-by-bug Q lists live in `B67_BUG_QUEUE.md`. The two
-questions below are the **only blockers for starting code**; every
-other queue Q can be resolved from codebase + spec without user
-input.
+Both blocker questions answered before code work began. Recorded
+here for traceability; will be deleted in the b67 ship commit per
+the top-of-file rule.
 
-### Q10.1 — Sine-wave force-curve geometry source
+### Q10.1 — Sine-wave force-curve geometry source → **ANSWERED: A**
 
-Git history search shows the live force chart has **never** been
-parametric sine since v0.4.5. Where does the "earlier working"
-geometry come from? Options:
+> Reimplement from `docs/handoff/design/force_curve.md` spec.
 
-- **A.** Reimplement from `docs/handoff/design/force_curve.md` spec (recommended)
-- **B.** Search release tags `v0.4.30`–`v0.4.38` for an earlier sine impl (slow, may turn up nothing)
-- **C.** User points to a specific commit SHA
-- **D.** Port Demo Mode `sin(progress * .pi)` envelope (`fef3d6d`) to render layer
+Decision rationale: git history search returned zero commits where
+the live force chart was ever parametric sine; spec doc is the only
+remaining source of truth. Options B/C/D rejected.
 
-**Status:** awaiting answer. **Blocks:** B67-10 implementation.
-**Fallback if user delays:** proceed with A.
+**Implementation note:** B67-10 fix builds a fresh per-rep sine-wave
+renderer using `force_curve.md` as canonical, replacing the
+raw-sample polyline path in `ForceChartView.swift` /
+`ForceChartV2.swift`. ADR will be added to
+`04_DECISIONS_AND_CONSTRAINTS.md` (V4-D13 or next available slot)
+in the same commit as the code.
 
-### Q10.5 — Numbering + scope
+### Q10.5 — Numbering + scope → **ANSWERED: A**
 
-User paste block labeled the force-curve bug as Bug 10; queue had a
-Bug 09 placeholder I skipped. Also: ship all 9 bugs in one b67
-release, or split? Options:
+> Keep Bug 10 numbering, ship all 9 in b67.
 
-- **A.** Keep Bug 10 numbering, ship all 9 in b67 (recommended)
-- **B.** Renumber to Bug 09, ship all 9 in b67
-- **C.** Split: chrome cleanup (01/02/03/04+05/06/07/08) in b67, force chart (10) in b68
+Decision rationale: bugs are entangled (03/06/07/08 all touch the
+same view files; 04+05 must ship with 07 per cross-cutting flag
+#11). Bug 09 stays explicitly skipped/reserved. Single release:
+**v0.4.40 / build 67**.
 
-**Status:** awaiting answer. **Blocks:** branch / commit naming, release notes.
-**Fallback if user delays:** proceed with A.
+Branch stays `feat/ui-v4-2-claude` (continuation, no new branch).
 
 ## V2 promotion
 
