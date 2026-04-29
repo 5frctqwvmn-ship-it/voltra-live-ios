@@ -4,17 +4,18 @@
 > `docs/WORK_LOG.md` and are deleted from here. Unfixed items
 > stay until shipped.
 
-## b68 Bug Batch — OPEN (cycle started Apr 29 2026 PDT)
+## b68 Bug Batch — FIXED in-tree, awaiting altool ship
 
-New bug cycle opened immediately after b67 TestFlight ship
-verify. See `B68_BUG_QUEUE.md` for the live queue + held
-questions. Cycle target: v0.4.41 / build 68 on
-`feat/ui-v4-2-claude`.
+Cycle opened Apr 29 2026 (PDT) immediately after b67 TestFlight
+ship verify. Cycle target: v0.4.41 / build 68 on
+`feat/ui-v4-2-claude`. See `B68_BUG_QUEUE.md` for per-bug
+detail + Q&A and `04_DECISIONS_AND_CONSTRAINTS.md` ADR V4-D16
+for the auto-engage contract.
 
-- **B68-01** — OPEN — Demo mode should auto-engage in Live View
-  when no Voltra is connected (regression caused by B67-01
-  cold-launch flip; `DemoModeButton(.prePair)` in `ConnectView`
-  is unreachable from the root flow).
+- **B68-01** — FIXED in-tree — demo mode auto-engages on
+  `LiveCaptureViewV2.toggleHardwareLoad()` when no Voltra is
+  connected, and auto-exits via `.onChange` observers when any
+  device pairs mid-session (prePair source only).
 
 ## b67 Bug Batch — SHIPPED in v0.4.40 / build 67
 

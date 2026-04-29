@@ -88,6 +88,14 @@ struct LiveCaptureViewV2: View {
     /// re-pair a slot mid-session by tapping a greyed L/R pill in the
     /// VoltraUnitHeader (subject to the live-set isReadOnly lock).
     @EnvironmentObject var pairing: PairingCoordinator
+    /// b68 (B68-01): demo controller env-injected so the LIVE screen can
+    /// auto-engage demo mode when the user loads weight with no Voltra
+    /// connected, and auto-exit when a real device pairs mid-session.
+    /// Replaces the deprecated `ConnectView` `DemoModeButton(.prePair)`
+    /// path that B67-01 orphaned (cold launch goes straight to
+    /// `LoggingHomeView` now, so the prePair button is unreachable from
+    /// the root flow).
+    @EnvironmentObject var demo: DemoController
 
     @Environment(\.dismiss) private var dismiss
 
@@ -187,6 +195,15 @@ struct LiveCaptureViewV2: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+        // b68 (B68-01) Q2: hand off from prePair demo to real telemetry
+        // the moment any of the three connection paths flips to
+        // .connected. Wired to all three @Published states; Equatable
+        // associated values mean redundant fires are harmless because
+        // `handleConnectionChange()` is guarded by `demo.isActive` +
+        // `entrySource == .prePair`.
+        .onChange(of: ble.connectionState)        { _, _ in handleConnectionChange() }
+        .onChange(of: mdm.left.connectionState)   { _, _ in handleConnectionChange() }
+        .onChange(of: mdm.right.connectionState)  { _, _ in handleConnectionChange() }
         .toolbar { toolbarContent }
         .confirmationDialog(
             "What do you want to do?",
@@ -1433,6 +1450,17 @@ struct LiveCaptureViewV2: View {
     /// reusing the same opcode path V1 uses (sendLoad/sendUnload). When
     /// any MDM slot is paired we route through MDM; otherwise legacy ble.
     private func toggleHardwareLoad() {
+        // b68 (B68-01): if no Voltra is connected and demo isn't already
+        // active, auto-engage prePair demo so the force chart + rep
+        // counter respond to synthetic telemetry. Replaces the orphaned
+        // ConnectView prePair entry. User decision (Apr 29 2026 PDT):
+        //   Q1 = any weight tap, no device → fire here.
+        //   Q4 = silent (no banner/toast); existing DemoModeOverlay is
+        //        the only signal.
+        // Q2 (auto-exit on real-device connect mid-session) is handled
+        // by the .onChange observer on connection state in body.
+        autoEngageDemoIfNeeded()
+
         if deviceLoaded {
             if mdm.state != .idle { mdm.unload() } else { ble.sendUnload() }
             deviceLoaded = false
@@ -1443,6 +1471,38 @@ struct LiveCaptureViewV2: View {
             if mdm.state != .idle { mdm.load() } else { ble.sendLoad() }
             deviceLoaded = true
         }
+    }
+
+    /// b68 (B68-01): true when no Voltra is paired & connected on any
+    /// path (legacy single `ble`, MDM left, or MDM right).
+    private var anyDeviceConnected: Bool {
+        ble.connectionState.isConnected
+            || mdm.left.connectionState.isConnected
+            || mdm.right.connectionState.isConnected
+    }
+
+    /// b68 (B68-01): auto-engage prePair demo when the user interacts
+    /// with weight controls but no Voltra is connected. Idempotent —
+    /// `DemoController.enter` early-returns when already active.
+    private func autoEngageDemoIfNeeded() {
+        guard !anyDeviceConnected, !demo.isActive else { return }
+        guard let handler = DemoTelemetryBridge.shared.handler else { return }
+        demo.note(.buttonTap(
+            label: "Auto-engage (no device, weight tapped)",
+            screen: "LiveCaptureViewV2"
+        ))
+        demo.enter(source: .prePair, onTelemetry: handler)
+    }
+
+    /// b68 (B68-01) / Q2: when a real Voltra connects mid-session while
+    /// prePair demo is active, exit demo so subsequent reps consume real
+    /// telemetry. postPair demo (manually engaged from home with a
+    /// device already paired) is left alone — that path is intentional.
+    private func handleConnectionChange() {
+        guard demo.isActive,
+              demo.entrySource == .prePair,
+              anyDeviceConnected else { return }
+        _ = demo.exit()
     }
 
     // MARK: - Device state push

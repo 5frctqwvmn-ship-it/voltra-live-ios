@@ -4,17 +4,31 @@
 > up VOLTRA Live iOS. Skim, then read the docs in the order at
 > the bottom.
 
-## Where things stand (b68 cycle opened; b67 SHIPPED)
+## Where things stand (b68 fixed in-tree, awaiting altool ship)
 
-**ACTIVE CYCLE:** b68 / v0.4.41 / build 68 — cycle opened
-Apr 29 2026 (PDT) immediately after b67 TestFlight ship
-verify. First bug **B68-01** (demo mode auto-engage regression)
-is logged in `B68_BUG_QUEUE.md` with held questions Q1–Q5
-embedded inline. User has invoked HR#2 ("hold questions until I
-say done") — do not start fix execution until the user says
-"done". When unblocked, ask Q1–Q5 via multiple choice, then
-implement on `feat/ui-v4-2-claude`, ship as build 68 via
-`release.yml dry_run=false` + 5-gate altool verify.
+**ACTIVE CYCLE:** b68 / v0.4.41 / build 68 — the single
+user-reported bug **B68-01** (demo mode auto-engage regression
+caused by B67-01's cold-launch flip) is **fixed and committed**
+on `feat/ui-v4-2-claude`. The branch is awaiting
+`release.yml dry_run=false` + 5-gate altool verify + TestFlight
+surface. Read **`B68_BUG_QUEUE.md`** for the Q&A + close-out
+detail, **`docs/WORK_LOG.md`** for the v0.4.41 ship narrative,
+and **`04_DECISIONS_AND_CONSTRAINTS.md`** ADR V4-D16 for the
+auto-engage contract.
+
+b68 wins (closed):
+1. **B68-01** — `LiveCaptureViewV2.toggleHardwareLoad()`
+   auto-engages prePair demo when no Voltra is connected, and
+   `.onChange` observers on the three connection states
+   auto-exit demo when any device pairs mid-session.
+
+### Next-agent action: ship b68
+
+1. Run `gh workflow run release.yml --repo 5frctqwvmn-ship-it/voltra-live-ios --ref feat/ui-v4-2-claude -f dry_run=false`
+2. 5-gate altool verify (UPLOAD SUCCEEDED / ≥20s / exit 0 / no
+   blocklist markers / Delivery UUID captured).
+3. Record ship verification in `docs/WORK_LOG.md`, commit with
+   bot identity, push.
 
 ## Previous cycle (b67) — SHIPPED to TestFlight
 

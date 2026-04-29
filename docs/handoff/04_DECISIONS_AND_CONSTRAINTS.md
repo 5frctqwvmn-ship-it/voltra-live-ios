@@ -496,3 +496,61 @@ chrome doesn't strand the user mid-flow.
   remove the duplicate pair UX or the duplicate scanner state.
 - Per-screen `@State showingPairSheet`. Status quo; defeats
   the dedupe.
+
+## V4-D16 — Demo mode auto-engage contract on LiveCaptureViewV2
+
+**Date.** 2026-04-29 (b68 / B68-01).
+
+**Problem.** B67-01 made `LoggingHomeView` the unconditional
+cold-launch surface and demoted `ConnectView` to legacy/deeplink
+only. `ConnectView`'s `DemoModeButton(source: .prePair)` at
+lines 165–168 became unreachable from the root flow, so a
+fresh-install user with no Voltra paired had no way to engage
+demo mode and the LIVE force chart sat at zero with weights
+loaded — a discoverability regression, not a code defect in
+b67's chrome work.
+
+**Decided.** Auto-engage `prePair` demo from
+`LiveCaptureViewV2.toggleHardwareLoad()`:
+
+- **Trigger (Q1):** any tap on the WEIGHT NUMBER (b56 hardware
+  LOAD path) when `!anyDeviceConnected && !demo.isActive`.
+  Idempotent — `DemoController.enter` early-returns when
+  already active.
+- **Telemetry handler.** `DemoTelemetryBridge.shared.handler`,
+  identical to the wiring `LoggingHomeView` uses for
+  manual-postPair entry.
+- **Auto-handoff (Q2):** `.onChange` observers on
+  `ble.connectionState`, `mdm.left.connectionState`,
+  `mdm.right.connectionState` call `demo.exit()` when
+  `entrySource == .prePair && anyDeviceConnected`. postPair
+  demo (manually engaged with a device already paired) is
+  intentionally untouched — that's a user-explicit demo
+  session that should outlive a connection blip.
+- **No banner / toast (Q4).** Existing `DemoModeOverlay` is the
+  only signal the user gets; matches the current visual
+  language for demo state.
+- **Manual postPair button stays (Q3).** `LoggingHomeView`'s
+  `DemoModeButton(source: .postPair)` is unchanged so users
+  with a paired device can still opt into demo intentionally.
+
+**Why.** Hooks the demo trigger into the user's actual intent
+(loading weight) rather than into a navigational surface that
+no longer exists. The "weight tap with no device connected"
+state is a tight, unambiguous signal that the user is trying to
+exercise but has nothing driving the chart — exactly the case
+demo mode was designed to cover.
+
+**Rejected.**
+- *Auto-engage on view appear* (every time the LIVE screen
+  mounts). Engages too early, before user intent is clear; would
+  fight `ConnectView` deeplinks and re-fire on every navigation
+  back-and-forth.
+- *First-LOAD-per-session only.* Functionally equivalent given
+  `DemoController.enter`'s `guard !isActive else { return }`
+  early-return, and adds a session-tracking flag without
+  benefit.
+- *Persistent banner / toast on auto-engage.* User picked silent
+  per Q4 — `DemoModeOverlay` is the canonical signal.
+- *Delete `ConnectView` outright in b68 (Q5).* Deferred to a
+  later cycle; out of scope for this single-bug fix.

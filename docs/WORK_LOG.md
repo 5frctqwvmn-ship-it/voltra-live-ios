@@ -2954,3 +2954,59 @@ status = success.
 **TestFlight surface:** v0.4.40 (build 67) uploaded to App Store
 Connect at 22:42 UTC on Apr 29 2026. Awaiting Apple processing
 before the build appears in TestFlight.
+
+---
+
+## 2026-04-29 (b68) — B68-01 demo auto-engage on LiveCaptureViewV2
+
+**Bug.** Demo mode regression caused by B67-01 cold-launch flip.
+`LoggingHomeView` became the unconditional root, demoting
+`ConnectView` to legacy/deeplink and orphaning the
+`DemoModeButton(source: .prePair)` at `ConnectView:165–168`. A
+fresh-install user with no Voltra paired could load weights on
+LIVE but had no path to engage demo, so the force chart sat at
+zero with weights on screen.
+
+**User answers driving the fix.**
+- Q1 = any weight tap, no device → fire on every
+  `toggleHardwareLoad()` invocation when not connected.
+- Q2 = auto-exit on real device pair → `.onChange` observers on
+  all three connection states drop prePair demo automatically.
+- Q3 = keep `LoggingHomeView` postPair `DemoModeButton` as
+  manual entry → no home-screen change.
+- Q4 = silent activation → existing `DemoModeOverlay` is the
+  only signal.
+- Q5 = `ConnectView` retirement deferred (not asked, not
+  blocking).
+
+**Files touched.**
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
+  - `@EnvironmentObject var demo: DemoController` (root-injected
+    from `VoltraLiveApp:119`).
+  - `private var anyDeviceConnected: Bool` derives from
+    `ble.connectionState.isConnected || mdm.left.connectionState.isConnected || mdm.right.connectionState.isConnected`.
+  - `private func autoEngageDemoIfNeeded()` records a button-tap
+    trace (parity with `LoggingHomeView`) and calls
+    `demo.enter(source: .prePair, onTelemetry:
+    DemoTelemetryBridge.shared.handler)`.
+  - `private func handleConnectionChange()` exits demo when
+    `entrySource == .prePair && anyDeviceConnected`.
+  - Three `.onChange(of: …connectionState)` modifiers on body.
+  - `toggleHardwareLoad()` calls `autoEngageDemoIfNeeded()`
+    before LOAD/UNLOAD branch.
+- `docs/handoff/B68_BUG_QUEUE.md` — Q&A locked, status FIXED.
+- `docs/handoff/06_KNOWN_ISSUES.md` — banner moved to
+  fixed-pending-ship.
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` — ADR V4-D16
+  records the auto-engage contract.
+- `docs/handoff/09_NEXT_AGENT_PROMPT.md` — flipped to
+  "fixed in-tree, awaiting altool".
+
+**Lint-gate invariants (b67 carryover).** `grep -rni
+"VL1\|LiveStatusPill\|LeftRightStatusPill\|DeviceStatusStrip\|VoltraWordmark"
+VoltraLive/Views/ VoltraLive/Logging/Views/` still must return
+zero matches outside the two known doc/copy exceptions in
+`VoltraUnitHeader.swift` and `DebugView.swift`.
+
+**Ship.** Pending. Will run `release.yml dry_run=false` after
+this commit lands; 5-gate altool verify, then v0.4.41 / build 68.

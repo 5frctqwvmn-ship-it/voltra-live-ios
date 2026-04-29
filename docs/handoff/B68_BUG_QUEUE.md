@@ -13,7 +13,7 @@
 
 | ID      | Title                                                  | Status | Closing commit |
 |---------|--------------------------------------------------------|--------|----------------|
-| B68-01  | Demo mode should auto-engage in Live View when no Voltra is connected | OPEN   | —              |
+| B68-01  | Demo mode should auto-engage in Live View when no Voltra is connected | FIXED  | (this commit)  |
 
 ---
 
@@ -86,27 +86,25 @@ if !anyDeviceConnected && !demo.isActive {
 existing `DemoController.exit()` paths (manual toggle, BLE
 connection) are unchanged.
 
-### Held questions (per HR#2 + HR#3 — to ask after user says "done")
+### Held questions — user answers (Apr 29 2026, PDT)
 
-- **Q1 — trigger granularity.** Should *any* weight tap engage
-  demo, or only the first LOAD per session? Or only specific
-  actions like "Start session" / tapping a weight card vs. a
-  pulley adjustment?
-- **Q2 — auto-disengage on connect.** If a Voltra device pairs
-  *mid-session* while demo is active, should demo auto-exit and
-  hand off to the real device (with a transition), or stay in
-  demo until the rep set ends?
-- **Q3 — `LoggingHomeView` postPair button.** Should the
-  existing `DemoModeButton(source: .postPair)` on home stay as
-  a manual entry point, or be removed now that demo auto-engages?
-- **Q4 — visual indicator.** When demo auto-engages, do you
-  want a banner / toast on `LiveCaptureViewV2` ("Demo mode —
-  no device connected") or silent activation matching the
-  `DemoModeOverlay` already in the tree?
-- **Q5 — `ConnectView` cleanup.** With `DemoModeButton(.prePair)`
-  unreachable, do you want `ConnectView` deleted outright in b68
-  (it's reserved for legacy onboarding deeplink only), or kept
-  as a stub for future deeplink work?
+- **Q1 — trigger granularity.** → **Any weight tap, no device.**
+  Hooked into `toggleHardwareLoad()` on `LiveCaptureViewV2`
+  (the WEIGHT NUMBER tap path from b56).
+- **Q2 — auto-disengage on connect.** → **Auto-exit, hand off to
+  real device.** `.onChange` observers on all three connection
+  states fire `handleConnectionChange()` which exits demo
+  whenever `entrySource == .prePair` and any device flips to
+  connected.
+- **Q3 — `LoggingHomeView` postPair button.** → **Keep as manual
+  entry.** No change to home; postPair demo is still
+  user-engageable when a device is already paired.
+- **Q4 — visual indicator.** → **Silent.** Existing
+  `DemoModeOverlay` is the only signal; no banner / toast added.
+- **Q5 — `ConnectView` cleanup.** → deferred (not asked; not
+  blocking). The orphaned `DemoModeButton(.prePair)` at
+  `ConnectView:165–168` remains in-tree but unreachable; revisit
+  in a later cycle if `ConnectView` is fully retired.
 
 ### Acceptance criteria (draft, pending Q answers)
 
@@ -125,7 +123,29 @@ connection) are unchanged.
    passes (UPLOAD SUCCEEDED, ≥20s, exit 0, no blocklist
    markers).
 
+### Implementation (landed in this commit)
+
+`VoltraLive/Logging/Views/LiveCaptureViewV2.swift`:
+
+1. Added `@EnvironmentObject var demo: DemoController` next to the
+   existing `pairing` injection (root-injected from
+   `VoltraLiveApp:119`).
+2. New `private var anyDeviceConnected: Bool` derives from the
+   three connection-state paths (`ble`, `mdm.left`, `mdm.right`).
+3. New `private func autoEngageDemoIfNeeded()` — idempotent;
+   reads `DemoTelemetryBridge.shared.handler`, records a button-tap
+   trace event for parity with `LoggingHomeView`, then
+   `demo.enter(source: .prePair, onTelemetry: handler)`. Called at
+   the top of `toggleHardwareLoad()` so every WEIGHT NUMBER tap
+   covers the auto-engage gate.
+4. New `private func handleConnectionChange()` — guarded by
+   `demo.isActive` + `entrySource == .prePair`; calls
+   `demo.exit()` when any device flips to connected. postPair
+   demo (manually engaged from home) is intentionally untouched.
+5. Three `.onChange(of: …connectionState)` modifiers on the body
+   forward to `handleConnectionChange()`.
+
 ### Status
 
-**OPEN.** Awaiting user "done" + Q1–Q5 answers before fix
-execution. Fix will ship as v0.4.41 / build 68.
+**FIXED.** Awaiting `release.yml dry_run=false` ship verify.
+Will ship as v0.4.41 / build 68.
