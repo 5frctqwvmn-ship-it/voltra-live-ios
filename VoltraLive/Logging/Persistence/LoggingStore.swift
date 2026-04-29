@@ -58,6 +58,17 @@ final class LoggingStore: ObservableObject {
     @Published var upcomingChainsLb: Double = 0
     /// b51: Chains motor toggle. Same semantics as `upcomingEccEnabled`.
     @Published var upcomingChainsEnabled: Bool = true
+    /// b56: Inverse-chain weight in lb (digital reverse chain — chains hang
+    /// at top, lighten through the ROM). Mirrors `upcomingChainsLb` shape so
+    /// V2 can surface ECC / CHAIN / INV CHAIN / DROP as four parallel mod
+    /// controls. The protocol-level VoltraModifiers.inverse flag was already
+    /// in the wire format; this is the user-facing per-set state. Persists
+    /// across sets in the active instance.
+    @Published var upcomingInverseLb: Double = 0
+    /// b56: Inverse-chain motor toggle. Same semantics as
+    /// `upcomingChainsEnabled`. Default OFF (legacy behavior — INV was not
+    /// previously surfaced in V1).
+    @Published var upcomingInverseEnabled: Bool = false
     /// Generalized non-Voltra added load. Persists across sets in the
     /// active instance — you don't usually re-rack chains between sets.
     /// Reset to nil on `pickExercise`.

@@ -50,11 +50,36 @@ struct ForceChartV2: View {
     /// and we're not resting. Typically `ble.telemetry.phase`.
     let idlePhase: VoltraPhase
 
+    /// b56: Y-axis ceiling in lb, supplied by the parent. Drives the
+    /// active-mode polyline scaling AND the idle-ramp scaling so both
+    /// modes share the same vertical reference. Parent computes this as
+    /// `max(workingWeight, eccEffective) \u00d7 1.3` (with reasonable headroom),
+    /// then animates the change so the line doesn't pop.
+    /// Defaults to 160 to match the b55 hardcoded value if a parent hasn't
+    /// yet been migrated.
+    let yAxisMaxLb: Double
+
+    init(
+        samples: [ForceSample],
+        peakLb: Double,
+        resting: Bool,
+        idlePhase: VoltraPhase,
+        yAxisMaxLb: Double = 160
+    ) {
+        self.samples = samples
+        self.peakLb = peakLb
+        self.resting = resting
+        self.idlePhase = idlePhase
+        self.yAxisMaxLb = yAxisMaxLb
+    }
+
     // MARK: Tunables (mirror web preview)
 
-    /// Hard floor for the y-axis denominator so an early-set rep with a
+    /// b55 hard floor for the y-axis denominator so an early-set rep with a
     /// small peak still draws within the chart instead of slamming into
-    /// the top edge. Matches the preview's `maxF = 160`.
+    /// the top edge. b56: superseded by `yAxisMaxLb` (passed in by parent),
+    /// but retained as a defensive floor in `activeChart` so legacy
+    /// callers that pass `yAxisMaxLb = 0` don't divide by zero.
     private let maxFCeiling: Double = 160
 
     /// Inner padding inside the SVG-equivalent viewBox.
@@ -71,6 +96,10 @@ struct ForceChartV2: View {
             let w = geo.size.width
             let h = canvasHeight
             ZStack(alignment: .topLeading) {
+                // b56: smooth y-axis rescale animation when yAxisMaxLb
+                // changes (e.g. user nudges ECC, working weight changes).
+                Color.clear
+                    .animation(.easeInOut(duration: 0.35), value: yAxisMaxLb)
                 // BOTTOM dashed marker (always present, all three modes)
                 bottomMarker(width: w, height: h)
 
@@ -127,11 +156,14 @@ struct ForceChartV2: View {
         }()
 
         let n = 5
+        // b56: scale the idle ramp against the SAME y-axis the active mode
+        // uses (yAxisMaxLb), with the b55 ceiling as a defensive floor.
+        let denom = max(maxFCeiling, yAxisMaxLb)
         let pts: [CGPoint] = (0..<n).map { i in
             let force = (Double(i) / Double(n - 1)) * phasePeak
             // Sparse: i / 28 of (w - 2*pad) — anchors leftmost ~14% of chart
             let x = pad + CGFloat(i) / 28.0 * (w - 2 * pad)
-            let y = h - pad - CGFloat(force / maxFCeiling) * (h - 2 * pad - 8)
+            let y = h - pad - CGFloat(force / denom) * (h - 2 * pad - 8)
             return CGPoint(x: x, y: y)
         }
 
@@ -166,7 +198,14 @@ struct ForceChartV2: View {
         let now = samples.last?.timestamp ?? Date()
         let windowStart = now.addingTimeInterval(-30)
         let recent = samples.filter { $0.timestamp >= windowStart }
-        let denom = max(maxFCeiling, max(peakLb, recent.map { $0.forceLb }.max() ?? 0))
+        // b56: parent-supplied yAxisMaxLb is the primary y-axis driver
+        // (= max(workingLb, eccEffective) \u00d7 1.3). We still take the max
+        // against peakLb / observed samples so a transient spike above the
+        // planned ceiling still fits.
+        let denom = max(
+            max(maxFCeiling, yAxisMaxLb),
+            max(peakLb, recent.map { $0.forceLb }.max() ?? 0)
+        )
 
         // Map each sample to (x, y, phase). x is normalized over the 30s
         // window so the chart always feels like it's scrolling left.

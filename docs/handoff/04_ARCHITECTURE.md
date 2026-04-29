@@ -88,7 +88,7 @@ FrameAssembler ──► PacketParser ──► TelemetryExtractor
 Control writes flow the other direction: UI → `VoltraWriter` → BLE
 characteristic write → device. See `05_BLE_AND_PROTOCOL.md#control-writes`.
 
-## LiveCapture V1/V2 split (b54 gate, b55 V2 rewrite)
+## LiveCapture V1/V2 split (b54 gate, b55 V2 rewrite, b56 V2 mods + V1 restore)
 
 `LiveCaptureContainer` is the entry point from the rest of the app.
 It reads `@AppStorage("liveCaptureUIVersion")` (values: `"v1"`,
@@ -104,40 +104,90 @@ the full feature surface; V2 is intentionally narrower.
 
 **b55 V2 rewrite.** The b54 V2 was a 2x2 tile grid (REPS / PHASE
 / FORCE / REST + HR/KCAL pills + CompareStrip). It was discarded
-in b55 because it didn't match the design handoff. The new V2 is a
-port of `voltra-v2-preview/index.html` (the user-signed-off render)
-and maps to `screenshots/A1-states.png` + `A1-drop2.png`. Layout:
+in b55 because it didn't match the design handoff. b55 ported
+`voltra-v2-preview/index.html` (user-signed-off render).
+
+**b56 V2 mods + rest timer + V1 restore.** b55 had three
+problems the user flagged: (a) ECC / CHAIN / INV CHAIN tiles
+weren't selectable (the `disabled(onTap == nil)` short-circuited
+their taps); (b) V2 was missing the V1 below-the-chart
+affordances (pulley chip, added-plates picker, logged-sets list,
+Next-exercise / End-session); (c) the rest experience was a
+static phase-strip flip rather than the timer the design called
+for. b56 restructures V2 as:
 
 - **Header.** End ← button + connection pill + "Bench Press ·
-  Set 2" + HR / KCAL pulse pills.
-- **Top banner.** Always-visible phase strip (PULL teal full /
-  RETURN orange full / IDLE under-rest dim half-fill / IDLE
-  over-rest WARN orange full); optional rest row beneath with
-  1px hairline divider when `restElapsedSeconds > 0`.
-- **DROP-SET banner.** Visible only when `manualDropSequence` is
-  armed (V2-only manual drop list, distinct from V1 timer-fired
-  cascade). Sits between header and WEIGHT card.
-- **WEIGHT card.** WEIGHT label + LOADED chip, big mono number,
-  ±5 / ±1 stepper pair, embedded DROP row when armed.
-- **Mod tile row.** ECC / CHAIN / INV / DROP, 4-up grid. DROP
-  tile is tap-to-configure (opens `DropSetConfigureSheet`).
-- **Small tiles.** REPS, TOTAL VOLUME.
-- **Force chart.** `ForceChartV2` — ACTIVE polyline / RESTING
-  empty / IDLE-NO-DATA sparse 5-sample up-tick.
+  Set N" + HR / KCAL pulse pills (unchanged from b55).
+- **Phase strip OR `RestTimerBarV2`.** When `restElapsedSeconds
+  == 0`, render a compact 4pt phase-color strip with phase label
+  + SET N. When `restElapsedSeconds > 0`, swap in `RestTimerBarV2`
+  — HSL 3-stop sweep `green(140°,70%,45%) → amber(40°,90%,50%) →
+  red(0°,80%,50%)`, blink on overtime, header text flips to
+  `REST · OVER` and the time label flips to `+MM:SS`.
+- **WEIGHT card** (b56-redesigned). Tapping the big mono number
+  toggles hardware LOAD/UNLOAD via `ble.sendLoad()` /
+  `ble.sendUnload()` (or `mdm.load/unload` if any slot paired);
+  number turns `VoltraColor.accent` (green) when `deviceLoaded`.
+  Small "✓ LOADED" / "UNLOADED" pill on the label row mirrors
+  it. ±5 / ±1 stepper pair on the right. Below the number:
+  `NestedModRowV2`s for each ARMED mod (ECC / CHAIN / INV CHAIN
+  / DROP, in that fixed order) — inactive mods are HIDDEN, not
+  greyed-out. Below the nested rows: 4-up mod tile grid (ALL
+  selectable per b56 bug fix). Below the tile grid:
+  `ModStepperRowV2`s (−10 / −5 / +5 / +10 per engaged mod) —
+  ECC clamps 5–400 lb, CHAIN/INV CHAIN clamp 0–300 lb, DROP
+  step clamps to head-5.
+- **Small tiles.** REPS, TOTAL VOLUME (unchanged from b55).
+- **Force chart.** `ForceChartV2` with new `yAxisMaxLb`
+  parameter. Parent computes `max(workingLb, eccEffective) ×
+  1.3` (defensive floor 60 lb) and animates rescale on change.
+- **`V1RestoreSection`.** Pulley chip + Added-plates picker (V1
+  line 1561 `addedWeightSection` + 1648 `addWeightPicker` ported
+  verbatim) + LOGGED SETS list (V1 line 1781 `loggedSetsSection`
+  using the now file-internal `SwipeableSetRow`) + Bottom
+  actions ("Next exercise" `NavigationLink` + "End session"
+  button — V1 line 1935).
+
+CHAIN and INV CHAIN are **mutually exclusive** — toggling one
+while the other is active disables the other (you can't lighten
+and add through the ROM at the same time).
+
+DROP behavior is **finalize-driven** in V2: the DROP tile tap
+arms a `manualDropSequence = [head, next]`; each subsequent tap
+deepens the step by 5 lb (−5 → −10 → −15 → −20…); long-press
+cancels (sets sequence to nil); when the user finalizes the set,
+the next weight is pushed on the next set start. This is
+distinct from V1's timer-fired `startDropSet` cascade, which
+stays V1-only.
 
 Uses VoltraTheme tokens added in b54 plus the existing
 `pull` / `returnPhase` / `warn` / `transition` / `idle` / `danger`
 set. **Any V2 change must re-read the spec verbatim before coding**
-— see `00_START_HERE.md` external-spec discipline. The web preview
-at `voltra-v2-preview/index.html` is the source of truth; do not
-rebuild it from screenshots without re-rendering and getting a new
-sign-off.
+— see `00_START_HERE.md` external-spec discipline. The web
+preview at `voltra-v2-preview/index.html` is the b55 source of
+truth; the b56 spec lives in WORK_LOG b56 + the screenshot at
+`/home/user/workspace/image.jpg`.
 
-**V2-only `LoggingStore` state (b55).**
-`manualDropSequence: [Double]?` (nil when no drop armed; descending
-step list otherwise) and `manualDropIndex: Int = 0`. Cleared on
-`endSession()` and `cancelDropSet()`. Distinct from
-`dropChainPlannedLb` which is the V1 timer-fired cascade.
+**V2-only `LoggingStore` state (b55 + b56).**
+`manualDropSequence: [Double]?` (nil when no drop armed; head +
+next pair otherwise) and `manualDropIndex: Int = 0`. b56 adds
+`upcomingInverseLb: Double = 0` and `upcomingInverseEnabled:
+Bool = false` for INV CHAIN. Cleared on `endSession()` and
+`cancelDropSet()`. Distinct from `dropChainPlannedLb` which is
+the V1 timer-fired cascade.
+
+**INV CHAIN protocol mapping (b56).** `VoltraModifiers.inverse`
+was already in the wire format. There is no separate
+`VoltraWeights.inverseLb` field — the inverse weight is written
+to `chainsLb` AND `inverse: true` is set, so the device
+interprets the offset as thru-ROM lightening rather than
+at-top heavying. CHAIN ↔ INV CHAIN sharing one weight slot is
+why they're mutually exclusive at the UI layer.
+
+**`SwipeableSetRow` access change (b56).** V1's
+`SwipeableSetRow` was promoted from `private` to file-internal
+so V2's `V1RestoreSection` can reuse it instead of duplicating
+~250 lines. The view itself is unchanged.
 
 All b53 chain features (per-instance `assignedVoltra` routing, 3-way
 L/R/Both picker, header rewrite, SWAP-no-auto-LOAD) live in V1. V2

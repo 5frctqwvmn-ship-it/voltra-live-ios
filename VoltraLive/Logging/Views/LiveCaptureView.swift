@@ -1994,7 +1994,10 @@ private final class LiveWriterHolder: ObservableObject {
 /// A logged-set row that supports tap-to-expand-edit and swipe-left-to-delete.
 /// Implemented as a List-less row using DragGesture for the swipe so it
 /// composes inside the parent ScrollView (List would conflict).
-private struct SwipeableSetRow: View {
+// b56: was `private`. Promoted to file-internal so V2's V1RestoreSection
+// can reuse the SAME row instead of duplicating ~250 lines. The view is
+// otherwise unchanged from V1.
+struct SwipeableSetRow: View {
     let set: LoggedSet
     let isExpanded: Bool
     let onToggleExpand: () -> Void

@@ -2095,3 +2095,174 @@ of truth and the CI ship-verification logic moved.
 **Cost callout.** Tiny. Two YAML/yml edits and a doc append.
 No app code shipped.
 
+
+
+## b56 — v0.4.34 (build 56) — V2 mods + rest timer + V1 restore
+
+**Date (UTC):** 2026-04-29
+**Tag:** `v0.4.34-build56`
+**Goal.** Make the V2 LiveCaptureView functionally complete for
+in-gym testing: every modifier tile (ECC, CHAIN, INV CHAIN, DROP)
+must be selectable and visibly armed; the DROP redesign per the
+b56 spec (no menu, tap-to-arm, idle-fires, tap-deeper-step,
+long-press-cancel); the rest timer that sweeps through three
+HSL-interpolated stops; the hardware Loaded button; the auto-
+scaling force-curve Y-axis; ECC weight range expanded to
+5–400 lb; and verbatim restore of the V1 pulley/added-plates/
+logged-sets/bottom-actions block under the chart.
+
+### What changed (8 items)
+
+1. **All four modifier tiles selectable.**
+   ECC, CHAIN, INV CHAIN, DROP all toggle on tap. INV CHAIN ↔ CHAIN
+   are mutually exclusive (selecting one clears the other on the
+   upcoming set). The b55 selectability bug where ECC/INV CHAIN
+   chips appeared but didn't engage is fixed by routing every
+   tile through one shared `LoggingStore.upcoming…` write.
+
+2. **DROP redesign per spec.**
+   No more configure sheet, no menu. First tap arms DROP at
+   −5 lb. Each subsequent tap (before idle finalize) re-arms
+   deeper: −5 → −10 → −15 → −20 …. Long-press on the DROP tile
+   cancels the arm. On idle finalize, the head set is saved and
+   `manualDropSequence = [head, dropTarget]` is queued so the
+   next set begins at the dropped weight automatically. This
+   replaces b55's V1-style timer-cascade `startDropSet` with a
+   simpler finalize-driven path.
+
+3. **INV CHAIN promoted to first-class tile.**
+   New `upcomingInverseLb` / `upcomingInverseEnabled` fields on
+   LoggingStore (lines 61–71). Wire-protocol unchanged: writes
+   inverse weight to `chainsLb` AND sets `inverse: true` on
+   VoltraWeights — there is no separate `inverseLb` field on the
+   protocol struct.
+
+4. **RestTimerBarV2 (NEW, 207 lines).**
+   HSL 3-stop sweep — green at start, yellow at mid-rest, red
+   when over target — interpolated in HSL space so the gradient
+   reads cleanly. Anchored under the force chart, hidden during
+   active sets.
+
+5. **Hardware Loaded button.**
+   Tap on the big weight number sends LOAD/UNLOAD over BLE.
+   Routing: if `mdm.state != .idle` (MultiState enum) the
+   write goes to `mdm.load` / `mdm.unload`; otherwise to
+   `ble.sendLoad` / `ble.sendUnload`. Same opcodes V1 already
+   uses (per handoff/05).
+
+6. **ForceChartV2 Y-axis auto-scale.**
+   New `yAxisMaxLb` parameter on `ForceChartV2.init` replaces
+   the hardcoded 160-lb ceiling. LiveCaptureViewV2 computes
+   `max(currentWorkingLb, eccentricOverloadLb) * 1.3` as
+   headroom. Smooth animated rescale (`.animation(.easeInOut)`)
+   so the curve doesn't jump on weight-change.
+
+7. **ECC range 5–400 lb.**
+   `ModStepperRowV2` clamp helper for the ECC row enforces the
+   new working range (was 0–300 in b55). −10 / −5 / +5 / +10
+   buttons saturate at the bounds.
+
+8. **V1RestoreSection (NEW, 358 lines) — verbatim port.**
+   The pulley-ratio chip, added-plates picker, logged-sets list
+   (with swipe-to-delete via the now-file-internal
+   `SwipeableSetRow`), and the bottom-action row (End Set,
+   Previous Sets, Add Next Exercise) are ported from
+   LiveCaptureView.swift sections 1561 / 1648 / 1781 / 1935 with
+   no behavior change — only restyled for the V2 layout. Sits
+   directly under the force chart.
+
+### Files changed
+
+**New (5):**
+- `VoltraLive/Logging/Views/V2/RestTimerBarV2.swift` (207)
+- `VoltraLive/Logging/Views/V2/NestedModRowV2.swift` (139)
+- `VoltraLive/Logging/Views/V2/ModStepperRowV2.swift` (143)
+- `VoltraLive/Logging/Views/V2/V1RestoreSection.swift` (358)
+
+**Modified:**
+- `VoltraLive/Logging/Persistence/LoggingStore.swift` — added
+  `upcomingInverseLb` + `upcomingInverseEnabled` (lines 61–71)
+- `VoltraLive/Logging/Views/V2/ForceChartV2.swift` — `yAxisMaxLb`
+  parameter, animated rescale (~277 lines)
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — full
+  rewrite to 845 lines: new layout, all 4 mod tiles selectable,
+  DROP tap-arms-deeper + long-press-cancels + idle-fires,
+  hardware-load tap on weight number, INV CHAIN ↔ CHAIN
+  mutual exclusion, V1RestoreSection mounted under chart
+- `VoltraLive/Logging/Views/LiveCaptureView.swift` — promoted
+  `SwipeableSetRow` from `private` to file-internal so
+  V1RestoreSection can reuse it
+- `project.yml` — version 0.4.34/56 in 3 places (lines 64–65,
+  92–93, 96 label)
+- `VoltraLive/Info.plist` — version 0.4.34/56 + label
+  "V2 mods + rest timer + V1 restore"
+- `docs/handoff/00_START_HERE.md` — last-shipped paragraph
+  rewritten for b56
+- `docs/handoff/02_CURRENT_STATE.md` — date, latest build, V2
+  layout description, recent tags
+- `docs/handoff/04_ARCHITECTURE.md` — V2 LiveCapture section
+  expanded with b56 details
+
+**Deleted (4 obsolete):**
+- `VoltraLive/Logging/Views/V2/DropSetConfigureSheet.swift`
+- `VoltraLive/Logging/Views/V2/DropSetBannerV2.swift`
+- `VoltraLive/Logging/Views/V2/DropRowV2.swift`
+- `VoltraLive/Logging/Views/V2/TopBannerV2.swift`
+
+### Sacred files: untouched
+
+`VoltraProtocol.swift`, `TelemetryExtractor.swift`,
+`PacketParser.swift`, `FrameAssembler.swift` — no edits.
+
+### Verification (CI altool 5-gate)
+
+Following the sticky correction from b55:
+
+1. Release workflow polled to `conclusion: success`.
+2. Job log pulled via `gh api .../actions/jobs/<id>/logs` to
+   `/tmp/release_log_b56.txt`.
+3. Wall-clock duration ≥ 20s.
+4. Positive success marker present (`UPLOAD COMPLETED
+   SUCCESSFULLY` or equivalent).
+5. Zero `ERROR:` / `Failed to upload package` / `(-NNNNN)`
+   lines in altool log.
+
+Only after all five gates pass does this build get reported to
+the user as shipped.
+
+### Risks
+
+- **DROP idle-fires timing** — the finalize handler that queues
+  `manualDropSequence = [head, next]` runs on `mdm.state ==
+  .idle`. If the rep sensor reports idle before the final eccentric
+  fully completes, the head set could save short. Mitigated by
+  reusing the same idle-debounce window V1 uses.
+- **INV CHAIN wire format** — writing inverse weight into
+  `chainsLb` while CHAIN is also non-zero would mean two
+  competing tensions at the firmware level. UI mutual-exclusion
+  prevents this; if a future feature ever needs both, the
+  protocol struct will need a real `inverseLb` field.
+- **ForceChartV2 back-compat** — `yAxisMaxLb` parameter has a
+  default of 160 to keep any future caller of ForceChartV2
+  working without rewrite. LiveCaptureViewV2 always passes the
+  computed value.
+- **V1RestoreSection styling drift** — port is verbatim-functional
+  but visual styling was lightly adapted to the V2 dark layout.
+  If anything looks off in TestFlight, fall back to the V1
+  modifiers and re-port.
+
+### Cost callout
+
+Medium-or-heavier. Five new SwiftUI files (~847 new lines), a
+~277-line ForceChartV2 modification, an ~845-line
+LiveCaptureViewV2 rewrite, version bump, doc updates across
+three handoff files. No protocol or Sacred-file changes, no
+SwiftData migration.
+
+### Next step
+
+Watch the b56 build land in TestFlight processing within ~5
+minutes of altool's success marker, then the user installs and
+verifies the eight items above against the b56 spec screenshot.
+If anything is off, the next build is a targeted patch — not
+another full rewrite of LiveCaptureViewV2.

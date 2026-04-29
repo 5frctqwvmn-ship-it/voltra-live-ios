@@ -1,38 +1,44 @@
 // LiveCaptureViewV2.swift
 //
-// b55 (v0.4.33): Rewrite of the V2 single-Voltra capture screen so it
-// MATCHES THE DESIGN-HANDOFF SCREENSHOTS. The b53/b54 V2 was a 2x2
-// REPS/PHASE/FORCE/REST tile grid + HR/KCAL pair + CompareStrip — it
-// did not match the actual A1 spec the design team handed us
-// (screenshots/A1-states.png and A1-drop2.png). The user signed off
-// on a web preview render before this rewrite — that render is the
-// source of truth for the layout below.
+// b56 (v0.4.34): full rewrite of the V2 capture screen per the b56 design
+// drop. Locks the layout to the screenshot-driven spec:
 //
-// Layout (top → bottom):
-//   1. Header strip       — End/back, LEFT CONNECTED pill + "Bench Press · Set 2"
-//                           centered, HR + KCAL pulse pills right
-//   2. Top banner         — Phase strip line (PULL teal / RETURN orange /
-//                           IDLE dim half-fill / WARN full orange when rest
-//                           preset exceeded) + label row; PLUS a second
-//                           rest row beneath when rest is engaged
-//   3. DROP-SET banner    — Visible only when a manual drop sequence is
-//                           armed; shows "DROP-SET 120lb → 110lb [-10 lb]"
-//   4. WEIGHT card        — WEIGHT label + LOADED chip, big mono number,
-//                           ±5/±1 stepper pair; embedded DROP row when armed
-//   5. Mod tile row       — ECC / CHAIN / INV / DROP (4-up grid). DROP tile
-//                           taps open the drop-set configure sheet.
-//   6. Small tiles row    — REPS, TOTAL VOLUME
-//   7. Force chart card   — FORCE · 30s chart with phase-segmented line.
-//                           Sparse single up-tick during idle states (matches
-//                           reference); empty when resting (BOTTOM marker only).
+//   1. Header strip                — End/back, CONNECTED pill + "Bench Press · Set 2"
+//                                    centered, HR + KCAL pulse pills right
+//   2. Phase strip OR RestTimerBarV2 — phase strip while active; rest bar
+//                                    replaces it 2s after idle (HSL sweep,
+//                                    blink on overtime).
+//   3. WEIGHT card                 — WEIGHT label, big number (TAP toggles
+//                                    hardware LOAD/UNLOAD; goes green when
+//                                    deviceLoaded), nested mod rows (only
+//                                    armed mods rendered), 4-up mod tile
+//                                    grid (ALL selectable), per-engaged-mod
+//                                    stepper rows (ECC clamps 5–400).
+//   4. REPS / TOTAL VOLUME tiles
+//   5. ForceChartV2                — y-axis = max(workingLb, eccEffective) × 1.3
+//   6. V1RestoreSection            — pulley chip + added-plates picker +
+//                                    LOGGED SETS list + Next-exercise / End
+//                                    bottom actions (verbatim port from V1)
 //
-// Container (LiveCaptureContainer) routes here only when the user opted
-// into V2, no chain entries exist, and only one Voltra is paired — so we
-// can safely ignore dual-Voltra and chain UX in this file.
+// DROP behavior (b56):
+//   - First tap: arms a drop of −5 lb from current working weight.
+//   - Each subsequent tap deepens the step: −10 → −15 → −20 …
+//     (clamped at 5 lb floor).
+//   - Long-press: cancels the armed drop (sets manualDropSequence = nil).
+//   - Idle fires: when the user finalizes the set (telemetry rest detect),
+//     the queued next weight is pushed to the device on the next set start.
+//     This is finalize-driven, not timer-driven — distinct from V1's 2s
+//     time-cascade (`startDropSet`) which b56 explicitly does not use.
 //
-// Sacred files NOT modified: VoltraProtocol.swift, TelemetryExtractor.swift,
-// PacketParser.swift, FrameAssembler.swift. This view reads BLE telemetry
-// and writes weight changes via WriterRouter — the same path V1 uses.
+// LOAD behavior (b56):
+//   - Tapping the big WEIGHT NUMBER toggles hardware LOAD / UNLOAD via
+//     ble.sendLoad() / ble.sendUnload() (or mdm.load/unload if paired).
+//     Mirrors V1's deviceLoaded toggle (LiveCaptureView.swift:716).
+//   - Number turns VoltraColor.accent (green) when loaded; the small
+//     "✓ LOADED" / "UNLOADED" pill on the WEIGHT card label row matches.
+//
+// Container (LiveCaptureContainer) only routes here when V2 is opted in,
+// no chains, single Voltra. Sacred files NOT modified.
 
 import SwiftUI
 
@@ -60,11 +66,11 @@ struct LiveCaptureViewV2: View {
     /// Drives the rest-over blink. Toggled at 1Hz while we're over preset.
     @State private var blinkOn: Bool = false
 
-    /// Drop-set configure sheet — opened from the DROP mod tile.
-    @State private var showingDropSetConfigure: Bool = false
+    /// Hardware LOAD state. Same semantics as V1's @State deviceLoaded.
+    /// b56: toggled by tapping the big WEIGHT NUMBER.
+    @State private var deviceLoaded: Bool = false
 
-    /// Owns its own writer router — same pattern as V1. The router survives
-    /// view re-creation cycles via @StateObject.
+    /// Owns its own writer router — same pattern as V1.
     @StateObject private var writerRouter = WriterRouter()
 
     // MARK: Body
@@ -73,19 +79,20 @@ struct LiveCaptureViewV2: View {
         ZStack {
             VoltraColor.bg.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                headerStrip
-                topBannerSection
-                dropSetBannerIfArmed
-                weightCard
-                modTileRow
-                smallTileRow
-                forceChartCard
-                Spacer(minLength: 0)
+            ScrollView {
+                VStack(spacing: 0) {
+                    headerStrip
+                    phaseOrRestBar
+                    weightCard
+                    smallTileRow
+                    forceChartCard
+                    V1RestoreSection(onEndTapped: { showingEndConfirm = true })
+                        .padding(.top, 12)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 22)
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 22)
         }
         .navigationBarBackButtonHidden(true)
         .toolbar { toolbarContent }
@@ -115,14 +122,6 @@ struct LiveCaptureViewV2: View {
             if let s = lastEndedSession {
                 ExportSheet(session: s).environmentObject(logging)
             }
-        }
-        .sheet(isPresented: $showingDropSetConfigure) {
-            DropSetConfigureSheet(
-                startingLb: Int((logging.pendingPlannedWeightLb ?? 0).rounded()),
-                onConfirm:  { steps in startManualDropSequence(steps: steps) },
-                onCancel:   { showingDropSetConfigure = false }
-            )
-            .environmentObject(logging)
         }
         .onAppear {
             health.start()
@@ -156,7 +155,6 @@ struct LiveCaptureViewV2: View {
 
     // MARK: - 1. Header strip
 
-    /// Match the reference layout: [< End]  [LEFT CONNECTED pill / Bench Press · Set 2]  [118 bpm] [42 kcal]
     private var headerStrip: some View {
         HStack(spacing: 8) {
             Button { showingEndConfirm = true } label: {
@@ -245,97 +243,76 @@ struct LiveCaptureViewV2: View {
         .clipShape(Capsule())
     }
 
-    // MARK: - 2. Top banner (phase strip + optional rest row)
+    // MARK: - 2. Phase strip OR Rest Timer Bar
 
-    /// The phase strip is always visible. The rest row only appears when
-    /// `restElapsedSeconds > 0` (i.e. the user has finalized a set and is
-    /// in the rest window). Over-preset state turns the strip warn orange
-    /// and adds a blink to the rest row.
-    private var topBannerSection: some View {
+    /// b56: replaces b55's TopBannerV2. Active → small phase-color strip;
+    /// resting → RestTimerBarV2 with HSL sweep & blink. Boundary is 2s
+    /// idle on push or pull, observed via `session.restElapsedSeconds`.
+    @ViewBuilder
+    private var phaseOrRestBar: some View {
         let phase = ble.telemetry.phase
         let restElapsed = Int(session.restElapsedSeconds.rounded())
-        let restPreset  = restPresetSeconds
-        let isResting   = restElapsed > 0
-        let over        = isResting && restElapsed > restPreset
-
-        return TopBannerV2(
-            phase:        phase,
-            isResting:    isResting,
-            restElapsed:  restElapsed,
-            restPreset:   restPreset,
-            over:         over,
-            blinkOn:      blinkOn,
-            setNumber:    setNumber,
-            onTapToStart: { /* tap-to-start is wired by SessionStore via the existing rest UI */ }
-        )
-        .padding(.bottom, 6)
-    }
-
-    // MARK: - 3. DROP-SET banner
-
-    /// Visible when a manual drop sequence is armed (V2-only: configured by
-    /// tapping the DROP mod tile). Mirrors the auto-cascade banner style
-    /// but uses the user's explicit step list.
-    @ViewBuilder
-    private var dropSetBannerIfArmed: some View {
-        if let seq = logging.manualDropSequence,
-           seq.count >= 2,
-           let head = seq.first,
-           let next = seq.dropFirst().first {
-            DropSetBannerV2(
-                fromLb: Int(head.rounded()),
-                toLb:   Int(next.rounded()),
-                stepLb: Int((head - next).rounded()),
-                blinkOn: false  // banner does NOT blink — only rest-over strip does
+        if restElapsed > 0 {
+            RestTimerBarV2(
+                restElapsedSec: restElapsed,
+                restPresetSec:  restPresetSeconds,
+                blinkOn:        blinkOn
             )
-            .padding(.bottom, 6)
+            .padding(.bottom, 10)
+        } else {
+            // Compact phase strip when active.
+            VStack(spacing: 6) {
+                HStack {
+                    Text(phase.rawValue.uppercased())
+                        .font(.system(size: 9, weight: .bold))
+                        .kerning(1.6)
+                        .foregroundColor(VoltraColor.phase(phase))
+                    Spacer()
+                    Text("SET \(setNumber)")
+                        .font(.system(size: 9, weight: .bold))
+                        .kerning(1.6)
+                        .foregroundColor(VoltraColor.textDim)
+                }
+                Capsule(style: .continuous)
+                    .fill(VoltraColor.phase(phase))
+                    .frame(height: 4)
+            }
+            .padding(.bottom, 10)
         }
     }
 
-    // MARK: - 4. WEIGHT card
+    // MARK: - 3. WEIGHT card (with hardware-load tap + nested mod rows)
 
     private var weightCard: some View {
         let weightLb = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
-        let isLoaded = ble.connectionState.isConnected || mdm.left.connectionState.isConnected || mdm.right.connectionState.isConnected
-        let dropArmed = (logging.manualDropSequence?.count ?? 0) >= 2
 
-        return VStack(spacing: 0) {
-            // Top row: WEIGHT label + LOADED chip
+        return VStack(spacing: 10) {
+            // Top row: WEIGHT label + LOADED/UNLOADED pill
             HStack {
                 Text("WEIGHT")
                     .font(.system(size: 9, weight: .bold))
                     .kerning(1.6)
                     .foregroundColor(VoltraColor.textDim)
                 Spacer()
-                if isLoaded {
-                    HStack(spacing: 5) {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .bold))
-                        Text("LOADED")
-                            .font(.system(size: 9, weight: .bold))
-                            .kerning(1.4)
-                    }
-                    .foregroundColor(VoltraColor.accent)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(VoltraColor.accent.opacity(0.10))
-                    .overlay(Capsule().stroke(VoltraColor.accent.opacity(0.4), lineWidth: 1))
-                    .clipShape(Capsule())
-                }
+                loadedPill
             }
-            .padding(.bottom, 6)
 
-            // Big number row + steppers
+            // Big number row + steppers. b56: tapping the number toggles
+            // hardware LOAD/UNLOAD. Number is green when deviceLoaded.
             HStack(spacing: 10) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("\(weightLb)")
-                        .font(.system(size: 44, weight: .bold, design: .monospaced))
-                        .monospacedDigit()
-                        .foregroundColor(VoltraColor.text)
-                    Text("lb")
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundColor(VoltraColor.textDim)
+                Button(action: toggleHardwareLoad) {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text("\(weightLb)")
+                            .font(.system(size: 44, weight: .bold, design: .monospaced))
+                            .monospacedDigit()
+                            .foregroundColor(deviceLoaded ? VoltraColor.accent : VoltraColor.text)
+                        Text("lb")
+                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .foregroundColor(VoltraColor.textDim)
+                    }
                 }
+                .buttonStyle(.plain)
+
                 Spacer()
                 stepperButton("\u{2212}5") { adjustWeight(-5) }
                 stepperButton("\u{2212}1") { adjustWeight(-1) }
@@ -343,17 +320,71 @@ struct LiveCaptureViewV2: View {
                 stepperButton("+5")        { adjustWeight(+5) }
             }
 
-            // Embedded DROP row — only when an explicit drop sequence is armed
-            if dropArmed,
-               let seq = logging.manualDropSequence,
-               let head = seq.first,
-               let next = seq.dropFirst().first {
-                DropRowV2(
-                    fromLb: Int(head.rounded()),
-                    toLb:   Int(next.rounded()),
-                    stepLb: Int((head - next).rounded())
-                )
-                .padding(.top, 10)
+            // Nested mod rows — render only ARMED rows in fixed order.
+            VStack(spacing: 4) {
+                if eccArmed {
+                    NestedModRowV2.ecc(
+                        workingLb: weightLb,
+                        eccLb: Int(logging.upcomingEccLb.rounded())
+                    )
+                }
+                if chainArmed {
+                    NestedModRowV2.chain(
+                        workingLb: weightLb,
+                        chainsLb: Int(logging.upcomingChainsLb.rounded())
+                    )
+                }
+                if invArmed {
+                    NestedModRowV2.invChain(
+                        workingLb: weightLb,
+                        inverseLb: Int(logging.upcomingInverseLb.rounded())
+                    )
+                }
+                if dropArmed,
+                   let seq = logging.manualDropSequence,
+                   let head = seq.first,
+                   let next = seq.dropFirst().first {
+                    NestedModRowV2.drop(
+                        currentLb: Int(head.rounded()),
+                        nextLb:    Int(next.rounded())
+                    )
+                }
+            }
+
+            // 4-up mod tile grid. b56: ALL FOUR are selectable (V1 bug fix).
+            modTileRow
+
+            // Per-mod stepper rows — render only for engaged mods.
+            VStack(spacing: 4) {
+                if eccArmed {
+                    ModStepperRowV2(
+                        label: "ECC",
+                        valueLb: Int(logging.upcomingEccLb.rounded())
+                    ) { delta in adjustEcc(delta) }
+                }
+                if chainArmed {
+                    ModStepperRowV2(
+                        label: "CHAIN",
+                        valueLb: Int(logging.upcomingChainsLb.rounded())
+                    ) { delta in adjustChain(delta) }
+                }
+                if invArmed {
+                    ModStepperRowV2(
+                        label: "INV CHAIN",
+                        valueLb: Int(logging.upcomingInverseLb.rounded())
+                    ) { delta in adjustInverse(delta) }
+                }
+                if dropArmed,
+                   let seq = logging.manualDropSequence,
+                   let head = seq.first,
+                   let next = seq.dropFirst().first {
+                    let stepLb = Int((head - next).rounded())
+                    ModStepperRowV2(
+                        label: "DROP",
+                        valueLb: stepLb,
+                        valueTint: VoltraColor.warn
+                    ) { delta in adjustDropStep(delta) }
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -365,6 +396,27 @@ struct LiveCaptureViewV2: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.bottom, 8)
+    }
+
+    /// "✓ LOADED" / "UNLOADED" pill — mirrors deviceLoaded.
+    @ViewBuilder
+    private var loadedPill: some View {
+        let tint = deviceLoaded ? VoltraColor.accent : VoltraColor.textDim
+        HStack(spacing: 5) {
+            if deviceLoaded {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            Text(deviceLoaded ? "LOADED" : "UNLOADED")
+                .font(.system(size: 9, weight: .bold))
+                .kerning(1.4)
+        }
+        .foregroundColor(tint)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(tint.opacity(0.10))
+        .overlay(Capsule().stroke(tint.opacity(0.4), lineWidth: 1))
+        .clipShape(Capsule())
     }
 
     private func stepperButton(_ label: String, action: @escaping () -> Void) -> some View {
@@ -384,46 +436,74 @@ struct LiveCaptureViewV2: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    // MARK: - 5. Mod tile row (ECC / CHAIN / INV / DROP)
+    // MARK: - 4. Mod tile row (ALL selectable per b56 bug fix)
 
     private var modTileRow: some View {
         HStack(spacing: 8) {
-            modTile(systemImage: "arrow.down.to.line", label: "ECC",   active: logging.upcomingEccEnabled && logging.upcomingEccLb > 0)
-            modTile(systemImage: "link",               label: "CHAIN", active: logging.upcomingChainsEnabled && logging.upcomingChainsLb > 0)
-            modTile(systemImage: "arrow.uturn.left",   label: "INV",   active: false /* INV not surfaced in V2 yet */)
-            modTile(systemImage: "chart.bar.fill",     label: "DROP",
-                    active: (logging.manualDropSequence?.count ?? 0) >= 2,
-                    onTap:  { showingDropSetConfigure = true })
+            modTile(systemImage: "arrow.down.to.line",
+                    label: "ECC",
+                    active: eccArmed,
+                    onTap:  toggleEcc)
+            modTile(systemImage: "link",
+                    label: "CHAIN",
+                    active: chainArmed,
+                    onTap:  toggleChain)
+            modTile(systemImage: "arrow.uturn.left",
+                    label: "INV CHAIN",
+                    active: invArmed,
+                    onTap:  toggleInverse)
+            modTile(systemImage: "chart.bar.fill",
+                    label: "DROP",
+                    active: dropArmed,
+                    onTap:       tapDropTile,
+                    onLongPress: cancelArmedDrop,
+                    activeTint:  VoltraColor.warn)
         }
-        .padding(.bottom, 8)
+        .padding(.top, 2)
     }
 
-    private func modTile(systemImage: String, label: String, active: Bool, onTap: (() -> Void)? = nil) -> some View {
-        Button {
-            onTap?()
-        } label: {
-            VStack(spacing: 4) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundColor(active ? VoltraColor.accent : VoltraColor.textDim)
-                Text(label)
-                    .font(.system(size: 10, weight: .bold))
-                    .kerning(1.4)
-                    .foregroundColor(active ? VoltraColor.accent : VoltraColor.textDim)
+    private func modTile(
+        systemImage: String,
+        label: String,
+        active: Bool,
+        onTap: @escaping () -> Void,
+        onLongPress: (() -> Void)? = nil,
+        activeTint: Color = VoltraColor.accent
+    ) -> some View {
+        let tint = active ? activeTint : VoltraColor.textDim
+        let view = VStack(spacing: 4) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .regular))
+                .foregroundColor(tint)
+            Text(label)
+                .font(.system(size: 9.5, weight: .bold))
+                .kerning(1.3)
+                .foregroundColor(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .background(VoltraColor.bgElev)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(active ? activeTint.opacity(0.45) : VoltraColor.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .contentShape(Rectangle())
+
+        return Group {
+            if let lp = onLongPress {
+                view
+                    .onTapGesture { onTap() }
+                    .onLongPressGesture(minimumDuration: 0.5) { lp() }
+            } else {
+                view
+                    .onTapGesture { onTap() }
             }
-            .frame(maxWidth: .infinity, minHeight: 56)
-            .background(VoltraColor.bgElev)
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(active ? VoltraColor.accent.opacity(0.4) : VoltraColor.border, lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 14))
         }
-        .buttonStyle(.plain)
-        .disabled(onTap == nil)
     }
 
-    // MARK: - 6. Small tile row (REPS / TOTAL VOLUME)
+    // MARK: - 5. Small tile row (REPS / TOTAL VOLUME)
 
     private var smallTileRow: some View {
         HStack(spacing: 8) {
@@ -462,7 +542,7 @@ struct LiveCaptureViewV2: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
-    // MARK: - 7. Force chart card
+    // MARK: - 6. Force chart card
 
     private var forceChartCard: some View {
         let phase   = ble.telemetry.phase
@@ -470,6 +550,7 @@ struct LiveCaptureViewV2: View {
         let resting = session.restElapsedSeconds > 0
         let samples = session.currentSet?.samples ?? session.lastFinalizedSamples
         let peak    = session.currentSet?.peakLb ?? session.lastFinalizedPeakLb
+        let yMax    = computedYAxisMaxLb()
 
         let displayForce: String = {
             if resting { return "0" }
@@ -496,10 +577,11 @@ struct LiveCaptureViewV2: View {
                 }
             }
             ForceChartV2(
-                samples:  samples,
-                peakLb:   peak,
-                resting:  resting,
-                idlePhase: phase
+                samples:    samples,
+                peakLb:     peak,
+                resting:    resting,
+                idlePhase:  phase,
+                yAxisMaxLb: yMax
             )
             .frame(maxWidth: .infinity, minHeight: 175)
         }
@@ -514,6 +596,18 @@ struct LiveCaptureViewV2: View {
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
+    /// b56: y-axis ceiling = max(workingWeight, eccEffective) × 1.3.
+    /// Uses pulley-multiplied effective weights so the chart reflects what
+    /// the user feels (matches LoggedSet.weightLb / peakForceLb storage).
+    /// Defensive 60-lb floor so an unloaded screen still draws sensibly.
+    private func computedYAxisMaxLb() -> Double {
+        let m = logging.pulleyMultiplier
+        let working = (logging.pendingPlannedWeightLb ?? 0) * m
+        let eccEff  = logging.upcomingEccEnabled ? (logging.upcomingEccLb * m) : 0
+        let total   = max(working, working + eccEff)  // ECC adds on top during eccentric phase
+        return max(60, total * 1.3)
+    }
+
     // MARK: - Helpers
 
     private var exerciseHeaderText: String {
@@ -523,9 +617,7 @@ struct LiveCaptureViewV2: View {
 
     private var setNumber: Int { logging.setNumberForCurrentInstance }
 
-    /// Default rest preset = 120s (2 min). The session viewmodel doesn't
-    /// expose a per-exercise preset yet; using 120 matches the reference
-    /// screenshots' "01:23 of 02:00" timing.
+    /// Default rest preset = 120s (2 min).
     private var restPresetSeconds: Int { 120 }
 
     private func formattedTotalVolume() -> String {
@@ -536,8 +628,6 @@ struct LiveCaptureViewV2: View {
         return nf.string(from: NSNumber(value: v)) ?? "\(Int(v.rounded()))"
     }
 
-    /// Sum of `weightLb × reps` across logged sets in the active session.
-    /// Read-only convenience — no mutation.
     private func sessionTotalVolumeLb() -> Double {
         guard let s = logging.activeSession,
               let insts = s.instances else { return 0 }
@@ -551,7 +641,87 @@ struct LiveCaptureViewV2: View {
         return total
     }
 
-    // MARK: - Stepper actions (mirror V1's adjustWeight + push)
+    // MARK: - Mod-armed flags (drive nested-row + stepper-row visibility)
+
+    private var eccArmed:    Bool { logging.upcomingEccEnabled    && logging.upcomingEccLb     > 0 }
+    private var chainArmed:  Bool { logging.upcomingChainsEnabled && logging.upcomingChainsLb  > 0 }
+    private var invArmed:    Bool { logging.upcomingInverseEnabled && logging.upcomingInverseLb > 0 }
+    private var dropArmed:   Bool { (logging.manualDropSequence?.count ?? 0) >= 2 }
+
+    // MARK: - Mod toggles (b56 bug fix: tapping any tile arms/disarms)
+
+    /// ECC toggle. If currently 0, seed with 30 lb default (matches V1's
+    /// "first tap arms" feel). Otherwise just flip the enabled flag.
+    /// b56: ECC range 5–400 lb — `adjustEcc` enforces.
+    private func toggleEcc() {
+        if logging.upcomingEccLb <= 0 {
+            logging.upcomingEccLb = 30
+            logging.upcomingEccEnabled = true
+        } else {
+            logging.upcomingEccEnabled.toggle()
+        }
+        pushUpcomingStateToDevice()
+    }
+
+    private func toggleChain() {
+        // CHAIN and INV CHAIN are mutually exclusive — you can't lighten
+        // and add through the ROM at the same time.
+        if logging.upcomingInverseEnabled, logging.upcomingInverseLb > 0 {
+            logging.upcomingInverseEnabled = false
+        }
+        if logging.upcomingChainsLb <= 0 {
+            logging.upcomingChainsLb = 30
+            logging.upcomingChainsEnabled = true
+        } else {
+            logging.upcomingChainsEnabled.toggle()
+        }
+        pushUpcomingStateToDevice()
+    }
+
+    private func toggleInverse() {
+        // Mutually exclusive with CHAIN.
+        if logging.upcomingChainsEnabled, logging.upcomingChainsLb > 0 {
+            logging.upcomingChainsEnabled = false
+        }
+        if logging.upcomingInverseLb <= 0 {
+            logging.upcomingInverseLb = 30
+            logging.upcomingInverseEnabled = true
+        } else {
+            logging.upcomingInverseEnabled.toggle()
+        }
+        pushUpcomingStateToDevice()
+    }
+
+    /// b56 DROP tile tap: arms a single planned next-weight, deepening
+    /// each subsequent tap by 5 lb (−5 → −10 → −15 → −20 …). The next
+    /// weight is clamped at 5 lb (device floor).
+    private func tapDropTile() {
+        let head = (logging.pendingPlannedWeightLb ?? 0).rounded()
+        guard head > 5 else { return }
+
+        let curStepLb: Int = {
+            if let seq = logging.manualDropSequence,
+               let h = seq.first,
+               let n = seq.dropFirst().first {
+                return Int((h - n).rounded())
+            }
+            return 0
+        }()
+        let nextStepLb = max(5, curStepLb + 5)
+        let nextWeight = max(5.0, head - Double(nextStepLb))
+        // Refresh head to current working weight in case user adjusted
+        // weight after the prior tap.
+        logging.manualDropSequence = [head, nextWeight]
+        logging.manualDropIndex    = 0
+    }
+
+    /// b56 DROP tile long-press: cancel armed drop.
+    private func cancelArmedDrop() {
+        logging.manualDropSequence = nil
+        logging.manualDropIndex    = 0
+    }
+
+    // MARK: - Stepper actions
 
     private func adjustWeight(_ delta: Int) {
         let cur  = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
@@ -559,18 +729,109 @@ struct LiveCaptureViewV2: View {
         let next = CombinedParity.enforce(raw, mode: mdm.workoutMode)
         logging.pendingPlannedWeightLb = Double(next)
         logging.reanchorCascadeIfActive(toLb: Double(next))
-        pushWeightToDevice()
+        // If a drop is armed, slide the head to the new working weight
+        // and re-derive the next-weight using the existing step.
+        if let seq = logging.manualDropSequence,
+           seq.count >= 2 {
+            let stepLb = (seq[0] - seq[1]).rounded()
+            let nextW = max(5, Double(next) - stepLb)
+            logging.manualDropSequence = [Double(next), nextW]
+        }
+        pushUpcomingStateToDevice()
     }
 
-    private func pushWeightToDevice() {
+    /// b56 ECC range: 5–400 lb working. Clamp via ModStepperRowV2.clampedECC.
+    private func adjustEcc(_ delta: Int) {
+        let cur  = Int(logging.upcomingEccLb.rounded())
+        let next = ModStepperRowV2.clampedECC(current: cur, delta: delta)
+        logging.upcomingEccLb = Double(next)
+        if next > 0 { logging.upcomingEccEnabled = true }
+        pushUpcomingStateToDevice()
+    }
+
+    private func adjustChain(_ delta: Int) {
+        let cur  = Int(logging.upcomingChainsLb.rounded())
+        let next = ModStepperRowV2.clampedChain(current: cur, delta: delta)
+        logging.upcomingChainsLb = Double(next)
+        if next > 0 { logging.upcomingChainsEnabled = true }
+        pushUpcomingStateToDevice()
+    }
+
+    private func adjustInverse(_ delta: Int) {
+        let cur  = Int(logging.upcomingInverseLb.rounded())
+        let next = ModStepperRowV2.clampedChain(current: cur, delta: delta)
+        logging.upcomingInverseLb = Double(next)
+        if next > 0 { logging.upcomingInverseEnabled = true }
+        pushUpcomingStateToDevice()
+    }
+
+    /// DROP step adjuster — modifies the GAP between head and next.
+    /// −5 here means "next weight gets 5 lb HEAVIER" (smaller drop), +5
+    /// means "next weight gets 5 lb LIGHTER" (deeper drop). The label
+    /// shows the current drop magnitude in lb.
+    private func adjustDropStep(_ delta: Int) {
+        guard let seq = logging.manualDropSequence,
+              seq.count >= 2 else { return }
+        let head    = seq[0]
+        let curStep = Int((head - seq[1]).rounded())
+        let headLb  = Int(head.rounded())
+        let newStep = ModStepperRowV2.clampedDropNext(
+            current: curStep,
+            delta: delta,
+            headLb: headLb - 5  // next-weight floor is 5 lb, so max step is head-5
+        )
+        let nextW = max(5, head - Double(newStep))
+        logging.manualDropSequence = [head, nextW]
+    }
+
+    // MARK: - Hardware LOAD/UNLOAD
+
+    /// b56: tap on the big WEIGHT NUMBER toggles hardware LOAD/UNLOAD,
+    /// reusing the same opcode path V1 uses (sendLoad/sendUnload). When
+    /// any MDM slot is paired we route through MDM; otherwise legacy ble.
+    private func toggleHardwareLoad() {
+        if deviceLoaded {
+            if mdm.state != .idle { mdm.unload() } else { ble.sendUnload() }
+            deviceLoaded = false
+        } else {
+            // Re-push the planned state first so the device matches what
+            // the user sees on screen, THEN issue LOAD.
+            pushUpcomingStateToDevice()
+            if mdm.state != .idle { mdm.load() } else { ble.sendLoad() }
+            deviceLoaded = true
+        }
+    }
+
+    // MARK: - Device state push
+
+    /// Build a coherent VoltraDeviceState and hand it to the writer.
+    /// b56: honors INV CHAIN — sets `inverse: true` and writes the inverse
+    /// weight to chainsLb (per protocol, there's no separate inverseLb
+    /// field; VoltraModifiers.inverse repurposes chainsLb for the
+    /// thru-ROM offset).
+    private func pushUpcomingStateToDevice() {
         let m = logging.pulleyMultiplier
-        let baseLb     = Int(((logging.pendingPlannedWeightLb ?? 0) * m).rounded())
-        let eccLb      = logging.upcomingEccEnabled    ? Int((logging.upcomingEccLb    * m).rounded()) : 0
-        let chainsLb   = logging.upcomingChainsEnabled ? Int((logging.upcomingChainsLb * m).rounded()) : 0
+        let baseLb = Int(((logging.pendingPlannedWeightLb ?? 0) * m).rounded())
+        let eccLb  = logging.upcomingEccEnabled ? Int((logging.upcomingEccLb * m).rounded()) : 0
+
+        // CHAIN vs INV CHAIN — mutually exclusive (toggle helpers enforce).
+        let chainsActive = logging.upcomingChainsEnabled  && logging.upcomingChainsLb  > 0
+        let inverseActive = logging.upcomingInverseEnabled && logging.upcomingInverseLb > 0
+
+        let chainsLb: Int = {
+            if inverseActive { return Int((logging.upcomingInverseLb * m).rounded()) }
+            if chainsActive  { return Int((logging.upcomingChainsLb  * m).rounded()) }
+            return 0
+        }()
+
         let voltraMode: VoltraMode = (logging.upcomingMode == .band) ? .band : .weight
         let state = VoltraDeviceState(
             mode: voltraMode,
-            modifiers: VoltraModifiers(eccentric: eccLb > 0, chains: chainsLb > 0, inverse: false),
+            modifiers: VoltraModifiers(
+                eccentric: eccLb > 0,
+                chains:    chainsActive,
+                inverse:   inverseActive
+            ),
             weights: VoltraWeights(
                 baseLb: baseLb,
                 eccentricLb: eccLb,
@@ -580,20 +841,5 @@ struct LiveCaptureViewV2: View {
             )
         )
         writerRouter.apply(state, mdm: mdm, assignment: logging.activeInstance?.assignedVoltra)
-    }
-
-    // MARK: - Manual drop sequence (V2-only)
-
-    private func startManualDropSequence(steps: [Int]) {
-        showingDropSetConfigure = false
-        let stepsD = steps.map(Double.init)
-        guard stepsD.count >= 2 else { return }
-        logging.manualDropSequence = stepsD
-        logging.manualDropIndex    = 0
-        // Push the head weight to the device so the user is on it.
-        if let head = stepsD.first {
-            logging.pendingPlannedWeightLb = head
-            pushWeightToDevice()
-        }
     }
 }
