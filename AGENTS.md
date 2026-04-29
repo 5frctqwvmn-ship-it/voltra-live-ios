@@ -200,3 +200,32 @@ not just embedding the pre-built artifact.
 
 If any of these regress, **revert** rather than try to fix forward. The protocol layer is more
 important than any feature.
+
+## Audit cadence (added post-b54)
+
+External audits stress-test the handoff documentation by asking an
+independent agent to attempt a black-box rebuild from docs alone.
+Prompts live in `docs/audits/`. See `docs/audits/README.md` for the
+full setup.
+
+**Run an audit when any of these triggers fire:**
+
+1. Before tagging any release `v0.5.0` or higher.
+2. After any commit that touches `docs/handoff/` and changes ≥ 100
+   lines across ≥ 3 files in one go (high churn = high risk of
+   inconsistency).
+3. After any architectural change to a sacred-adjacent area (BLE
+   write path, SwiftData migrations, routing source of truth).
+4. On user request, ad hoc.
+
+**How to log an audit run:**
+
+Append a `## AUDIT — YYYY-MM-DD — <model> — Flavor <X>` entry to
+`docs/WORK_LOG.md` with: the model used, repo HEAD at audit start,
+verdict score, and the path to the run subdirectory under
+`docs/audits/runs/`. Do not edit past audit outputs — they're
+append-only history.
+
+**Do not run audits from a chat interface without filesystem access.**
+The prompts require reading dozens of repo files directly. Use
+Claude Code, Cursor, Antigravity, or Codex CLI.
