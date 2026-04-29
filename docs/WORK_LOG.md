@@ -2611,3 +2611,13 @@ was NEVER pushed. Sandbox reset wiped everything. Hard
 rule going forward: **commit + push every 10 Q&A turns,
 no exceptions.** This recovery commit is turn-1 of the
 new rule.
+
+<!-- AUDIT 2026-04-29: Cherry-pick of 3f8d41c included a
+     GPT-5.5-track-marker WORK_LOG entry. Per session
+     isolation rule (DO NOT contact GPT-5.5 fork at any
+     layer, including borrowed log entries naming that
+     fork), this conflict was resolved by KEEPING the
+     recovery note above and STRIPPING the GPT-5.5 entry.
+     The dropset arm-only entry (b60-prep) below is
+     preserved verbatim — it pre-dates the fork split
+     and lives on shared release/v0.4.38-build60. -->
