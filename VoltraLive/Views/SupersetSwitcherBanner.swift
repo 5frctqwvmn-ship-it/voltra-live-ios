@@ -30,6 +30,12 @@
 
 import SwiftUI
 
+// b66 hotfix: explicit `@MainActor` so the body's reads of `mdm.supersetTag`
+// (and other main-actor-isolated MDM state) are safe under Xcode 26 / Swift 6
+// strict concurrency. SwiftUI's implicit body isolation is sufficient on
+// most call paths, but the static helpers in this file (and the swap()
+// method that touches multiple main-actor stores) need belt-and-suspenders.
+@MainActor
 struct SupersetSwitcherBanner: View {
     @ObservedObject var mdm: MultiDeviceManager
     @ObservedObject var logging: LoggingStore

@@ -45,6 +45,13 @@ extension VoltraAssignment {
     /// exercise name. If `exerciseName` is set and an override exists for
     /// that name, the override wins; otherwise we read `mdm.workoutMode`.
     /// SS is reported when the superset tag is set (regardless of mode).
+    ///
+    /// b66 hotfix: `@MainActor` is required because every property read
+    /// here (`supersetTag`, `exerciseAssignmentOverride`, `workoutMode`)
+    /// is main-actor-isolated on `MultiDeviceManager`. Under Xcode 26 /
+    /// Swift 6 strict concurrency this static helper would otherwise be
+    /// flagged as referencing main-actor state from a nonisolated context.
+    @MainActor
     static func currentMode(exerciseName: String?, mdm: MultiDeviceManager) -> VoltraAssignment {
         // SS is a separate orthogonal switch — superset tag wins for
         // display because it is the most user-meaningful state.
@@ -86,6 +93,12 @@ extension VoltraAssignment {
 
 // MARK: - Panel
 
+// b66 hotfix: explicit `@MainActor` for the same reason as
+// SupersetSwitcherBanner — the body and tap handlers freely touch
+// `mdm.workoutMode`, `mdm.supersetTag`, and `mdm.exerciseAssignmentOverride`,
+// all main-actor-isolated. Marking the View struct itself avoids isolation
+// errors under Xcode 26 / Swift 6 strict concurrency.
+@MainActor
 struct VoltraAssignmentPanel: View {
     @ObservedObject var mdm: MultiDeviceManager
 

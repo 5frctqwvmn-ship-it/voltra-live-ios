@@ -39,12 +39,21 @@
 import Foundation
 import Combine
 
+// b66 hotfix: under Xcode 26 / Swift 6 strict concurrency, members on an
+// extension of a `@MainActor` class are NOT automatically main-actor-isolated.
+// The computed property below touches `self.workoutMode` (which IS @MainActor
+// on `MultiDeviceManager`), so we must explicitly annotate the extension
+// members. Marking the whole extension `@MainActor` is the cleanest path:
+// every member touches main-actor state, and SwiftUI views that read these
+// helpers are themselves main-actor-bound at body-eval time.
+@MainActor
 extension MultiDeviceManager {
     // MARK: - Per-exercise assignment override (mirror rule 1A)
 
     /// Side-store for the per-exercise override dict. Keyed by
     /// `ObjectIdentifier(mdm)` so multiple MDM instances (e.g. preview)
-    /// stay isolated.
+    /// stay isolated. Main-actor-isolated like the rest of MDM state
+    /// so the get/set path stays on a single concurrency domain.
     private static var _exerciseOverrideStore: [ObjectIdentifier: [String: WorkoutMode]] = [:]
 
     /// b66: read/write per-exercise mode override. Empty/nil means
@@ -82,7 +91,7 @@ extension MultiDeviceManager {
     /// scanner subscribe in `.onAppear` and present their pair sheet in
     /// response. Stub-style: this extension does NOT itself trigger the
     /// scan because the scanner lives outside the MDM.
-    static let scanRequestedSubject = PassthroughSubject<DeviceSlot, Never>()
+    nonisolated static let scanRequestedSubject = PassthroughSubject<DeviceSlot, Never>()
 
     /// b66: panel calls this when the user taps a greyed L or R pill.
     /// Emits a request-event on `scanRequestedSubject`; the host that
