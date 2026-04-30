@@ -3082,3 +3082,24 @@ auto-engage contract and applies to both V1 and V2 by symmetry.
 
 **Ship.** Pending. Will run `release.yml dry_run=false` after
 this commit lands; 5-gate altool verify, then v0.4.42 / build 69.
+
+### Ship verification (5-gate altool, b69)
+
+Workflow run: [25140763953](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25140763953)
+status = success.
+
+1. **Exit code 0** — confirmed (`altool upload succeeded
+   (duration 52s, success marker present).`).
+2. **Wall-clock duration ≥20 s** — 52 s.
+3. **Positive success marker** — both `UPLOAD SUCCEEDED with no
+   errors` and `No errors uploading archive at
+   'build/export/VoltraLive.ipa'` present in the altool log.
+4. **Zero failure markers** — blocklist grep clean against the
+   live altool stdout. Only blocklist-pattern hits in the run
+   log are script-source comment lines that document the gate
+   itself, not actual upload errors.
+5. **Delivery UUID:** `7e036a7d-7060-4682-8212-c253b815118a`.
+
+**TestFlight surface:** v0.4.42 (build 69) uploaded to App
+Store Connect on Apr 29 2026 (PDT). Awaiting Apple processing
+before the build appears in TestFlight.
