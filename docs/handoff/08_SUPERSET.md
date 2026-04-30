@@ -177,19 +177,35 @@ are paired. Three controls (b53 changed #1):
 
 `addAnotherExerciseButton` is unchanged.
 
-## V1/V2 routing interaction (b54)
+## V1/V2 routing interaction (b54, updated b71 V4-D21 part 2)
 
-`LiveCaptureContainer` gates V1 vs V2:
+**Pre-b71 behavior (b54).** `LiveCaptureContainer` gates V1 vs V2:
 
 - V2 renders only when **single Voltra paired AND
   `mdm.supersetChain.isEmpty`**.
 - Any chain entry (≥ 1) → V1 renders, regardless of V2 preference.
 - 2 Voltras → V1 always.
 
-So **all chain / superset behavior described in this doc lives in
-V1**. V2 is intentionally narrower (single-Voltra, no-chain) and
-falls through to V1 the moment the user adds a second exercise or
-pairs a second Voltra.
+**As of b71 V4-D21 part 2 (this commit).** The chain UI is now ported
+into V2 verbatim — `SupersetSwitcherBanner` hosts the full V1 SWAP
+flow (force-finalize → unload outgoing → flip slot → switch active
+instance → restore chain weight + re-anchor cascade → host pushes
+device state) and `LiveCaptureViewV2` wires the three V1 lifecycle
+hooks: onAppear chain restore, onChange `currentSet` flip →
+`mdm.lockSupersetTag()`, onChange `mdm.supersetActiveSlot` →
+`switchActiveInstanceByExerciseName`. The B53 "no auto-LOAD on
+incoming" safety is preserved.
+
+The `LiveCaptureContainer.shouldUseV2` predicate still routes
+`hasChain → V1` at the time of this commit — the routing flip lands
+in V4-D21 part 3 (Step 3 of the b71 stack). After part 3, V2 will
+be the canonical chain UX and V1 will only render via the
+emergency `@AppStorage("liveCaptureUIVersion")` kill switch.
+
+Until part 3 ships, **all chain / superset behavior described in
+this doc still lives in V1 at runtime**, but the V2 implementation
+is structurally complete and reachable by setting the kill switch
+to `"v2"` on a build with the V1-fallback branch removed.
 
 ## What the user sees end-to-end (b53)
 

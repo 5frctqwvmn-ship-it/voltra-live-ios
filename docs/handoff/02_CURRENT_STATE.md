@@ -20,7 +20,7 @@ duration 29s. HEAD at ship: `e10b428fbf4afdb75db8f3ffc72b4730bac49a65`.
 Awaiting Apple processing before TestFlight surface.
 
 **Active cycle:** b71 / v0.4.44 / build 71 — NOT YET BUMPED OR SHIPPED;
-currently a working diff on `feat/ui-v4-2-claude`. Three unshipped
+currently a working diff on `feat/ui-v4-2-claude`. Four unshipped
 commits sit on top of the b70 ship tag:
 - b70 page-badge double-render hotfix (commit `34ba63e`, 2026-04-30 22:02 UTC).
 - b71 force-chart canonicalization — V1's `ForceChartView` is now mounted
@@ -40,13 +40,23 @@ commits sit on top of the b70 ship tag:
   users routed through V2 still see every below-chart affordance.
   Equivalence documented for `upcomingSetCard` chrome and load/unload
   pair (V2 surfaces both via `weightCard` + `toggleHardwareLoad`).
-  See ADR **V4-D21** (Step 4 chain UI port + Step 3 routing flip
-  follow as separate commits in the same cycle).
+  See ADR **V4-D21**. Commit `b93b4fe`.
+- b71 chain / superset UI port into V2 (V4-D21 part 2 of 3) — full V1
+  SWAP semantics now live in `SupersetSwitcherBanner` (force-finalize
+  current set → unload outgoing → flip slot → switch active instance →
+  restore chain weight + re-anchor cascade → host pushes device state),
+  and V2 wires the three V1 lifecycle hooks: onAppear chain restore
+  (LiveCaptureView.swift:242-248), onChange `currentSet` flip →
+  `mdm.lockSupersetTag()` (264-268), onChange `mdm.supersetActiveSlot`
+  → `switchActiveInstanceByExerciseName` (283-288). B53 "no auto-LOAD
+  on incoming" safety preserved verbatim. Commit pending in this
+  session (Step 3 routing flip lands next; this commit is the
+  prerequisite).
+  See ADR **V4-D21 part 2**.
 
 Version bump and ship are pending explicit user approval per the
 standing constraint AND completion of the remaining b71 scope items
-(Step 4 chain UI port; Step 3 routing flip; Step 6 parity verification
-pass).
+(Step 3 routing flip; Step 6 parity verification pass).
 
 ## What works today
 

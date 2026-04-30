@@ -3442,3 +3442,125 @@ No changes to LoggingStore, MultiDeviceManager, WriterRouter, CombinedParity, Fo
 - `health.stop()` on disappear may race a session-end path that also pops navigation. `HealthKitStore.stop()` is documented as idempotent (verified on the V1 path which has shipped this for the entire HealthKit lifetime), so a redundant call is a no-op.
 
 **Out of scope (this commit).** No routing change (Step 3); no chain UI port (Step 4); no parity verification pass (Step 6); no version bump; no push.
+
+---
+
+## 2026-04-30 23:03 UTC — b71 Step 4: chain / superset UI port into V2 (V4-D21 part 2 of 3)
+
+Port the V1 chain / superset SWAP flow into V2 so `LiveCaptureViewV2`
+behaves identically to V1 when the user has built a 2+ entry superset
+chain. Lands in two surgical files: `SupersetSwitcherBanner.swift`
+(which now hosts the full SWAP semantics) and `LiveCaptureViewV2.swift`
+(which now wires session/onAfterSwap and the three V1 lifecycle hooks).
+
+This commit makes Step 3 (V1 fallback removal) safe — without it,
+removing `if hasChain { return false }` would route chain users to a
+V2 that did not preserve activeInstance across slot flips, did not
+seal `supersetTag` on set 1, and did not re-anchor the cascade on
+chain entry.
+
+**Files changed.**
+
+- `VoltraLive/Views/SupersetSwitcherBanner.swift` (~310 lines)
+  - Header docs expanded with V4-D21 part 2 rationale (gate widening,
+    chain-aware swap flow, host integration contract).
+  - Added optional inputs: `var session: SessionStore? = nil`,
+    `var onAfterSwap: (() -> Void)? = nil`. Backwards-compatible —
+    older host call sites that pass only `mdm` and `logging` still
+    compile.
+  - Visibility gate widened from
+    `mdm.supersetTag && bothPaired` to
+    `(mdm.supersetTag && bothPaired) || mdm.hasActiveSupersetChain`,
+    so a chain that hasn't been "tagged" via the legacy two-side flow
+    still surfaces the banner on the live screen.
+  - Display rewrites: when a chain is active, the LEFT / RIGHT badges
+    prefer `mdm.activeSupersetEntry?.exerciseName` /
+    `mdm.nextSupersetEntry?.exerciseName` and the "Next:" weight
+    prefers `mdm.nextSupersetEntry?.plannedWeightLb` over the
+    mirrored side weight (V1 LiveCaptureView.swift:805-814 verbatim).
+  - `swap()` rewritten as the full V1 7-step flow:
+    1. `session?.forceFinalizeCurrentSet()` — telemetry-safe boundary
+       so a mid-set swap never orphans samples.
+    2. Save outgoing planned weight (mirror).
+    3. `mdm.unload(target: outgoing)` — outgoing side returns to bar.
+    4. `mdm.flipSupersetActiveSlot()` — slot pointer advances.
+    5. `logging.switchActiveInstanceByExerciseName(incoming)` so the
+       LoggingStore commits sets against the new exercise.
+    6. Restore weight: prefer
+       `mdm.activeSupersetEntry?.plannedWeightLb` over the mirrored
+       value, set `pendingPlannedWeightLb`, and
+       `reanchorCascadeIfActive(toLb:)`.
+    7. Fire `onAfterSwap?()` so the host's `pushUpcomingStateToDevice`
+       is the single source of device-side state (writer-cache aware).
+  - **Non-negotiable preserved (b53):** no auto-LOAD on the incoming
+    side. SWAP only LOADs when the user pulls the trigger.
+
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` (1693 → ~1740
+  lines after diff)
+  - `body`: banner mount updated to
+    `SupersetSwitcherBanner(mdm: mdm, logging: logging, session: session, onAfterSwap: { pushUpcomingStateToDevice() })`.
+  - `onAppear`: added the V1 chain-restoration block verbatim
+    (LiveCaptureView.swift:242-248) — when `mdm.activeSupersetEntry`
+    is non-nil and `mdm.supersetChain.count >= 2`, switch active
+    instance, set `pendingPlannedWeightLb`, re-anchor cascade, and
+    `pushUpcomingStateToDevice()`. Idempotent with SWAP's restore.
+  - Added `.onChange(of: session.currentSet != nil) { _, started in if started && mdm.supersetTag { mdm.lockSupersetTag() } }`
+    (V1 LiveCaptureView.swift:264-268 verbatim) — seals the
+    historical `supersetTag` the instant set 1 starts.
+  - Added `.onChange(of: mdm.supersetActiveSlot) { _, _ in guard session.currentSet == nil else { return }; if let entry = mdm.activeSupersetEntry { logging.switchActiveInstanceByExerciseName(entry.exerciseName) } }`
+    (V1 LiveCaptureView.swift:283-288 verbatim) — keeps
+    `LoggingStore.activeInstance` synced with the chain slot for any
+    flip path that bypasses SWAP (chain advance, navigation re-entry).
+
+**APIs verified before edit.**
+
+- `SessionStore.forceFinalizeCurrentSet()` (SessionStore.swift:305)
+- `MultiDeviceManager.unload(target:)` (MultiDeviceManager.swift:445)
+- `MultiDeviceManager.lockSupersetTag()` (MultiDeviceManager.swift:181)
+- `MultiDeviceManager.hasActiveSupersetChain` (MultiDeviceManager.swift:190)
+- `MultiDeviceManager.activeSupersetEntry` / `nextSupersetEntry` (MultiDeviceManager.swift:324, 331)
+- `MultiDeviceManager.flipSupersetActiveSlot()` (MultiDeviceManager.swift:314)
+- `LoggingStore.switchActiveInstanceByExerciseName(_:) -> Bool` (LoggingStore.swift:1252) — return value intentionally ignored to mirror V1 verbatim.
+- `LoggingStore.reanchorCascadeIfActive(toLb:)` (LoggingStore.swift:609)
+- V2 already has `@EnvironmentObject var session: SessionStore` (LiveCaptureViewV2.swift:87).
+
+**Verification.**
+
+- Brace / paren / bracket balance via comment-and-string-stripped
+  Python regex pass:
+  - `LiveCaptureViewV2.swift`: braces 0 / parens 0 / brackets 0
+  - `SupersetSwitcherBanner.swift`: braces 0 / parens 0 / brackets 0
+- No duplicate observers — `grep` confirms one `lockSupersetTag` site
+  and one `onChange(of: mdm.supersetActiveSlot)` site in V2.
+- Sacred files untouched (git diff scope is the two files above).
+- No Xcode toolchain on the sandbox; CI `build.yml` on push is the
+  authoritative compile check. Step 3 (routing flip) lands next and
+  will not push without explicit user approval.
+
+**Risks.**
+
+- The widened banner gate (`|| hasActiveSupersetChain`) means the
+  banner now appears in chain mode even if `supersetTag` was never
+  flipped via the legacy two-side flow. This matches V1 (chain-only
+  builds shipped from b48 onward). If a user has an in-flight chain
+  and somehow lands on a build where only one side is paired, the
+  banner will render but `swap()` will still try to flip slots; the
+  V1 `swap()` has shipped under that condition without report so the
+  port should be safe.
+- `swap()` calls `session?.forceFinalizeCurrentSet()` only when the
+  host passed `session`. The legacy two-arg call site (no session)
+  still falls through to a slot flip without finalize — V1 behavior
+  for the pre-chain era. V2 always passes `session` so it gets the
+  full safety contract.
+- The `onChange(of: mdm.supersetActiveSlot)` observer in V2 fires on
+  every slot flip including the one inside `swap()`. The guard
+  `session.currentSet == nil` is intact, and V1 has shipped this
+  exact pattern since b52, so the redundant call is a defensive
+  no-op (V1 LiveCaptureView.swift:283 inline comment).
+- Two compiler warnings expected (matches V1):
+  `Result of call to 'switchActiveInstanceByExerciseName' is unused`
+  on the two onAppear / onChange call sites. V1 has shipped these
+  warnings since b52; not promoting to errors.
+
+**Out of scope (this commit).** No routing change (Step 3);
+no parity verification (Step 6); no version bump; no push.

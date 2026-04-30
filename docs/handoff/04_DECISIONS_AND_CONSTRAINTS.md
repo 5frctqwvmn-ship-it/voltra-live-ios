@@ -1024,3 +1024,134 @@ is untouched. No chain UI port — V2 still gates on
 `SupersetSwitcherBanner`'s `supersetTag && bothPaired` predicate;
 chain semantics are unchanged. No version bump, no push, no ship.
 No sacred-file changes.
+
+## V4-D21 part 2 — Port V1 chain / superset UI into V2 (b71 Step 4)
+
+**Context.** Part 1 of V4-D21 ported all *non-chain* below-chart UI
+into V2 so a single-instance user routed through V2 sees every
+affordance V1 offers. Part 2 closes the *chain-shaped* gap: when the
+user has built a 2+ entry superset chain, V2 must behave identically
+to V1 (banner display, SWAP semantics, lifecycle hooks) before Step 3
+flips the router to deprecate the V1 fallback. Without part 2 the
+Step 3 flip would route chain users into a V2 that:
+
+- Did not surface the active / next exercise names from
+  `mdm.activeSupersetEntry` / `nextSupersetEntry`.
+- Did not force-finalize a mid-set SWAP (telemetry-orphaned set).
+- Did not seal `supersetTag` on set 1 (historical record mutable
+  after lifting started).
+- Did not re-anchor the cascade on chain entry (drop-set cascade
+  computed from the wrong base weight).
+- Did not keep `LoggingStore.activeInstance` synced when
+  `mdm.supersetActiveSlot` flipped from any path other than SWAP
+  (sets committed against the wrong exercise).
+
+V1 has shipped these behaviors since b48–b53. This ADR documents the
+V1-verbatim port into V2.
+
+**Decision.** Promote `SupersetSwitcherBanner` to host the full V1
+SWAP semantics, parametrize it with optional `session: SessionStore?`
+and `onAfterSwap: (() -> Void)?` so the host owns device-side state,
+and wire the three V1 lifecycle hooks into `LiveCaptureViewV2`.
+Specifics:
+
+1. **Banner gate widening.**
+   `SupersetSwitcherBanner` visibility predicate moves from
+   `mdm.supersetTag && bothPaired` to
+   `(mdm.supersetTag && bothPaired) || mdm.hasActiveSupersetChain`.
+   This matches V1 where `supersetBanner` (LiveCaptureView.swift:763
+   inline gate) renders the chain-aware variant whenever a chain is
+   active, regardless of pair state. `mdm.hasActiveSupersetChain` is
+   `chain.count >= 2` (MultiDeviceManager.swift:190).
+
+2. **Banner content prefers chain entries.**
+   When a chain is active, the LEFT / RIGHT badge labels prefer
+   `mdm.activeSupersetEntry?.exerciseName` /
+   `mdm.nextSupersetEntry?.exerciseName`, and the "Next:" weight
+   prefers `mdm.nextSupersetEntry?.plannedWeightLb` over the mirrored
+   side weight. Verbatim port of V1 LiveCaptureView.swift:805-814.
+
+3. **`SupersetSwitcherBanner.swap()` rewritten as the V1 7-step flow.**
+   In order:
+   1. `session?.forceFinalizeCurrentSet()` — telemetry-safe boundary.
+   2. Save outgoing planned weight (mirror).
+   3. `mdm.unload(target: outgoing)` — outgoing side returns to bar.
+   4. `mdm.flipSupersetActiveSlot()`.
+   5. `logging.switchActiveInstanceByExerciseName(incoming)` —
+      LoggingStore commits sets against the new exercise.
+   6. Restore weight: prefer
+      `mdm.activeSupersetEntry?.plannedWeightLb` over the mirrored
+      value, set `pendingPlannedWeightLb`, then
+      `reanchorCascadeIfActive(toLb:)`.
+   7. Fire `onAfterSwap?()` — host's `pushUpcomingStateToDevice` is
+      the single source of device-side state (writer-cache aware).
+
+   **B53 safety preserved verbatim.** No auto-LOAD on the incoming
+   side. SWAP only LOADs when the user pulls the trigger. The
+   incoming side stays unloaded so the user is never surprised by an
+   unexpected hardware engagement.
+
+4. **Three V1 lifecycle hooks wired into V2.**
+   Verbatim ports of V1 LiveCaptureView.swift:242-248, 264-268,
+   283-288:
+   - `onAppear`: when `mdm.activeSupersetEntry` is non-nil and
+     `mdm.supersetChain.count >= 2`, switch active instance, set
+     `pendingPlannedWeightLb`, re-anchor cascade,
+     `pushUpcomingStateToDevice`. Idempotent with SWAP's restore.
+   - `onChange(of: session.currentSet != nil)`: when `started`
+     becomes true and `mdm.supersetTag` is set,
+     `mdm.lockSupersetTag()`. Seals the historical record on set 1.
+   - `onChange(of: mdm.supersetActiveSlot)`: guard
+     `session.currentSet == nil`, then if
+     `mdm.activeSupersetEntry` is non-nil call
+     `switchActiveInstanceByExerciseName`. Catches any slot-flip
+     path that bypasses SWAP (chain advance, navigation re-entry).
+
+5. **Host call site.**
+   V2 mounts the banner as
+   `SupersetSwitcherBanner(mdm: mdm, logging: logging, session: session, onAfterSwap: { pushUpcomingStateToDevice() })`.
+   Legacy two-arg call sites (no chain context) still compile.
+
+**Why ports are verbatim, not refactored.** V1 has shipped these
+exact paths since b48–b53 without report. The b71 mandate is parity
+not redesign. Any cleanup (e.g. moving the slot observer into a
+dedicated `SupersetCoordinator`) is deferred to a future ADR. The
+goal here is "V2 chain UX is observably indistinguishable from V1
+chain UX," not "V2 chain UX is structurally improved."
+
+**Alternatives considered.**
+
+1. **Keep the simple `SupersetSwitcherBanner.swap()` and add the
+   chain restore in V2 only.** Rejected. The V1 `swap()` is the
+   authoritative chain-advance path; if V2 wraps it with extra logic
+   the two implementations diverge and a future maintainer must
+   reverse-engineer which is canonical. The banner is now the single
+   source of SWAP behavior, host-owned state stays in V2.
+2. **Inline the swap flow inside V2 directly.** Rejected. The
+   banner is the natural home for SWAP UI + behavior; inlining
+   would mean two implementations of the same flow (V1 banner,
+   V2 inline) and a third cleanup commit later.
+3. **Skip chain restore on V2 onAppear and rely on SWAP-only
+   restoration.** Rejected. V1's onAppear restore catches the
+   "user navigated back to live screen with chain already built"
+   case which SWAP cannot — SWAP only fires on the user's tap
+   inside the banner.
+4. **Defer to b72 because it's surgically large.** Rejected per the
+   b71 scope mandate ("Do not use 'this is large' as a reason to
+   move items to b72/b73/b74"). Without part 2 the Step 3 routing
+   flip is unsafe.
+
+**Sequencing.** Part 2 commits between part 1 (b93b4fe, below-chart
+parity) and part 3 (Step 3 routing flip). After part 2 lands, part 3
+removes `if hasChain { return false }` from
+`LiveCaptureContainer.shouldUseV2`, redocuments the
+`@AppStorage("liveCaptureUIVersion")` switch as emergency-only, and
+updates 08_SUPERSET / 10_OPEN_QUESTIONS / 02_CURRENT_STATE.
+
+**Out of scope (this ADR).** No routing change (Step 3); no parity
+verification (Step 6); no version bump; no push; no sacred-file
+changes. No new types, no new MultiDeviceManager APIs, no new
+LoggingStore APIs. Two compiler warnings expected on the
+`switchActiveInstanceByExerciseName` call sites (return value
+unused) — V1 has shipped these warnings since b52, not promoting to
+errors.

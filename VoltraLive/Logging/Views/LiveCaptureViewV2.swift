@@ -178,7 +178,20 @@ struct LiveCaptureViewV2: View {
                     // breathing-ring delta on ACTIVE side. Self-hides
                     // when supersetTag is false or both Voltras are
                     // not paired.
-                    SupersetSwitcherBanner(mdm: mdm, logging: logging)
+                    //
+                    // b71 (V4-D21 part 2): pass `session` so the banner's
+                    // SWAP can call `forceFinalizeCurrentSet()` directly
+                    // (V1's safety contract: no telemetry-orphaned set on
+                    // mid-set chain advance), and pass `onAfterSwap` so
+                    // the host's writer-cache-aware `pushUpcomingStateToDevice`
+                    // is the single source of device-side state, identical
+                    // to V1.
+                    SupersetSwitcherBanner(
+                        mdm: mdm,
+                        logging: logging,
+                        session: session,
+                        onAfterSwap: { pushUpcomingStateToDevice() }
+                    )
                         .padding(.bottom, 8)
 
                     headerStrip
@@ -260,6 +273,24 @@ struct LiveCaptureViewV2: View {
             // weight to even on Combined entry.
             logging.applyWorkoutMode(mdm.workoutMode)
             enforceCombinedParityOnEntry()
+            // b71 (V4-D21 part 2): mirror V1 LiveCaptureView.swift:242-248
+            // verbatim — when arriving at the live screen with an active
+            // chain (>=2 entries), restore the active entry's exercise
+            // and planned weight, re-anchor the cascade, and push the
+            // resulting state to the device. The picker / chain-builder
+            // does not know about LoggingStore (separate module) and the
+            // user is briefly on the home screen between
+            // appendSupersetEntry and entering the live view, so onAppear
+            // is the canonical "about to start lifting" hook. SWAP keeps
+            // doing its own restore work for in-flight chain advances;
+            // this onAppear path is idempotent with it.
+            if let entry = mdm.activeSupersetEntry,
+               mdm.supersetChain.count >= 2 {
+                logging.switchActiveInstanceByExerciseName(entry.exerciseName)
+                logging.pendingPlannedWeightLb = entry.plannedWeightLb
+                logging.reanchorCascadeIfActive(toLb: entry.plannedWeightLb)
+                pushUpcomingStateToDevice()
+            }
             withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
                 pulseOn = true
             }
@@ -274,6 +305,40 @@ struct LiveCaptureViewV2: View {
         .onChange(of: mdm.workoutMode) { _, newMode in
             logging.applyWorkoutMode(newMode)
             enforceCombinedParityOnEntry()
+        }
+        // b71 (V4-D21 part 2): mirror V1 LiveCaptureView.swift:264-268
+        // verbatim. Lock the superset tag the instant set 1 begins.
+        // session.currentSet flips nil -> non-nil on the first Pull
+        // or rep bump, which is the canonical "set 1 has started" event.
+        // After this the user can no longer toggle mdm.supersetTag — the
+        // historical record is sealed. Subsequent set starts are no-ops
+        // because lockSupersetTag() is idempotent.
+        .onChange(of: session.currentSet != nil) { _, started in
+            if started && mdm.supersetTag {
+                mdm.lockSupersetTag()
+            }
+        }
+        // b71 (V4-D21 part 2): mirror V1 LiveCaptureView.swift:283-288
+        // verbatim. Keep LoggingStore.activeInstance in sync with the
+        // active chain slot. Pre-b52 (V1) the only resync path was
+        // SWAP's call to switchActiveInstanceByExerciseName, so any
+        // other route that flipped supersetActiveSlot (chain advance,
+        // navigation back into a chain entry, etc.) left activeInstance
+        // pointing at the wrong exercise — sets committed against the
+        // wrong instance. Resyncing here on every slot change closes
+        // that gap.
+        //
+        // Guard: only run while no set is in flight. If a slot flip
+        // races a live set boundary, SWAP itself force-finalizes the
+        // current set BEFORE flipping (see SupersetSwitcherBanner.swap),
+        // so this observer is a NO-OP during that window. The guard
+        // catches any future code path that flips the slot without
+        // finalizing.
+        .onChange(of: mdm.supersetActiveSlot) { _, _ in
+            guard session.currentSet == nil else { return }
+            if let entry = mdm.activeSupersetEntry {
+                logging.switchActiveInstanceByExerciseName(entry.exerciseName)
+            }
         }
         // b71 (V4-D21): mirror V1 LiveCaptureView.swift:289 — stop
         // HealthKit polling when the live screen vanishes so HR /
