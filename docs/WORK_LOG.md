@@ -3564,3 +3564,105 @@ chain entry.
 
 **Out of scope (this commit).** No routing change (Step 3);
 no parity verification (Step 6); no version bump; no push.
+
+---
+
+## 2026-04-30 23:09 UTC — b71 Step 3: V1 fallback removal; V2 is canonical (V4-D21 part 3 of 3)
+
+The routing flip. After V4-D21 parts 1 (below-chart parity) and 2
+(chain UI port) closed every behavior gap, `LiveCaptureContainer.shouldUseV2`
+collapses from a three-stage conditional cascade to a single line.
+V2 is now the canonical live capture view for every session shape;
+`@AppStorage("liveCaptureUIVersion")` is an emergency rollback kill
+switch only.
+
+**Files changed.**
+
+- `VoltraLive/Logging/Views/LiveCaptureContainer.swift`
+  - Header comments rewritten: pre-b71 routing rules listed and
+    marked deprecated; new V2-by-default policy spelled out;
+    kill-switch semantics inverted from opt-in (b53) to opt-out
+    (b71).
+  - `liveCaptureUIVersionKey` docstring updated: `"v1"` is now the
+    emergency rollback value; `""` and `"v2"` both route to V2.
+  - Removed `@EnvironmentObject var mdm: MultiDeviceManager` from
+    the container struct — the routing predicate no longer reads
+    MDM. App-entry-level injection still passes MDM down to V1 / V2.
+  - `shouldUseV2` rewritten as a single line:
+    `return uiVersion != "v1"`. The old three-stage cascade
+    (`hasChain → V1` / `bothPaired → V2` / else preference) is
+    preserved verbatim in a comment block immediately above the
+    return, citing V4-D21 parts 1+2 as the prerequisites that made
+    the flip safe.
+
+- `docs/handoff/02_CURRENT_STATE.md`
+  - "Five unshipped commits" header (was four).
+  - Added the V4-D21 part 3 entry beneath part 2.
+  - Trailing summary line updated: only Step 6 (parity verification)
+    remains before the version bump.
+  - "What works today" section: added a routing note at the top
+    flagging that "V1 only" bullets describe pre-b71 history, not
+    post-b71 runtime; rewrote the Live capture / Dual-Voltra /
+    Superset chain bullets to call out V2 as the canonical render
+    path post-b71 with V1 retained as a rollback artifact.
+
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md`
+  - Appended ADR **V4-D21 part 3** with the full rationale (why a
+    kill switch instead of a hard cut, alternatives considered,
+    files changed, deferred V1 deletion plan).
+
+- `docs/handoff/08_SUPERSET.md`
+  - "V1/V2 routing interaction" section rewritten to reflect the
+    post-Step-3 policy. Pre-b71 rules retained as deprecated
+    history; new one-line predicate quoted; kill-switch semantics
+    documented; V1 rollback path noted.
+
+- `docs/handoff/10_OPEN_QUESTIONS.md`
+  - "Should V2 become the default?" entry deleted from the open
+    questions section per the file's standing rule ("delete in
+    the same commit as the code that uses the answer"); a closure
+    note was added under "Recently closed" pointing at V4-D21 part 3.
+
+- `docs/WORK_LOG.md` (this entry).
+
+**Verification.**
+
+- Brace / paren / bracket balance via comment-and-string-stripped
+  Python regex pass on `LiveCaptureContainer.swift`: braces 0 /
+  parens 0 / brackets 0.
+- `grep` confirms no remaining `hasChain`, `bothPaired`, or
+  `MultiDeviceManager` references inside `LiveCaptureContainer.swift`
+  beyond the deprecated-cascade comment block.
+- Sacred files untouched.
+- No Xcode toolchain on the sandbox; CI `build.yml` on push remains
+  the authoritative compile check. No push performed.
+
+**Risks.**
+
+- Existing installs whose `liveCaptureUIVersion` is the empty string
+  (never picked at first launch) now route to V2 instead of V1. This
+  matches the b71 mandate but is the largest behavior change in this
+  cycle — the picker UX in b53 said "default V1 on cancel," and that
+  promise is now broken. Mitigation: V4-D21 parts 1+2 closed every
+  V1→V2 behavior gap, and the kill switch is reachable for users
+  who prefer V1.
+- Existing installs with `liveCaptureUIVersion == "v2"` see no
+  change in behavior. Existing installs with
+  `liveCaptureUIVersion == "v1"` (rare — required an explicit pick
+  of V1 from the b53 first-launch sheet) continue routing to V1
+  via the new kill-switch semantics. Verified on paper — the
+  predicate `uiVersion != "v1"` returns `false` for `"v1"`, `true`
+  for `""` / `"v2"` / any other value, matching intent.
+- The `LiveCaptureContainer.shouldUseV2` predicate is now stateless
+  with respect to runtime device state. A user who had paired both
+  Voltras pre-b71 and was relying on the implicit `bothPaired → V2`
+  fast path is now routed by AppStorage alone. This is the intent
+  of the flip but is worth noting if a future regression surfaces.
+- V2 carries the entirety of the live capture surface area. The
+  parity verification pass (Step 6) is the next step to flush out
+  any remaining V1↔V2 discrepancy not caught by parts 1 / 2.
+
+**Out of scope (this commit).** No V1 source deletion (deferred to
+b75+ at the earliest). No Settings toggle for the kill switch
+(deferred). No parity verification (Step 6 next). No version bump.
+No push.

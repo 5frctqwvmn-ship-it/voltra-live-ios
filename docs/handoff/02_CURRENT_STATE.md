@@ -20,7 +20,7 @@ duration 29s. HEAD at ship: `e10b428fbf4afdb75db8f3ffc72b4730bac49a65`.
 Awaiting Apple processing before TestFlight surface.
 
 **Active cycle:** b71 / v0.4.44 / build 71 — NOT YET BUMPED OR SHIPPED;
-currently a working diff on `feat/ui-v4-2-claude`. Four unshipped
+currently a working diff on `feat/ui-v4-2-claude`. Five unshipped
 commits sit on top of the b70 ship tag:
 - b70 page-badge double-render hotfix (commit `34ba63e`, 2026-04-30 22:02 UTC).
 - b71 force-chart canonicalization — V1's `ForceChartView` is now mounted
@@ -49,38 +49,58 @@ commits sit on top of the b70 ship tag:
   (LiveCaptureView.swift:242-248), onChange `currentSet` flip →
   `mdm.lockSupersetTag()` (264-268), onChange `mdm.supersetActiveSlot`
   → `switchActiveInstanceByExerciseName` (283-288). B53 "no auto-LOAD
-  on incoming" safety preserved verbatim. Commit pending in this
-  session (Step 3 routing flip lands next; this commit is the
-  prerequisite).
+  on incoming" safety preserved verbatim. Commit `2488484`.
   See ADR **V4-D21 part 2**.
+- b71 routing flip: V2 is canonical (V4-D21 part 3 of 3) —
+  `LiveCaptureContainer.shouldUseV2` collapsed from the three-stage
+  conditional cascade (`hasChain → V1` / `bothPaired → V2` / else
+  preference) to a single line `return uiVersion != "v1"`. V2 now
+  renders for every session shape; `@AppStorage("liveCaptureUIVersion")`
+  is an emergency rollback kill switch only. The pre-b71 `"Should V2
+  become the default?"` open question (10_OPEN_QUESTIONS) is resolved
+  and moved to Recently closed. 08_SUPERSET routing section rewritten
+  to reflect the new policy. V1 source code is retained on disk as a
+  verbatim rollback artifact — deletion is deferred to a future build
+  (b75+ at the earliest, after 2 clean V2 ships). Commit pending in
+  this session.
+  See ADR **V4-D21 part 3**.
 
 Version bump and ship are pending explicit user approval per the
-standing constraint AND completion of the remaining b71 scope items
-(Step 3 routing flip; Step 6 parity verification pass).
+standing constraint AND completion of the remaining b71 scope item
+(Step 6 parity verification pass).
 
 ## What works today
 
-- Single-Voltra capture (V1) — full feature set including drop-set
-  cascade, weight nudges, added-plates, expanded set rows.
-- Single-Voltra capture (V2) — opt-in via first-launch picker, falls
-  back to V1 the moment a chain entry exists or both Voltras pair.
-  V2 layout: header → phase strip OR rest-timer bar → WEIGHT card with
+> **b71 V4-D21 part 3 routing note:** as of b71 V2 is the canonical
+> live capture view for every session shape. The bullets below that
+> historically read "V1 only" or "V1 fallback" describe the runtime
+> view as **V2** post-b71. V1 source remains on disk as an emergency
+> rollback artifact reachable via the `liveCaptureUIVersion = "v1"`
+> kill switch, but is not on the default render path.
+
+- Live capture (V2, canonical post-b71) — full feature set including
+  drop-set cascade, weight nudges, added-plates, expanded set rows,
+  superset chain SWAP, dual-Voltra Independent / Combined.
+  V2 layout: header → phase strip OR rest-timer bar →
+  `SupersetSwitcherBanner` (chain-aware) → WEIGHT card with
   hardware-load tap on big number + nested mod rows + 4-up mod tile
-  grid + per-engaged-mod stepper rows → REPS / TOTAL VOLUME tiles →
-  force chart (b71: now V1's `ForceChartView` raw-sample phase-colored
-  polyline + Catmull-Rom smoothing + secondary-trace superset overlay,
-  per ADR V4-D20) → drop-cascade cancel chip (b71 V4-D21, self-hides
-  unless cascade is live) → V1RestoreSection (pulley chip + added-plates
-  picker + LOGGED SETS swipeable list + Next-exercise + End-session).
-  As of b71 V4-D21 the WEIGHT card also surfaces a `Target N reps`
-  chip in its header and a horizontal `SetMode` chips row at its
-  bottom (working / warmUp / eccentric / band / pause / dropSet /
-  isoHold), and its ±step nudgers are mode-aware via `CombinedParity`.
-- Dual-Voltra Independent + Combined modes (V1 only); Twin Mode pill
-  cluster with focus-aware mod routing (b58/V4-D9).
-- Superset chain (V1 only) with per-instance `assignedVoltra` routing
-  source-of-truth (b53), 3-way Left/Right/Both picker, SWAP-no-auto-LOAD
-  safety.
+  grid + per-engaged-mod stepper rows + `Target N reps` chip +
+  `SetMode` chips row → REPS / TOTAL VOLUME tiles → force chart
+  (V1's `ForceChartView` raw-sample phase-colored polyline +
+  Catmull-Rom smoothing + secondary-trace superset overlay, per ADR
+  V4-D20) → drop-cascade cancel chip (self-hides unless cascade is
+  live) → V1RestoreSection (pulley chip + added-plates picker +
+  LOGGED SETS swipeable list + Next-exercise + End-session).
+  ±step nudgers are mode-aware via `CombinedParity`.
+- Live capture (V1, retained as rollback artifact) — unchanged from
+  b70. Same feature set, reachable only via the kill switch.
+- Dual-Voltra Independent + Combined modes — Twin Mode pill cluster
+  with focus-aware mod routing (b58/V4-D9), now rendering through V2.
+- Superset chain — per-instance `assignedVoltra` routing source-of-
+  truth (b53), 3-way Left/Right/Both picker, SWAP-no-auto-LOAD
+  safety, now rendering through V2 via `SupersetSwitcherBanner`'s
+  V1-verbatim swap flow + V2's three V1 lifecycle hooks (b71
+  V4-D21 part 2).
 - HealthKit HR + active calories streaming with PulseDot freshness
   indicators.
 - Session export with sessionVitalsCard (AVG HR / KCAL / TOTAL VOL /

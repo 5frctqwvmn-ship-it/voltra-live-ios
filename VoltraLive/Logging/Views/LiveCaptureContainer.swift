@@ -3,37 +3,58 @@
 // b53: Wrapper view that selects between LiveCaptureView (V1, the
 // production multi-Voltra capture screen) and LiveCaptureViewV2 (the
 // b53 single-Voltra clean redesign sourced from the design-studio
-// branch). Reads the user's persistent UI choice from @AppStorage,
-// and on first launch presents a one-time picker sheet so the user
-// can opt into the V2 preview.
+// branch).
+//
+// b71 (V4-D21 part 3 / Step 3): V2 is now the canonical live capture
+// view for ALL session shapes — single-Voltra, dual-Voltra, AND
+// superset chains. The pre-b71 routing rules
+//   - hasChain → V1
+//   - bothPaired → V2
+//   - else → user's persistent preference
+// are deprecated. The new policy is V2-by-default with V1 surfaced
+// only via an emergency kill switch.
 //
 // Why a container instead of a flag inside LiveCaptureView: V1 owns
 // a deeply nested @StateObject WriterRouter graph, set-suggestion
 // caches, and chain-flow hooks that are EXPENSIVE to construct on
 // every navigation. V2 is a much lighter view. Wrapping with a
-// switch keeps both code paths clean and lets the team iterate on
-// V2 in isolation without touching V1's behavior \u2014 which is the
-// fallback for any session that doesn't fit the V2 single-Voltra
-// model (superset chains, dual-Voltra independent mode, etc.).
+// switch keeps both code paths clean and lets us keep V1 on disk
+// as a verbatim rollback artifact without paying its construction
+// cost on every nav.
 //
-// Routing decisions baked in:
-//   - V1 is the default. Even if the user opted into V2, we fall
-//     back to V1 whenever the active session has 2+ chain entries
-//     OR both Voltras are paired in a non-trivial mode \u2014 V2 is
-//     explicitly single-Voltra and would mis-render those flows.
-//   - The user's choice persists per-install (not per-session) so
-//     once they pick V2 they stay on V2 across launches.
+// Routing decisions baked in (b71):
+//   - V2 is the default for every session shape. Below-chart parity
+//     (V4-D21 part 1) and chain UI parity (V4-D21 part 2) closed the
+//     pre-b71 gaps that previously forced V1 fallback.
+//   - The `@AppStorage("liveCaptureUIVersion")` value is now an
+//     EMERGENCY KILL SWITCH only. Set to "v1" via a debug build or
+//     a future Settings toggle to revert a single install if a V2
+//     regression is discovered in the field. Default ("" or "v2")
+//     routes to V2.
+//   - The first-launch picker sheet still appears once per install
+//     to record the user's choice, but both choices now end up on
+//     V2 unless the user explicitly picks V1 — the picker copy is
+//     updated accordingly.
 
 import SwiftUI
 
-/// b53: Storage key for the user's V1/V2 preference. Values:
-///   - "v1" \u2192 production multi-Voltra capture screen (default)
-///   - "v2" \u2192 single-Voltra preview redesign
-///   - missing \u2192 first-launch sheet appears, defaults to V1 on cancel
+/// b53: Storage key for the user's V1/V2 preference.
+///
+/// b71 (V4-D21 part 3): semantics inverted. This key is now an
+/// EMERGENCY KILL SWITCH for V1 fallback, not a feature opt-in.
+/// Values:
+///   - "v1" \u2192 emergency rollback to V1 (only set if a V2
+///              regression is discovered in production)
+///   - "v2" \u2192 explicit V2 (the default route anyway)
+///   - missing / empty \u2192 V2 (canonical)
 private let liveCaptureUIVersionKey = "liveCaptureUIVersion"
 
 struct LiveCaptureContainer: View {
-    @EnvironmentObject var mdm: MultiDeviceManager
+    // b71 (V4-D21 part 3): `mdm` is no longer read here — the routing
+    // predicate collapsed to a single AppStorage check — but the
+    // environment object is still injected by the app entry for
+    // both V1 and V2 to consume. We do not need to re-declare it on
+    // this container.
     @AppStorage(liveCaptureUIVersionKey) private var uiVersion: String = ""
 
     /// True until the user has made a choice for this install. Drives
@@ -66,29 +87,26 @@ struct LiveCaptureContainer: View {
         .pageBadge("LiveCaptureContainer")
         }
 
-    /// Decide whether to render V2. As of b59:
-    ///   - V1 still wins for chain/superset sessions (V2 has no chain UI).
-    ///   - V2 wins when both Voltras are paired (only dual-aware view).
-    ///   - Single-Voltra sessions respect the user's persistent preference.
+    /// Decide whether to render V2. As of b71 (V4-D21 part 3): V2 is
+    /// the canonical view for every session shape; V1 only renders
+    /// when the user has explicitly set the `liveCaptureUIVersion`
+    /// kill switch to `"v1"`.
     private var shouldUseV2: Bool {
-        // b59 (fixing a b58 oversight): V2 is now the only view with
-        // dual-Voltra-aware chrome (dualHeaderCluster, MERGE button,
-        // fused TWIN pill, focusedSlot routing, pulley grey-out in
-        // Twin). The previous gate sent the user to V1 the moment
-        // both Voltras paired, which silently hid every b58 dual-
-        // Voltra change. Confirmed via IMG_2400 (b58 on TestFlight,
-        // both Voltras connected, legacy V1 ACTIVE/NEXT header still
-        // showing). New rule:
-        //   - If a chain/superset entry exists \u2192 V1 (V2 has no
-        //     chain UI, that regression matters more than dual UI).
-        //   - Else if both Voltras paired \u2192 V2 (only dual-aware view).
-        //   - Else \u2192 respect the user's persistent V1/V2 preference.
-        let bothPaired = mdm.left.connectionState.isConnected
-            && mdm.right.connectionState.isConnected
-        let hasChain = !mdm.supersetChain.isEmpty
-        if hasChain { return false }
-        if bothPaired { return true }
-        return uiVersion == "v2"
+        // b71 (V4-D21 part 3 / Step 3): the pre-b71 conditional
+        // routing
+        //     if hasChain { return false }
+        //     if bothPaired { return true }
+        //     return uiVersion == "v2"
+        // is removed. V4-D21 parts 1 and 2 closed the V2 parity
+        // gaps (below-chart UI; chain UI + SWAP semantics + lifecycle
+        // hooks), so V2 now handles every session shape V1 does
+        // — single-Voltra, dual-Voltra Independent / Combined, and
+        // superset chains — with identical user-visible behavior.
+        //
+        // Routing collapses to: V2 unless the kill switch says V1.
+        // The default value of `uiVersion` is the empty string, which
+        // routes to V2.
+        return uiVersion != "v1"
     }
 }
 

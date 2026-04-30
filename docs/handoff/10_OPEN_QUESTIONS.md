@@ -8,23 +8,6 @@ Things blocked on the user. Resolve before the dependent task can ship.
 
 ## V2 promotion
 
-### Should V2 become the default?
-
-Status: **needs user answer.**
-
-V2 currently ships as opt-in via the first-launch picker
-(`@AppStorage("liveCaptureUIVersion")` empty → user picks). V2 only
-renders for single-Voltra-no-chain sessions; everything else falls
-back to V1. Once V2 has shipped a couple of stable builds, do we:
-
-a. Flip the default to V2 (existing users who never picked stay on
-   whatever they have; new users default to V2).
-b. Auto-migrate everyone to V2 on next launch.
-c. Keep first-launch picker indefinitely.
-
-Tracking: minimum 2 clean ships of V2 before this question can be
-answered. b54 is `1 / 2`.
-
 ### Should SWAP's no-auto-LOAD change get an in-app hint?
 
 Status: **needs user answer (UX decision).**
@@ -59,6 +42,19 @@ Resolved in b53. Routing source of truth moved from
 `ExerciseInstance.assignedVoltra` field stamped at exercise-add time.
 3-way L/R/Both picker replaces binary L/R. SWAP unloads both sides
 without auto-LOAD. See `08_SUPERSET.md`.
+
+### Should V2 become the default? (b71)
+
+Resolved in b71 (V4-D21 part 3 / Step 3). After V4-D21 part 1
+(below-chart parity) and part 2 (chain UI port) closed every
+behavior gap, `LiveCaptureContainer.shouldUseV2` collapsed to
+`return uiVersion != "v1"`. V2 is now the canonical live capture
+view for every session shape; `@AppStorage("liveCaptureUIVersion")`
+is an emergency rollback kill switch only. The first-launch picker
+remains for compatibility but both choices route to V2 unless the
+user explicitly picks V1. See ADR **V4-D21 part 3** in
+`04_DECISIONS_AND_CONSTRAINTS.md` and the routing section in
+`08_SUPERSET.md`.
 
 ### V2 spec match (b54)
 

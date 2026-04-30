@@ -177,35 +177,48 @@ are paired. Three controls (b53 changed #1):
 
 `addAnotherExerciseButton` is unchanged.
 
-## V1/V2 routing interaction (b54, updated b71 V4-D21 part 2)
+## V1/V2 routing interaction (b54, b71 V4-D21 parts 2 + 3)
 
-**Pre-b71 behavior (b54).** `LiveCaptureContainer` gates V1 vs V2:
+**Pre-b71 behavior (b54, deprecated).** `LiveCaptureContainer` used
+to gate V1 vs V2 by:
 
 - V2 renders only when **single Voltra paired AND
   `mdm.supersetChain.isEmpty`**.
 - Any chain entry (≥ 1) → V1 renders, regardless of V2 preference.
 - 2 Voltras → V1 always.
 
-**As of b71 V4-D21 part 2 (this commit).** The chain UI is now ported
-into V2 verbatim — `SupersetSwitcherBanner` hosts the full V1 SWAP
-flow (force-finalize → unload outgoing → flip slot → switch active
-instance → restore chain weight + re-anchor cascade → host pushes
-device state) and `LiveCaptureViewV2` wires the three V1 lifecycle
-hooks: onAppear chain restore, onChange `currentSet` flip →
-`mdm.lockSupersetTag()`, onChange `mdm.supersetActiveSlot` →
-`switchActiveInstanceByExerciseName`. The B53 "no auto-LOAD on
-incoming" safety is preserved.
+**Current behavior (b71 V4-D21 parts 2 + 3, in force).** V2 is the
+canonical live capture view for ALL session shapes — single-Voltra,
+dual-Voltra Independent / Combined, AND superset chains. The
+`LiveCaptureContainer.shouldUseV2` predicate is now a single line:
 
-The `LiveCaptureContainer.shouldUseV2` predicate still routes
-`hasChain → V1` at the time of this commit — the routing flip lands
-in V4-D21 part 3 (Step 3 of the b71 stack). After part 3, V2 will
-be the canonical chain UX and V1 will only render via the
-emergency `@AppStorage("liveCaptureUIVersion")` kill switch.
+```swift
+return uiVersion != "v1"
+```
 
-Until part 3 ships, **all chain / superset behavior described in
-this doc still lives in V1 at runtime**, but the V2 implementation
-is structurally complete and reachable by setting the kill switch
-to `"v2"` on a build with the V1-fallback branch removed.
+Where `uiVersion` is `@AppStorage("liveCaptureUIVersion")` and is now
+an **emergency kill switch only**: set it to `"v1"` to roll a single
+install back to V1 if a V2 regression is found in the field. The
+default value (empty string or `"v2"`) routes to V2.
+
+The chain port that made the routing flip safe (V4-D21 part 2):
+
+- `SupersetSwitcherBanner` hosts the full V1 SWAP flow:
+  force-finalize current set → unload outgoing → flip slot →
+  switch active instance → restore chain weight + re-anchor
+  cascade → host pushes device state. B53 "no auto-LOAD on
+  incoming" safety preserved verbatim.
+- `LiveCaptureViewV2` wires the three V1 lifecycle hooks:
+  - onAppear chain restore (LiveCaptureView.swift:242-248)
+  - onChange `currentSet` non-nil → `mdm.lockSupersetTag()`
+    (LiveCaptureView.swift:264-268)
+  - onChange `mdm.supersetActiveSlot` →
+    `switchActiveInstanceByExerciseName` guarded by
+    `session.currentSet == nil` (LiveCaptureView.swift:283-288)
+
+All chain / superset behavior described in this doc now lives in V2
+at runtime; V1 is retained on disk as a verbatim rollback artifact.
+See ADR **V4-D21 parts 2 and 3** in `04_DECISIONS_AND_CONSTRAINTS.md`.
 
 ## What the user sees end-to-end (b53)
 

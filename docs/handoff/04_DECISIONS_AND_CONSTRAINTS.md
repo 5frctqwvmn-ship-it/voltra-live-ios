@@ -1155,3 +1155,107 @@ LoggingStore APIs. Two compiler warnings expected on the
 `switchActiveInstanceByExerciseName` call sites (return value
 unused) — V1 has shipped these warnings since b52, not promoting to
 errors.
+
+## V4-D21 part 3 — V2 is the canonical live capture view; V1 fallback removed (b71 Step 3)
+
+**Context.** V4-D21 parts 1 and 2 closed every behavior gap that
+made V2 unsafe as the default route:
+
+- Part 1 (b93b4fe) — below-chart parity (`SetMode` chips picker,
+  `Target N reps` chip, mode-aware ±step nudgers, drop-cancel chip,
+  full onAppear / onChange / onDisappear lifecycle).
+- Part 2 (commit 2488484, this session) — chain UI port: full V1
+  SWAP semantics inside `SupersetSwitcherBanner`, three V1
+  lifecycle hooks wired into V2.
+
+The next step is the routing flip. Pre-b71, `LiveCaptureContainer.shouldUseV2`
+short-circuited to V1 on chain or paired-second-Voltra; that path
+is now the wrong behavior because V2 handles every shape V1 does.
+
+**Decision.** Remove every V1-fallback branch from
+`LiveCaptureContainer.shouldUseV2`. The new predicate is one line:
+
+```swift
+return uiVersion != "v1"
+```
+
+Where `uiVersion` is `@AppStorage("liveCaptureUIVersion")`. The kill
+switch semantics are inverted from b53:
+
+- Pre-b71: `uiVersion == "v2"` was an opt-in toggle; everything else
+  defaulted to V1.
+- Post-b71: `uiVersion == "v1"` is an opt-out (emergency rollback);
+  everything else (including the empty default and explicit `"v2"`)
+  routes to V2.
+
+Source-code cleanup:
+
+- The pre-b71 conditional cascade
+  `if hasChain { return false } / if bothPaired { return true } / return uiVersion == "v2"`
+  is removed (kept verbatim in a comment block as the historical
+  reference for the next maintainer reading the simplified predicate).
+- `LiveCaptureContainer` no longer reads `MultiDeviceManager` since
+  routing is now AppStorage-only. The `@EnvironmentObject` declaration
+  was removed; the container is still surrounded by app-entry-level
+  injection of MDM, so V1 / V2 still receive it.
+- Header comments + storage-key docstring rewritten to spell out
+  the kill-switch semantics.
+
+**Why a kill switch instead of a hard cut.** Two reasons:
+
+1. We just doubled the V2 surface area (below-chart UI + chain UI +
+   lifecycle hooks). Despite verbatim ports, a regression is
+   plausible. A single-install kill switch lets the user (or a
+   future Settings toggle) revert without forcing a build hotfix.
+2. V1 has shipped continuously since b29 and is battle-tested on
+   real hardware; deleting it would discard ~2k lines of working
+   code with no rollback path. The rule (per `00_START_HERE.md`)
+   is "do not delete code paths until you have a rollback story."
+   The kill switch IS the rollback story.
+
+V1 deletion is intentionally deferred to a future build (b75+ at
+the earliest, 2 clean V2 ships beyond b71) when the kill switch
+has demonstrably not been needed. Until then, V1 lives on disk as
+a verbatim rollback artifact reachable via
+`@AppStorage("liveCaptureUIVersion") = "v1"`.
+
+**Resolves open question.** The "Should V2 become the default?"
+question in `10_OPEN_QUESTIONS.md` is now closed (option a, with
+the kill-switch caveat). The entry was moved to "Recently closed"
+in the same commit as this ADR.
+
+**Alternatives considered.**
+
+1. **Keep `if bothPaired { return true }` as a forcing rule.**
+   Rejected. V2 now handles single-Voltra, dual-Voltra, and chain
+   identically; there is no behavioral reason to force-route on
+   pair state. Forcing would also override the kill switch in the
+   one scenario (dual-Voltra) where a regression is most likely
+   to surface.
+2. **Force-route on chain (`if hasChain { return true }`).**
+   Rejected. Same reason. The kill switch must work in every shape
+   or it is not actually a kill switch.
+3. **Delete the kill switch and hard-route to V2.** Rejected. See
+   "Why a kill switch instead of a hard cut" above.
+4. **Add a Settings toggle in this commit.** Deferred. The toggle
+   is a user-visible UX surface and warrants its own design pass.
+   For b71 the kill switch is reachable via debug builds /
+   `defaults write` / a future `xcrun simctl` reset; that is enough
+   to recover from a field regression.
+
+**Files changed (this commit).**
+
+- `VoltraLive/Logging/Views/LiveCaptureContainer.swift`
+- `docs/handoff/02_CURRENT_STATE.md`
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` (this ADR)
+- `docs/handoff/08_SUPERSET.md` (routing section rewritten)
+- `docs/handoff/10_OPEN_QUESTIONS.md` ("Should V2 become the
+  default?" moved to Recently closed)
+- `docs/WORK_LOG.md`
+
+No sacred-file changes. No version bump. No push. CI `build.yml`
+on push remains the authoritative compile check.
+
+**Out of scope (this ADR).** No V1 deletion (deferred). No Settings
+toggle for the kill switch (deferred). No parity verification (Step
+6 next). No version bump.
