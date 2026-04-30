@@ -17,6 +17,15 @@
 //     used by other low-priority labels) so it does not compete with the
 //     primary content. ~9 pt to stay below the visual noise floor.
 //
+// b70 V4.4 update (V4-D18):
+//   • Render format is now "NN · ScreenName" where NN is the 2-digit
+//     stable ID from `PageRegistry`. Unknown screens render as
+//     "-- · ScreenName" (still useful, and the visible signal to add the
+//     screen to PageRegistry).
+//   • The modifier also mounts `.debugGridOverlay()`, so any screen that
+//     page-badges automatically gets the debug grid (which is invisible
+//     until the user taps the build badge to flip the mode).
+//
 // Usage:
 //   SomeView()
 //       .pageBadge("SomeView")
@@ -34,7 +43,7 @@ private struct PageBadgeOverlay: ViewModifier {
     func body(content: Content) -> some View {
         content
             .overlay(alignment: .bottomLeading) {
-                Text(name)
+                Text("\(PageRegistry.id(for: name)) · \(name)")
                     .font(.system(size: 9, weight: .regular, design: .monospaced))
                     .foregroundStyle(VoltraColor.textFaint)
                     .padding(.leading, 12)
@@ -45,6 +54,12 @@ private struct PageBadgeOverlay: ViewModifier {
                     .accessibilityHidden(true)
                     .allowsHitTesting(false)
             }
+            // b70 / V4-D18: every page-badged screen also participates in
+            // the debug-grid overlay. Renders nothing when
+            // `debugGridMode == .off` (the default), so this is a no-op
+            // on shipped builds until the user cycles the mode via the
+            // build-badge tap.
+            .debugGridOverlay()
     }
 }
 
@@ -52,6 +67,10 @@ extension View {
     /// Shows a faint monospace page-name badge at bottom-leading. The
     /// `name` should be the Swift type name of the screen verbatim so the
     /// user can reference it back to the agent unambiguously.
+    ///
+    /// b70: render format is `"NN \u00B7 ScreenName"` where `NN` comes
+    /// from `PageRegistry`. Also mounts the debug-grid overlay (off by
+    /// default).
     func pageBadge(_ name: String) -> some View {
         modifier(PageBadgeOverlay(name: name))
     }

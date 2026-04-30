@@ -3131,3 +3131,149 @@ patch in a single session.
 contract). No source modifications until those land.
 
 This commit touches docs only — no Swift was modified.
+
+## 2026-04-30T16:11:12Z — feat(b70): demo entry source connection-aware + debug grid overlay + page registry
+
+**Cycle.** v0.4.43 / build 70.
+
+**Branch.** `feat/ui-v4-2-claude` (no merge to `main` per agent
+operating rules — keep open).
+
+**User report (b69 still broken).** Demo simulation does not
+start the synthetic force chart from the in-app debug toggle.
+Architect (Opus) adjudicated the b70 ambiguity prompt and
+isolated **H3** as the primary root cause:
+
+- `DebugView.swift` already has a "Demo Mode" toggle.
+- That toggle calls `DemoController.enter(source: .settingsRestore, …)`.
+- Inside `DemoController.enter`, ONLY the `.prePair` branch
+  instantiates `SyntheticTelemetryGenerator`.
+- `.settingsRestore` (and `.postPair`, when no device is
+  connected) enter demo mode with no synthetic pump → user sees
+  empty force chart and the "Demo simulation broken" report.
+
+Architect's judgement: H1/H2/H4 not falsified yet but H3 alone
+explains the symptom; b70 fixes only H3 plus connection-aware
+call sites and rehydration glue. Other hypotheses re-evaluated
+post-ship.
+
+### Tasks landed
+
+1. **DemoController.swift** — added private `startSynthetic()`
+   helper so the prePair-pump construction lives in exactly
+   one place. Added a self-heal branch BEFORE the
+   `guard !isActive else { return }` line that uses
+   `entrySource` (the published, currently-active source field)
+   — NOT the incoming `source` parameter — to detect the case
+   "demo is active but the synthetic pump is missing because
+   the original entry was `.settingsRestore` or `.postPair`
+   with no real device" and rebuilds the pump in place. The
+   incoming `source` parameter is intentionally not consulted
+   here because the architect's contract is "the pump must
+   reflect what the active session actually is, not what a
+   late re-entry call thinks it is." Also added a legacy
+   marker comment on `.settingsRestore` documenting that the
+   case is retained for trace-replay compatibility only and
+   that NO live call site should use it going forward.
+
+2. **DebugView.swift:86–111 (existing toggle, REBOUND).** Did
+   NOT add a second toggle. Kept the existing UI verbatim and
+   only changed the source value passed to `enter(...)`. Added
+   `@EnvironmentObject ble: VoltraBLEManager` and
+   `mdm: MultiDeviceManager` to the view. Source is now derived
+   live: `anyDeviceConnected ? .postPair : .prePair`. Toggle
+   label / description / accent tint unchanged.
+
+3. **LoggingHomeView.swift:159–167 (DemoModeButton).** Replaced
+   hardcoded `.postPair` with the same connection-aware
+   selector. Kept the `if !demo.isActive` visibility gate
+   (already correct — the button stays visible regardless of
+   whether a Voltra is paired, only hidden when demo is already
+   running). `ble` and `mdm` env-objects were already on the
+   view (lines 15, 27).
+
+4. **VoltraLiveApp.swift / ContentView.swift** — root
+   `.onChange` observers on `bleManager.connectionState`,
+   `multi.left.connectionState`, `multi.right.connectionState`
+   call `demo.exit()` when `entrySource == .prePair` and any
+   device transitions to `.connected`. Mirrors the V2 hook
+   from V4-D16 (b68) but at root scope so the handoff fires
+   regardless of which screen is foreground when the device
+   pairs. Launch rehydration: if `demo.settingsToggleOn` is
+   true on cold launch and `demo.isActive` is false, call
+   `enter(source: .prePair, onTelemetry: telemetryHandler)` so
+   a backgrounded demo session picks back up with a working
+   pump (this is the case the legacy `.settingsRestore` was
+   trying to handle, now expressed via `.prePair`).
+
+5. **Debug grid overlay** — new file
+   `VoltraLive/Views/DebugGridOverlay.swift`. `DebugGridMode`
+   enum: `.off`, `.corners` (C-prefix labels at each corner),
+   `.midlines` (M-prefix labels at midpoints of each edge),
+   `.full` (corners + midlines + center F-prefix). Opacity
+   0.85, monospaced 9pt, mint tint matching the page badge.
+   View modifier `.debugGridOverlay()` reads
+   `@AppStorage("debugGridMode")` and switches by mode.
+
+6. **Page registry** — new file
+   `VoltraLive/Views/PageRegistry.swift`. Static table built
+   from the 13 distinct `.pageBadge(...)` call sites currently
+   in the source tree (verified via
+   `rg "\\.pageBadge\\(" VoltraLive --type swift`). Keys are
+   the verbatim Swift type-name strings the screens already
+   pass in; values are stable 2-digit numeric IDs assigned in
+   alphabetical order so future reorderings don't churn the
+   numbering.
+
+7. **PageBadgeOverlay.swift** — render now formats as
+   `"NN · ScreenName"` where `NN` is the registry-assigned
+   number (defaults to `--` if a screen calls `.pageBadge()`
+   with a name not in the registry, so unknown screens still
+   render a badge). Mounted `.debugGridOverlay()` inside the
+   modifier so any screen with a page-badge automatically gets
+   the grid overlay too.
+
+8. **BuildBadgeOverlay.swift** — added a tap gesture that
+   cycles `@AppStorage("debugGridMode")` through the four
+   `DebugGridMode` cases. Chip layout / colors / position
+   unchanged — only behavior added is the tap.
+
+9. **Version bump.** `project.yml` MARKETING_VERSION 0.4.43,
+   CURRENT_PROJECT_VERSION 70 (both the settings block and the
+   info.properties block). `Info.plist` CFBundleShortVersionString
+   0.4.43, CFBundleVersion 70.
+   `docs/handoff/01_PROJECT_OVERVIEW.md` and
+   `docs/handoff/02_CURRENT_STATE.md` both updated per
+   `00_START_HERE.md:135` mapping table (Karpathy
+   `01_PROJECT_STATE` role → both real files). The mapping
+   note in `00_START_HERE.md` was also extended with a "must
+   be updated together on any version bump" line so future
+   agents don't re-ask.
+
+10. **Lint gates passed.**
+    - `rg "source:\s*\.settingsRestore" VoltraLive` → 0 (only
+      the enum case definition + legacy comment remain)
+    - `rg "DemoModeButton\(source:\s*\.postPair\)" VoltraLive/Logging/Views/LoggingHomeView.swift` → 0
+    - `DemoModeButton(source: .prePair)` is NOT zero-gated;
+      ConnectView's legacy deeplink site still has it.
+
+**ADR.** New ADR V4-D17 in
+`04_DECISIONS_AND_CONSTRAINTS.md` documents (a) the
+connection-aware source rule for any live demo entry, (b) the
+self-heal contract using `entrySource` not `source`, and
+(c) the deprecation policy for `.settingsRestore`.
+
+**Sacred files.** Untouched. No changes to `VoltraProtocol.swift`,
+`TelemetryExtractor.swift`, `PacketParser.swift`,
+`FrameAssembler.swift`, or any `DemoTraceLogger.Event` case.
+The `.settingsRestore` enum case is retained in
+`DemoEntrySource` for trace-replay compatibility.
+
+**Out of scope.** `.pageBadge` additions to sheets that don't
+yet have one, deletion of `.settingsRestore`, BLE/protocol
+changes, H1/H2/H4 fixes — all deferred per b70 prompt §12.
+
+**Bump.** v0.4.43 / build 70.
+
+**Ship.** Pending. Will run `release.yml dry_run=false` after
+this commit lands; 5-gate altool verify, then v0.4.43 / build 70.

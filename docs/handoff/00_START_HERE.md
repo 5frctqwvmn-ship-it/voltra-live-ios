@@ -132,7 +132,7 @@ files** — use this mapping to resolve roles:
 
 | Karpathy role | Actual file(s) in this repo | Notes |
 |---|---|---|
-| `01_PROJECT_STATE` | `01_PROJECT_OVERVIEW.md` + `02_CURRENT_STATE.md` | Overview owns "what the app is"; CurrentState owns the post-ship snapshot. Both should be read. |
+| `01_PROJECT_STATE` | `01_PROJECT_OVERVIEW.md` + `02_CURRENT_STATE.md` | Overview owns "what the app is"; CurrentState owns the post-ship snapshot. Both should be read. **Both must be updated together on any version bump or cycle change** — Overview carries durable project facts (current shipping build line), CurrentState carries the rolling cycle snapshot. Leaving either stale defeats the wiki mapping. |
 | `02_ARCHITECTURE` | `04_ARCHITECTURE.md` | Single file, just numbered differently. |
 | `05_BUILD_TEST_DEPLOY` | `09_RELEASE_AND_SIGNING.md` | Contains the real `xcodebuild` / `xcodegen` / tag-based release commands. |
 | `07_FILE_MAP` | (not yet authored) | Closest existing equivalent is the `## Project layout` block in `AGENTS.md`. Author when next significant feature lands. |

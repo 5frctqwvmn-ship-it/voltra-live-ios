@@ -173,6 +173,26 @@ struct VoltraLiveApp: App {
                     // synthetic generator the same handler.
                     DemoTelemetryBridge.shared.handler = telemetryHandler
 
+                    // b70 / V4-D17: cold-launch demo rehydration.
+                    //
+                    // Pre-b70 the persisted toggle (`demoMode.toggleOn`) was
+                    // re-engaged via `.settingsRestore`, which never started
+                    // the synthetic pump. The b69 user report ("Demo
+                    // simulation broken") was the consequence: backgrounding
+                    // the app while in demo and reopening produced a live
+                    // screen with no force flow.
+                    //
+                    // Fix: rehydrate via `.prePair` so the synthetic pump is
+                    // built. We don't know which screen the user came from
+                    // \u2014 `.prePair` is the only enum case that guarantees a
+                    // pump, so it's the safe choice. If a Voltra is already
+                    // connected by the time rehydration runs (rare), the
+                    // root .onChange observer in ContentView will swap us
+                    // back to live by calling `demo.exit()`.
+                    if demo.settingsToggleOn && !demo.isActive {
+                        demo.enter(source: .prePair, onTelemetry: telemetryHandler)
+                    }
+
                     // Build 41: route MultiDeviceManager telemetry into
                     // the SAME pipeline as the single-device flow.
                     //

@@ -156,13 +156,26 @@ struct LoggingHomeView: View {
                         // v0.4.6.3: post-pair Demo Mode entry. Real device
                         // stays paired and telemetry flows from it; we just
                         // don't persist the session.
+                        //
+                        // b70 / V4-D17: source is now connection-aware so
+                        // the same button works whether or not a Voltra is
+                        // paired. Visibility is unchanged \u2014 only hidden
+                        // when demo is already active.
                         if !demo.isActive {
                             HStack {
                                 Spacer()
-                                DemoModeButton(source: .postPair) {
+                                let anyDeviceConnected =
+                                    ble.connectionState.isConnected
+                                    || mdm.left.connectionState.isConnected
+                                    || mdm.right.connectionState.isConnected
+                                let demoSource: DemoEntrySource = anyDeviceConnected ? .postPair : .prePair
+                                DemoModeButton(source: demoSource) {
                                     guard let handler = DemoTelemetryBridge.shared.handler else { return }
-                                    demo.note(.buttonTap(label: "Demo Mode (post-pair)", screen: "LoggingHome"))
-                                    demo.enter(source: .postPair, onTelemetry: handler)
+                                    demo.note(.buttonTap(
+                                        label: "Demo Mode (\(demoSource.rawValue))",
+                                        screen: "LoggingHome"
+                                    ))
+                                    demo.enter(source: demoSource, onTelemetry: handler)
                                 }
                                 Spacer()
                             }

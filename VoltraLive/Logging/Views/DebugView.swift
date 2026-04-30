@@ -19,6 +19,12 @@ struct DebugView: View {
     /// whether the paired Watch is streaming HR samples, and re-prompt
     /// from one consistent place.
     @EnvironmentObject private var health: HealthKitStore
+    /// b70 / V4-D17: connection-aware demo entry. The toggle below derives
+    /// `.prePair` vs `.postPair` from `anyDeviceConnected` at tap time, so
+    /// flipping demo on with no Voltra paired starts the synthetic pump
+    /// instead of silently entering a pump-less demo (the b69 bug).
+    @EnvironmentObject private var ble: VoltraBLEManager
+    @EnvironmentObject private var mdm: MultiDeviceManager
 
     @State private var counts: (sessions: Int, exercises: Int, sets: Int, legTagged: Int) = (0, 0, 0, 0)
     @State private var stubCount: Int = 0
@@ -95,7 +101,16 @@ struct DebugView: View {
                                         if newVal {
                                             guard let handler = DemoTelemetryBridge.shared.handler else { return }
                                             demo.note(.buttonTap(label: "Demo toggle ON", screen: "Debug"))
-                                            demo.enter(source: .settingsRestore, onTelemetry: handler)
+                                            // b70 / V4-D17: connection-aware
+                                            // source. Was `.settingsRestore`,
+                                            // which never started the
+                                            // synthetic pump (the b69 bug).
+                                            let anyDeviceConnected =
+                                                ble.connectionState.isConnected
+                                                || mdm.left.connectionState.isConnected
+                                                || mdm.right.connectionState.isConnected
+                                            let src: DemoEntrySource = anyDeviceConnected ? .postPair : .prePair
+                                            demo.enter(source: src, onTelemetry: handler)
                                         } else {
                                             demo.note(.buttonTap(label: "Demo toggle OFF", screen: "Debug"))
                                             _ = demo.exit()

@@ -1,5 +1,7 @@
 # 01 — Project Overview
 
+_Current shipping build: **v0.4.43 / build 70** (b70 cycle, branch `feat/ui-v4-2-claude`). For the rolling cycle snapshot see `02_CURRENT_STATE.md`._
+
 ## What VOLTRA Live is
 
 A native iOS app that mirrors live workout telemetry from a Beyond Power

@@ -39,8 +39,18 @@ enum DemoEntrySource: String, Codable {
     /// Tapped "Demo Mode" on the post-connect home screen with a real device
     /// already paired. Real telemetry flows through; we just don't persist.
     case postPair
-    /// Re-enabled via the Settings toggle on a fresh launch (we don't know
-    /// which screen they came from).
+    /// LEGACY (b70 / V4-D17). Retained ONLY for trace-replay compatibility:
+    /// existing `DemoTraceLogger` traces recorded by builds <= b69 reference
+    /// this case, and trace-replay fixtures in `docs/handoff/` decode it.
+    ///
+    /// **DO NOT use `.settingsRestore` from any live UI call site.** Pre-b70
+    /// the settings toggle and the Connect/Home buttons sometimes passed
+    /// `.settingsRestore`, which silently entered demo mode WITHOUT starting
+    /// `SyntheticTelemetryGenerator` (only `.prePair` does). That produced
+    /// the b69 "Demo simulation broken" report. Live entry sites must now
+    /// pick `.prePair` vs `.postPair` from the connection state at call
+    /// time. Cold-launch rehydration uses `.prePair`, NOT `.settingsRestore`,
+    /// so the synthetic pump exists.
     case settingsRestore
 }
 
@@ -103,6 +113,24 @@ final class DemoController: ObservableObject {
     ///       BLE manager uses so the rest of the app doesn't know the
     ///       difference.
     func enter(source: DemoEntrySource, onTelemetry: @escaping (Telemetry) -> Void) {
+        // b70 / V4-D17: self-heal path.
+        //
+        // If a demo session is already active but the synthetic pump is
+        // missing AND the active session was started as `.prePair` (i.e.
+        // the session that needs synthetic telemetry), rebuild the pump in
+        // place. This rescues sessions whose pump reference was nuked by
+        // some external sequence we'd rather not catalogue.
+        //
+        // CRITICAL: this branch reads `entrySource` (the active session's
+        // source-of-truth) NOT the incoming `source` parameter. A re-entry
+        // call may pass `.postPair` (because the caller sees a connection
+        // now) while the original session was `.prePair` \u2014 we must not flip
+        // the pump's intent based on a transient call. The pump's lifecycle
+        // is owned by the original entry; self-heal just rebuilds it.
+        if isActive && synthetic == nil && entrySource == .prePair {
+            startSynthetic(onTelemetry: onTelemetry, logger: trace)
+            return
+        }
         guard !isActive else { return }
 
         // Build an in-memory SwiftData container that mirrors the real one's
@@ -133,12 +161,7 @@ final class DemoController: ObservableObject {
         self.entrySource = source
 
         if source == .prePair {
-            let gen = SyntheticTelemetryGenerator(onTelemetry: { [weak logger] telem in
-                onTelemetry(telem)
-                logger?.recordTelemetry(telem)
-            })
-            gen.start()
-            self.synthetic = gen
+            startSynthetic(onTelemetry: onTelemetry, logger: logger)
         }
 
         // Persist the toggle so that if the user backgrounds the app and
@@ -185,5 +208,25 @@ final class DemoController: ObservableObject {
     /// the active trace. No-op when inactive.
     func note(_ event: DemoTraceLogger.Event) {
         trace?.recordEvent(event)
+    }
+
+    // MARK: Helpers
+
+    /// b70 / V4-D17: extracted helper so the pump-construction path lives
+    /// in exactly one place. Used by both `enter(source: .prePair, ...)`
+    /// and the self-heal branch at the top of `enter`.
+    ///
+    /// `logger` is captured weakly so the trace can be released independent
+    /// of the generator if the controller exits before the pump's next tick.
+    private func startSynthetic(
+        onTelemetry: @escaping (Telemetry) -> Void,
+        logger: DemoTraceLogger?
+    ) {
+        let gen = SyntheticTelemetryGenerator(onTelemetry: { [weak logger] telem in
+            onTelemetry(telem)
+            logger?.recordTelemetry(telem)
+        })
+        gen.start()
+        self.synthetic = gen
     }
 }

@@ -554,3 +554,186 @@ demo mode was designed to cover.
   per Q4 — `DemoModeOverlay` is the canonical signal.
 - *Delete `ConnectView` outright in b68 (Q5).* Deferred to a
   later cycle; out of scope for this single-bug fix.
+
+## V4-D17 — Demo entry source must be connection-aware; `.settingsRestore` is legacy
+
+**Date.** 2026-04-30 (b70).
+
+**Problem.** B68-01 (V4-D16) wired auto-engage demo to the
+WEIGHT-tap on the live screens. Two other live entry points
+were not updated to the same connection-aware contract:
+
+1. `DebugView.swift`'s existing "Demo Mode" toggle (lines
+   86–111) called `enter(source: .settingsRestore, …)`. The
+   `.settingsRestore` branch of `DemoController.enter` does
+   NOT instantiate `SyntheticTelemetryGenerator` (only
+   `.prePair` does). With no Voltra paired, the user toggled
+   demo on and saw zero force-chart activity — exactly the
+   "Demo simulation broken" bug report against b69.
+
+2. `LoggingHomeView.swift:159–167`'s `DemoModeButton` was
+   hardcoded to `.postPair`. With no Voltra paired, this
+   produced the same dead-pump symptom by the same mechanism.
+
+The b69 ship mishandled both because the architect's earlier
+B68-01 patch only touched the V2 LIVE-screen hook, not the
+two *other* live demo entry points.
+
+**Decided.** Every **live** call site that calls
+`DemoController.enter(...)` MUST select `source` from the
+connection state at call time:
+
+```
+let source: DemoEntrySource = anyDeviceConnected ? .postPair : .prePair
+demo.enter(source: source, onTelemetry: handler)
+```
+
+`anyDeviceConnected` evaluates to:
+
+```
+ble.connectionState.isConnected
+  || mdm.left.connectionState.isConnected
+  || mdm.right.connectionState.isConnected
+```
+
+The `.settingsRestore` enum case is **retained** but is now
+formally legacy:
+
+- Live UI MUST NOT pass `source: .settingsRestore`.
+- It survives as an enum case ONLY so existing
+  `DemoTraceLogger` traces (recorded by previous builds) stay
+  decodable and replayable. Trace fixtures in `docs/handoff/`
+  reference it.
+- Lint-gate: `rg "source:\s*\.settingsRestore" VoltraLive`
+  must report 0 hits in any file under `VoltraLive/`.
+- Cold-launch rehydration uses `.prePair` (see "Rehydration"
+  below), NOT `.settingsRestore`, because the rehydrated
+  session needs the synthetic pump just like any other
+  no-device-connected demo.
+
+**Self-heal contract (DemoController.swift).** `enter(...)`
+gains a self-heal branch BEFORE the `guard !isActive` line:
+
+```
+if isActive && synthetic == nil && entrySource == .prePair {
+    startSynthetic(onTelemetry: onTelemetry, logger: trace)
+}
+```
+
+Critical: this branch reads `entrySource` (the controller's
+own published source-of-truth) NOT the incoming `source`
+parameter. The reasoning is that a re-entry call may pass
+`.postPair` (because the caller now sees a connection) while
+the *original* session was `.prePair` — we must not flip the
+pump's intent based on a transient call. The pump's lifecycle
+is owned by the original entry; self-heal just rebuilds it if
+something nuked the reference.
+
+**Rehydration (VoltraLiveApp.swift).** On cold launch, if
+`demo.settingsToggleOn == true` and `demo.isActive == false`,
+call `demo.enter(source: .prePair, onTelemetry: telemetryHandler)`.
+This is the case the legacy `.settingsRestore` *intent* was
+meant to cover ("user backgrounded the app while in demo;
+restore demo on relaunch"). Expressing it via `.prePair`
+guarantees the pump exists.
+
+**Auto-handoff observers (ContentView root).** Mirror V4-D16
+at root scope — `.onChange` on
+`bleManager.connectionState`, `mdm.left.connectionState`,
+`mdm.right.connectionState`. Call `demo.exit()` when
+`demo.entrySource == .prePair && anyDeviceConnected`. Root
+scope ensures the handoff fires regardless of foreground
+view, including when the user is in DebugView when the
+Voltra connects.
+
+**Why.** Single rule covering all live demo-entry surfaces
+collapses the two-bugs-from-the-same-root-cause shape we just
+hit (`.settingsRestore` in DebugView, hardcoded `.postPair`
+in LoggingHomeView). The self-heal branch on `entrySource`
+makes the controller resilient to future caller mistakes
+without changing the controller's public contract — callers
+that follow the connection-aware rule never trip self-heal;
+callers that don't get rescued without the user noticing.
+
+**Rejected.**
+
+- *Delete `.settingsRestore` outright.* Architect explicitly
+  said no — would break trace-replay for existing fixtures.
+- *Make `.settingsRestore` start synthetic telemetry.* Same
+  mechanical effect as `.prePair`, but conflates two distinct
+  concepts (entry surface vs. data source) and would make
+  the trace-replay parity fixtures meaningless.
+- *Use the incoming `source` parameter in self-heal.* Lets a
+  late `.postPair` re-entry call kill an active prePair pump.
+  Wrong direction.
+- *Move auto-handoff observers per-screen.* Misses the
+  DebugView case, which was the actual b69 regression
+  surface.
+
+## V4-D18 — Page registry + debug grid overlay
+
+**Date.** 2026-04-30 (b70).
+
+**Problem.** The b66 `pageBadge(...)` modifier shows the Swift
+type name of the screen at bottom-leading so the user can
+reference screens unambiguously in feedback. That's the right
+floor of fidelity for the b66 ask, but b70 surfaced a new ask:
+
+1. Pair each screen with a **stable numeric ID** the user can
+   reference even faster than typing a type name.
+2. Provide a **debug grid overlay** the user can flip on from
+   any screen to give precise positional feedback (e.g. "the
+   misalignment is between M-T and M-R, closer to C-TR").
+
+**Decided.** Two new files + two edits:
+
+- **NEW `VoltraLive/Views/PageRegistry.swift`.** Static
+  `[String: Int]` table mapping every distinct
+  `.pageBadge("...")` argument currently in the source tree
+  to a 2-digit numeric ID. Built by running
+  `rg "\.pageBadge\(" VoltraLive --type swift` and assigning
+  IDs in alphabetical order. Future screens added to the
+  table get the next available ID — no renumbering.
+
+- **NEW `VoltraLive/Views/DebugGridOverlay.swift`.**
+  `DebugGridMode` enum: `.off`, `.corners` (4 C-prefixed
+  labels: C-TL / C-TR / C-BL / C-BR), `.midlines` (4
+  M-prefixed labels at edge midpoints: M-T / M-R / M-B /
+  M-L), `.full` (corners + midlines + an F-CTR center
+  label). Monospaced 9pt, mint tint, opacity 0.85.
+  ViewModifier `.debugGridOverlay()` reads
+  `@AppStorage("debugGridMode")` and renders the matching
+  set.
+
+- **Edit `PageBadgeOverlay.swift`.** Render format becomes
+  `"NN · ScreenName"`. Lookup falls back to `--` for unknown
+  names so the badge still renders. The modifier also calls
+  `.debugGridOverlay()` so every screen with a page badge
+  automatically gets the grid overlay applied (the grid is
+  invisible when `debugGridMode == .off`, which is the
+  default).
+
+- **Edit `BuildBadgeOverlay.swift`.** Add a tap gesture that
+  cycles `@AppStorage("debugGridMode")` through the four
+  `DebugGridMode` cases (off → corners → midlines → full →
+  off). Visual chip layout unchanged.
+
+**Why.** Numeric IDs collapse 30-char screen-name verbatim
+quoting into a 2-digit reference. Grid overlay collapses
+"between the third tile and the fourth tile near the bottom"
+into "M-B near C-BL." Both reduce friction in the
+user-to-agent feedback loop without adding chrome to the
+default visual design (grid stays at `.off` until tapped).
+Cycling via the build badge keeps the gesture in a place the
+user already looks for and avoids adding a new affordance.
+
+**Rejected.**
+
+- *Number screens in source-order or definition-order.*
+  Sensitive to file moves and definition reorder; alphabetical
+  is robust and obvious.
+- *Hardcode an enum of screens.* Forces a Swift edit on every
+  new screen; the dictionary lookup is cheaper to maintain.
+- *Put grid-toggle on a separate dev-menu button.* Adds
+  chrome and a discoverability problem; tapping the build
+  badge is already an "I'm looking at chrome" gesture.

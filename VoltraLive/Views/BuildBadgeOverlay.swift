@@ -14,6 +14,14 @@
 // Layout is bottom-trailing in the safe area. Small monospace text on a
 // faintly-tinted pill so it stays readable over both dark backgrounds and
 // brighter content (alerts/sheets) without being visually loud.
+//
+// b70 V4.4 update (V4-D18):
+//   • Tapping the chip now cycles `@AppStorage("debugGridMode")` through
+//     the four `DebugGridMode` cases (off → corners → midlines → full →
+//     off). The chip layout / colors / position are unchanged.
+//   • The chip is the only UI surface that toggles the grid — keeps the
+//     gesture in a place the user already looks for during chrome
+//     inspection, no new affordances added.
 
 import SwiftUI
 
@@ -26,12 +34,21 @@ struct BuildBadgeOverlay: ViewModifier {
                     .padding(.trailing, 8)
                     .padding(.bottom, 6)
                     .accessibilityHidden(true)
-                    .allowsHitTesting(false)
+                // b70 / V4-D18: chip is now tappable to cycle the debug
+                // grid. `allowsHitTesting(false)` was previously global on
+                // the chip; we drop it so the tap registers. The page
+                // badge (sibling overlay at bottom-leading) keeps
+                // `allowsHitTesting(false)` so it can never intercept.
             }
     }
 }
 
 private struct BuildBadgeChip: View {
+
+    /// b70 / V4-D18: persisted grid mode. Tapping the chip cycles this
+    /// through the four `DebugGridMode` cases.
+    @AppStorage("debugGridMode") private var modeRaw: String = DebugGridMode.off.rawValue
+
     var body: some View {
         Text(versionString)
             .font(.system(size: 9, weight: .semibold, design: .monospaced))
@@ -46,6 +63,15 @@ private struct BuildBadgeChip: View {
                 Capsule()
                     .stroke(VoltraColor.border.opacity(0.6), lineWidth: 0.5)
             )
+            // Tap cycles the debug-grid mode. Contained inside the chip
+            // so the rest of the screen retains its normal hit-testing.
+            // contentShape ensures the entire capsule (including the
+            // padding) is tappable, not just the rendered glyph rect.
+            .contentShape(Capsule())
+            .onTapGesture {
+                let current = DebugGridMode(rawValue: modeRaw) ?? .off
+                modeRaw = current.next().rawValue
+            }
     }
 
     private var versionString: String {

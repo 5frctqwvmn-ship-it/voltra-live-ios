@@ -19,6 +19,15 @@
 import SwiftUI
 
 struct ContentView: View {
+    /// b70 / V4-D17: root-scope observers for the demo \u2192 live handoff.
+    /// Mirrors the V2 LiveCaptureViewV2 hook from V4-D16 (b68) but at root
+    /// scope, so the handoff fires regardless of which screen is foreground
+    /// when the device pairs (including DebugView, ExerciseDetailView,
+    /// ExportSheet, etc.).
+    @EnvironmentObject private var demo: DemoController
+    @EnvironmentObject private var ble: VoltraBLEManager
+    @EnvironmentObject private var mdm: MultiDeviceManager
+
     var body: some View {
         ZStack {
             VoltraColor.bg.ignoresSafeArea()
@@ -30,6 +39,32 @@ struct ContentView: View {
         .buildBadgeOverlay()
         // b66 V4.2: page-name badge.
         .pageBadge("ContentView")
+        // b70 / V4-D17: real-device handoff. Exit prePair demo as soon as
+        // any of the three connection sources transitions to connected.
+        // postPair demo is intentionally untouched \u2014 that's a user-explicit
+        // demo that should outlive a connection blip (V4-D16 contract).
+        .onChange(of: ble.connectionState) { _, _ in
+            handoffIfNeeded()
+        }
+        .onChange(of: mdm.left.connectionState) { _, _ in
+            handoffIfNeeded()
+        }
+        .onChange(of: mdm.right.connectionState) { _, _ in
+            handoffIfNeeded()
+        }
+    }
+
+    /// If the active demo session was started as `.prePair` and any device
+    /// is now connected, exit demo so live telemetry takes over.
+    private func handoffIfNeeded() {
+        guard demo.isActive, demo.entrySource == .prePair else { return }
+        let anyDeviceConnected =
+            ble.connectionState.isConnected
+            || mdm.left.connectionState.isConnected
+            || mdm.right.connectionState.isConnected
+        if anyDeviceConnected {
+            _ = demo.exit()
+        }
     }
 }
 
@@ -41,4 +76,5 @@ struct ContentView: View {
         .environmentObject(DemoController())
         .environmentObject(MultiDeviceManager())
         .environmentObject(PairingCoordinator())
+        .environmentObject(HealthKitStore())
 }

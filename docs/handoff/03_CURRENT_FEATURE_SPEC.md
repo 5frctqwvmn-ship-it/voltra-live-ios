@@ -269,3 +269,57 @@ stay on the b57 cluster.
   for asymmetric loading the user must switch to Independent).
 - ❌ The b56 `manualDropSequence` finalize-driven dropset path
   (deprecated; legacy state field retained for future revival).
+
+## §9. Debug surfaces (NEW in b70)
+
+### Page badge
+
+Every screen with `.pageBadge("ScreenName")` renders
+`"NN · ScreenName"` at bottom-leading, where `NN` is the 2-digit
+ID assigned to that screen by `VoltraLive/Views/PageRegistry.swift`.
+Color: `VoltraColor.textFaint`. Font: 9pt monospaced. Always
+visible — no debug-build gate (per b66 user ask, retained in b70).
+Unknown screen names render `-- · ScreenName` so the badge still
+serves its identification purpose; that's the signal to add the
+name to the registry.
+
+### Debug grid overlay
+
+A four-state grid shipped behind `@AppStorage("debugGridMode")`:
+
+- `.off` (default) — invisible; no overlay rendered.
+- `.corners` — four labels at the corners of the safe area:
+  `C-TL`, `C-TR`, `C-BL`, `C-BR`.
+- `.midlines` — four labels at edge midpoints: `M-T`, `M-R`,
+  `M-B`, `M-L`.
+- `.full` — corners + midlines + a center label `F-CTR`.
+
+All labels: 9pt monospaced, mint tint, opacity 0.85. Mounted
+automatically by the page-badge modifier so any screen with a
+page badge participates.
+
+### Toggle gesture
+
+Tapping the bottom-trailing build badge cycles the mode:
+`.off` → `.corners` → `.midlines` → `.full` → `.off`. State is
+persisted in `@AppStorage("debugGridMode")`. No other UI surface
+exposes the toggle.
+
+### Demo Mode toggle (DebugView)
+
+Existing toggle behavior is unchanged from b66 (still labeled
+"Demo Mode is active / off", still in the `DEMO MODE` section
+of `DebugView`). What changed in b70 is the entry source: the
+toggle now derives `.prePair` vs `.postPair` from
+`anyDeviceConnected` at tap time so flipping it on with no
+Voltra paired starts the synthetic telemetry pump (which was
+the user-reported b69 bug). See `04_DECISIONS_AND_CONSTRAINTS.md`
+ADR V4-D17 for the connection-aware contract.
+
+### Demo Mode button (LoggingHomeView)
+
+Same connection-aware rule as the Debug toggle. Button stays
+visible regardless of pairing — only hidden when demo is
+already active. Per V4-D17, no live call site uses
+`source: .settingsRestore`; that case is retained in
+`DemoEntrySource` for trace-replay compatibility only.
