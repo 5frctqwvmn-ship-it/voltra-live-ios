@@ -384,6 +384,17 @@ KI-F1 (b57), which fixed the engagement-detection side in
 
 ### V4-D13 (b67, Bug 10) — Force-curve geometry: parametric per-rep sine
 
+> **⚠️ SUPERSEDED 2026-04-30 by ADR V4-D20.** The decision below was
+> reverted in b71. V1's `ForceChartView` (raw-sample phase-colored
+> polyline + Catmull-Rom smoothing) is now the canonical force-curve
+> renderer for both V1 and V2. The b67-10 sine work landed in
+> `ForceChartV2.swift`, which is retained on disk for rollback safety
+> but is no longer mounted anywhere. The user's verbatim correction:
+> _"the V1 ForceChartView is the one that displays the force curve
+> correctly in practice."_ See V4-D20 below for the supersede
+> rationale and rejected alternatives. The text below is preserved
+> verbatim for historical context only — do not implement against it.
+
 **Q.** The b58–b66 force-curve traced raw sensor samples as a
 phase-segmented polyline. User feedback: reps look blocky/spiky
 and "bleed into one continuous trace." How should rep shapes be
@@ -789,3 +800,111 @@ contexts and may carry their own badge.
 `BuildBadgeOverlay`, `DebugGridOverlay`, `PageRegistry`, header
 pills, the `⋏`/merge glyph (b71), force chart, or any routing
 logic. No b71 mode-glyph work. No version bump.
+
+## V4-D20 — V1 `ForceChartView` is canonical for V2 (supersedes V4-D13)
+
+**Date.** 2026-04-30 (b71 cycle, working diff on `feat/ui-v4-2-claude`).
+
+**Status.** Active. **Supersedes ADR V4-D13** (b67, Bug 10 —
+parametric per-rep sine lobes). V4-D13's decision text is preserved
+verbatim above for historical context but its implementation is no
+longer mounted.
+
+**Q.** Which force-chart renderer is canonical for the V2 capture
+screen (`LiveCaptureViewV2.forceChartCard`)?
+
+- (A) `ForceChartV2` — the b58 dual-band Tonal-style fill upgraded by
+  b67-10 to draw each rep as two parametric `sin(π · t)` half-sine
+  lobes computed from the rep's measured per-phase peak force.
+- (B) `ForceChartView` — V1's raw-sample phase-colored polyline
+  with Catmull-Rom interpolation, 3-sample moving-average smoothing,
+  pulley-multiplier-aware effective load, and the b49 superset
+  secondary-trace overlay.
+
+**Decided.** **(B).** V1's `ForceChartView` is now mounted directly
+from `LiveCaptureViewV2.forceChartCard`. The V2 method is a thin
+adapter that reproduces the same input-builder block V1's
+`LiveCaptureView.forceChart` uses (sample source, peak source,
+pulley multiplier, planned ceiling computed in effective space, and
+the `mdm.hasActiveSupersetChain` secondary-trace gate). V2's outer
+card chrome (`FORCE · 30 S` sibling header + bordered rounded-rect
+wrapper) is removed because `ForceChartView` paints its own header,
+legend, peak readout, padding, background, border, and clip.
+
+The V2-only helper `computedYAxisMaxLb()` is removed in the same
+commit because V1's chart computes its own y-axis from
+`plannedCeilingLb` + observed peak. The V2-only `eccBandActive` /
+`chainMirrorActive` plumbing is removed because dual-band ECC / CON
+fill, CHAIN gradient mirror, and centroid `ECC` / `CON` labels are
+features of the superseded `ForceChartV2` and intentionally are NOT
+carried forward.
+
+`ForceChartV2.swift` is retained on disk with a SUPERSEDED banner at
+the top of the file. Rollback path: re-mount `ForceChartV2(...)` in
+`LiveCaptureViewV2.forceChartCard` and restore `computedYAxisMaxLb()`
+from git history at the b71 commit. Deletion requires explicit user
+approval.
+
+**Why.** The user's verbatim correction at 2026-04-30 17:25 CDT,
+responding to a request to keep V2's sine logic and port the V1
+below-chart UI separately:
+
+> _"Correction: I do want the V1 force chart view/logic in V2. The V1
+> ForceChartView is the one that displays the force curve correctly
+> in practice. Replace or wrap V2's force panel so LiveCaptureViewV2
+> uses the V1 ForceChartView behavior/data path. Do not reinterpret
+> this as 'preserve ForceChartV2 sine logic.' The accepted user-
+> facing behavior is the V1 force chart. If this conflicts with the
+> old B67 Bug 10 docs, treat the docs as stale/wrong and update them
+> in the same commit."_
+
+The b67-10 reasoning (sample noise dominates the rep envelope, so a
+parametric shape would read more cleanly) was a plausible inference
+but not what the user actually wanted in practice. The polyline
+rendering is what the user has been reading as "the force curve"
+for the entire V1 lifetime; replacing it with sine lobes in V2 broke
+that continuity, and the parametric abstraction lost information the
+user was implicitly using (noise-as-effort-signal, fatigue-as-shape-
+decay across raw samples within a rep, not just across reps).
+
+This ADR follows the AGENTS.md directive that user-validated
+user-facing behavior outranks design-doc reasoning when the two
+conflict.
+
+**Rejected.**
+
+- _Keep `ForceChartV2` for V2 and port only V1's secondary-trace
+  overlay (the `secondarySamples` / `primaryLabel` / `secondaryLabel`
+  fields) into the sine renderer._ The user explicitly rejected this
+  framing: "Do not reinterpret this as 'preserve ForceChartV2 sine
+  logic.'" Rejected.
+- _Wrap `ForceChartView` inside V2's existing outer card chrome (so
+  V2 keeps its `FORCE · 30 S` sibling header + bordered card)._ Would
+  produce two headers, two borders, and a nested card-in-card layout.
+  Rejected per user instruction: "do not keep V2's outer FORCE header
+  row if ForceChartView already renders its own header/chrome… The
+  goal is not 'V2 card wrapped around V1 chart'; the goal is 'V1
+  ForceChartView behavior mounted in V2.'"
+- _Delete `ForceChartV2.swift` in the same commit as the supersede._
+  Higher-blast-radius. The user approved the surgical path: leave the
+  file on disk with a SUPERSEDED banner so a rollback is one re-mount
+  away. Rejected for now; revisit only on explicit user approval.
+- _Reintroduce the b58 dual-band ECC / CON fill, CHAIN gradient
+  mirror, rep-history overlay, or centroid labels by porting them
+  into V1's `ForceChartView`._ Out of scope for this commit. If any
+  of those features are reintroduced later, the future ADR must add
+  them to V1's `ForceChartView` (so V1 and V2 stay in sync) rather
+  than re-mounting `ForceChartV2`.
+
+**Sacred files.** Untouched. This ADR concerns rendering only; the
+telemetry stream feeding the chart is unchanged.
+
+**Out of scope.** No version bump. No push. No TestFlight ship.
+No changes to `LiveCaptureContainer.shouldUseV2` (V2-only routing
+is still gated behind `if hasChain { return false }` and
+`bothPaired`). No removal of V1 `LiveCaptureView`. No changes to
+any sacred protocol file. No changes to b70 hotfix or its ADR
+V4-D19. The `force_curve.md` design doc is updated in the same
+commit to reflect the supersede; the rep-stacking / dual-band /
+gradient-mirror sections in that doc remain as design references
+for any future re-introduction (now scoped to V1's renderer).

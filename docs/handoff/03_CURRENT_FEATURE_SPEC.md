@@ -157,54 +157,78 @@ chart (same width as the chart):
 - Under 2× pulley, displayed ±1 lb may snap by 2 lb — this is
   documented in `06_KNOWN_ISSUES.md`.
 
-### §5. Force chart (b58 V4 §1 — Tonal-style)
+### §5. Force chart (b71 V4-D20 — V1 ForceChartView is canonical)
 
-Dynamic Y-axis ceiling unchanged from b57:
+**Renderer.** `VoltraLive/Views/ForceChartView.swift` (the V1
+chart). Mounted by **both** `LiveCaptureView` (V1 screen) and
+`LiveCaptureViewV2.forceChartCard` (V2 screen). The b58/b67-10
+`ForceChartV2` (parametric `sin(π · t)` half-sine lobes) is
+retained on disk for rollback safety but is **no longer mounted
+anywhere** — see the SUPERSEDED banner at the top of
+`VoltraLive/Logging/Views/V2/ForceChartV2.swift`.
 
-```
-total = max(
-    working,
-    working + ECC,
-    working + CHAIN,
-    working + ECC + CHAIN
-)
-yMax = max(60, total × 1.2)
-```
+The user's verbatim rationale (2026-04-30): _"the V1
+ForceChartView is the one that displays the force curve correctly
+in practice. Replace or wrap V2's force panel so LiveCaptureViewV2
+uses the V1 ForceChartView behavior/data path."_ This decision
+supersedes the b67-10 polyline-vs-sine reasoning captured in ADR
+V4-D13. See ADR **V4-D20** in `04_DECISIONS_AND_CONSTRAINTS.md`.
 
-20% headroom above the highest possible peak; 60-lb floor for
-unloaded screens. 1.5 s ease on rescale.
+**Inputs.** V2's `forceChartCard` is a thin V1-input adapter that
+reproduces the same builder block V1 uses:
 
-**Rep history overlay (carried from b57 V3 §1a):**
+- `samples = session.currentSet?.samples ?? session.lastFinalizedSamples`
+  — keeps the chart filled through the rest window instead of
+  blanking on finalize.
+- `peakLb = session.currentSet?.peakLb ?? session.lastFinalizedPeakLb`.
+- `forceMultiplier = logging.pulleyMultiplier` — displayed values
+  are EFFECTIVE (what the user feels), matching `LoggedSet`
+  storage.
+- `plannedCeilingLb = ((pendingPlannedWeightLb ?? 0) + upcomingEccLb) × m + (upcomingAddedLoadLb ?? 0)`
+  — anchors the y-axis to planned + 15% headroom (or observed
+  peak + 15%, whichever is greater); 12-lb floor inside-session.
+- Superset secondary trace: when `mdm.hasActiveSupersetChain` is
+  true and the active and next chain entries name different
+  exercises, the chart pulls the OTHER exercise's most-recent
+  finalized force trace from `SessionStore.lastFinalizedByExercise`
+  and renders it as a dimmed dashed line behind the primary
+  phase-colored trace, with both exercise labels surfaced in the
+  legend.
 
-- Up to 8 most-recent reps drawn behind the live curve.
-- Logarithmic fade: `opacity = max(0.10, 1/(1+ln(repsAgo+1)))`.
-- Reset on End Set or when rest expires.
+**Rendering.** Phase-colored line segments (pull / return /
+transition / idle), Catmull-Rom interpolation, 3-sample moving-
+average smoothing pre-multiplied by `forceMultiplier`, X-domain
+spans the whole set (no 30-second rolling window). Five horizontal
+grid lines (0 / 25 / 50 / 75 / 100 % of ymax) labeled in lb. Peak
+label `peak XX.X lb` rendered in the chart header alongside the
+legend.
 
-**NEW b58: dual-band ECC / CON fill.**
+**Chrome ownership.** `ForceChartView` paints its own header,
+legend, peak readout, padding, `bgElev` background, border, and
+rounded-corner clip. The V2 call site does NOT wrap it in V2-only
+card chrome — stacking would produce double headers / double
+borders / nested cards. The previous b58 V2 wrapper (`FORCE · 30 S`
+sibling header + outer rounded-rect card) was removed in b71.
 
-- Below the polyline, each rep's eccentric segment fills DOWN
-  to BOTTOM with a stronger gradient (top-stop α ≈ 0.55) so
-  the lowering work reads as the dominant visual band. The
-  concentric segment fills as a thinner band (top-stop α ≈ 0.22).
-  Idle gaps between reps don't fill at all.
-- ECC fill is conditional on `eccArmed` so working-only sets
-  stay clean.
+**Removed in b71 (along with the V2 mount):**
 
-**NEW b58: CHAIN mirrored gradient.**
+- `LiveCaptureViewV2.computedYAxisMaxLb()` helper — no longer
+  needed; V1's chart computes its own y-axis from
+  `plannedCeilingLb` + observed peak.
+- The V2-only `eccBandActive` / `chainMirrorActive` plumbing into
+  the chart — dual-band ECC / CON fill, CHAIN mirrored gradient,
+  and inline `ECC` / `CON` centroid labels were features of the
+  superseded `ForceChartV2`. They are NOT present in V1's
+  `ForceChartView` and are intentionally NOT carried forward; the
+  user has accepted V1's rendering as the correct user-facing
+  shape.
+- The b57/b58 rep-history overlay (8-rep log-decay fade) and the
+  1.5 s y-axis rescale ease — same reason. Both lived only in
+  `ForceChartV2`.
 
-- When CHAIN is armed, the gradient flips from `.top → .bottom`
-  to `.topTrailing → .bottomLeading` so the visual weight reads
-  heaviest at top of ROM (right side of the normalized x-axis).
-  Communicates that chain load builds as the cable extends.
-- INV CHAIN does NOT mirror — its thru-ROM offset is already
-  represented by the polyline shape itself.
-
-**NEW b58: ECC / CON inline labels.**
-
-- Most-recent rep ONLY (repsAgo == 0). Two small kerned mono
-  captions ("ECC" / "CON") at the centroid of each phase
-  segment, in phase color at 70% opacity.
-- Suppressed if the rep doesn't contain both phases.
+If any of those features are reintroduced later, the future ADR
+must add them to V1's `ForceChartView` (so V1 and V2 stay in
+sync), not by re-mounting `ForceChartV2`.
 
 ### §6. Rest timer (b57 V3 §6)
 

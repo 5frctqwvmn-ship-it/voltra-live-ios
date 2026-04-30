@@ -1,5 +1,32 @@
 // ForceChartV2.swift
 //
+// =====================================================================
+// SUPERSEDED — b71 (ADR V4-D20, supersedes V4-D13 / b67-10).
+// =====================================================================
+//
+// This view is NO LONGER MOUNTED anywhere in the app. As of b71,
+// `LiveCaptureViewV2.forceChartCard` returns V1's `ForceChartView`
+// directly — the V1 raw-sample phase-colored polyline is the canonical
+// user-facing force chart for both V1 and V2. The parametric
+// `sin(π·t)` lobe rendering documented below was the b67-10 fix for
+// what the user described as a "raw / blocky / spiky polyline"; the
+// user has since corrected that the polyline IS the correct rendering
+// in practice and the sine lobes were the wrong abstraction.
+//
+// This file is retained ON DISK for rollback safety — do NOT delete
+// without explicit user approval. If you need to revert: re-mount
+// `ForceChartV2(...)` in `LiveCaptureViewV2.forceChartCard` and restore
+// the `computedYAxisMaxLb()` helper (see git history at the b71 commit).
+//
+// Search anchor: SUPERSEDED-V4-D20
+//
+// All references to this view from production code paths have been
+// removed. The struct is left compileable for the rollback path; if
+// future builds drop it from the target, restore via git.
+// =====================================================================
+//
+// ORIGINAL HEADER (kept verbatim for context) —
+//
 // b58 V4 §1 — Tonal-style force-curve rendering.
 //
 //   - Dual-band ECC / CON: each rep polyline is now also stroked as a

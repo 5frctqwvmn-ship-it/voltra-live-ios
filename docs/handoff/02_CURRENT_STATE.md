@@ -1,6 +1,6 @@
 # 02 — Current State
 
-_Last updated: 2026-04-30 (b70 cycle, in flight)._
+_Last updated: 2026-04-30 (b71 cycle, in flight — force-chart canonicalization)._
 
 > **Maintenance rule:** this file is overwritten on every ship. The
 > append-only history lives in `docs/WORK_LOG.md`. If you're updating
@@ -12,18 +12,25 @@ _Last updated: 2026-04-30 (b70 cycle, in flight)._
 
 ## Latest shipped build
 
-**v0.4.42 / build 69** — tag `v0.4.42-build69`, label "B68-01 demo
-auto-engage on V1 + V2 LOAD" (shipped 2026-04-29). 5-gate altool verify
-passed; Delivery UUID `7e036a7d-7060-4682-8212-c253b815118a`,
-[run 25140763953](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25140763953)
-duration 52s.
+**v0.4.43 / build 70** — label "b70 demo entry source connection-aware +
+page registry + debug grid overlay" (shipped 2026-04-30). 5-gate altool
+verify passed; Delivery UUID `fc2f3148-6f9e-484e-b83c-23534bcc1582`,
+[run 25176969283](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25176969283)
+duration 29s. HEAD at ship: `e10b428fbf4afdb75db8f3ffc72b4730bac49a65`.
+Awaiting Apple processing before TestFlight surface.
 
-**Active cycle:** b70 / v0.4.43 / build 70. In flight on
-`feat/ui-v4-2-claude`. Targets the b69 user-reported regression
-"Demo simulation broken." See `WORK_LOG` 2026-04-30 entry and
-ADRs V4-D17 + V4-D18 in `04_DECISIONS_AND_CONSTRAINTS.md` for the
-complete plan and justification. Pending altool ship at the time
-this file was written.
+**Active cycle:** b71 / v0.4.44 / build 71 — NOT YET BUMPED OR SHIPPED;
+currently a working diff on `feat/ui-v4-2-claude`. Two unshipped
+commits sit on top of the b70 ship tag:
+- b70 page-badge double-render hotfix (commit `34ba63e`, 2026-04-30 22:02 UTC).
+- b71 force-chart canonicalization — V1's `ForceChartView` is now mounted
+  inside `LiveCaptureViewV2.forceChartCard`; the b67-10 parametric-sine
+  `ForceChartV2` is retained on disk as a SUPERSEDED rollback artifact
+  but is no longer mounted anywhere. See ADR **V4-D20** in
+  `04_DECISIONS_AND_CONSTRAINTS.md` (supersedes V4-D13). The user's
+  verbatim rationale: "the V1 ForceChartView is the one that displays
+  the force curve correctly in practice." Version bump and ship are
+  pending explicit user approval per the standing constraint.
 
 ## What works today
 
@@ -34,9 +41,10 @@ this file was written.
   V2 layout: header → phase strip OR rest-timer bar → WEIGHT card with
   hardware-load tap on big number + nested mod rows + 4-up mod tile
   grid + per-engaged-mod stepper rows → REPS / TOTAL VOLUME tiles →
-  force chart with parent-driven Y-axis → V1RestoreSection (pulley
-  chip + added-plates picker + LOGGED SETS swipeable list +
-  Next-exercise + End-session).
+  force chart (b71: now V1's `ForceChartView` raw-sample phase-colored
+  polyline + Catmull-Rom smoothing + secondary-trace superset overlay,
+  per ADR V4-D20) → V1RestoreSection (pulley chip + added-plates picker
+  + LOGGED SETS swipeable list + Next-exercise + End-session).
 - Dual-Voltra Independent + Combined modes (V1 only); Twin Mode pill
   cluster with focus-aware mod routing (b58/V4-D9).
 - Superset chain (V1 only) with per-instance `assignedVoltra` routing

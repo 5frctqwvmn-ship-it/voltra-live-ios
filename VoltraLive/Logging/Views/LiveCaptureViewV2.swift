@@ -48,7 +48,11 @@
 //                                    grid (ALL selectable), per-engaged-mod
 //                                    stepper rows (ECC clamps 5–400).
 //   4. REPS / TOTAL VOLUME tiles
-//   5. ForceChartV2                — y-axis = max(workingLb, eccEffective) × 1.3
+//   5. ForceChartView (V1)         — b71 (V4-D20, supersedes V4-D13):
+//                                    V1's raw-sample phase-colored
+//                                    polyline is canonical for V2; the
+//                                    b58/b67 ForceChartV2 sine renderer
+//                                    is retained on disk only for rollback.
 //   6. V1RestoreSection            — pulley chip + added-plates picker +
 //                                    LOGGED SETS list + Next-exercise / End
 //                                    bottom actions (verbatim port from V1)
@@ -1067,93 +1071,74 @@ struct LiveCaptureViewV2: View {
     }
 
     // MARK: - 6. Force chart card
+    //
+    // b71 (V4-D20 — supersedes V4-D13 / b67-10): V1's `ForceChartView` is
+    // now the canonical force-curve renderer for V2. The previous V2-only
+    // `ForceChartV2` (parametric `sin(π·t)` lobes) is retained on disk for
+    // rollback safety but is NO LONGER MOUNTED — see
+    // `VoltraLive/Logging/Views/V2/ForceChartV2.swift` for the SUPERSEDED
+    // banner. User-facing rationale (verbatim, 2026-04-30):
+    //   "the V1 ForceChartView is the one that displays the force curve
+    //    correctly in practice. Replace or wrap V2's force panel so
+    //    LiveCaptureViewV2 uses the V1 ForceChartView behavior/data path."
+    //
+    // This helper is now a thin V1-input adapter: it reproduces the same
+    // builder block V1 uses in `LiveCaptureView.forceChart` (samples / peak
+    // / pulley multiplier / planned ceiling / superset secondary trace) and
+    // returns `ForceChartView` directly. We deliberately do NOT wrap it in
+    // V2-only chrome — `ForceChartView` paints its own header, legend, peak
+    // readout, padding, bgElev, border, and rounded-corner clip. Stacking
+    // V2's old card chrome on top would produce double headers / double
+    // borders / nested cards.
 
     private var forceChartCard: some View {
-        let phase   = ble.telemetry.phase
-        let force   = ble.telemetry.forceLb
-        // P1-2 (b66): align with the rest-bar mount predicate; key
-        // on `restActive` so the chart's resting-display kicks in on
-        // the same run loop as finalize, not 0.25s later.
-        let resting = session.restActive
-        let samples = session.currentSet?.samples ?? session.lastFinalizedSamples
-        let peak    = session.currentSet?.peakLb ?? session.lastFinalizedPeakLb
-        let yMax    = computedYAxisMaxLb()
+        // Sample source — V1-verbatim:
+        //   currentSet.samples while a set is in flight, then
+        //   lastFinalizedSamples after finalize so the chart KEEPS
+        //   displaying the rep pattern through the rest period instead
+        //   of blanking. Cleared on next set.
+        let samples = session.currentSet?.samples
+            ?? session.lastFinalizedSamples
+        let peak = session.currentSet?.peakLb
+            ?? session.lastFinalizedPeakLb
+        let m = logging.pulleyMultiplier
+        // Planned ceiling computed in EFFECTIVE space (pulley-multiplied)
+        // so a 50 lb device under 2× pulley reads as 100 lb on the y-axis,
+        // matching the smoothed sample values the chart will plot. Verbatim
+        // from `LiveCaptureView.forceChart` (V1 line ~1052).
+        let planned = ((logging.pendingPlannedWeightLb ?? 0) + logging.upcomingEccLb) * m
+            + (logging.upcomingAddedLoadLb ?? 0)
 
-        let displayForce: String = {
-            if resting { return "0" }
-            if force > 0 { return String(format: "%.0f", force) }
-            return "\u{2014}"
-        }()
-        let forceColor: Color = resting ? VoltraColor.textFaint : VoltraColor.phase(phase)
-
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("FORCE \u{00B7} 30 S")
-                    .font(.system(size: 9, weight: .bold))
-                    .kerning(1.6)
-                    .foregroundColor(VoltraColor.textDim)
-                Spacer()
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(displayForce)
-                        .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .monospacedDigit()
-                        .foregroundColor(forceColor)
-                    Text("lb")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(VoltraColor.textDim)
-                }
+        // b49 superset secondary trace — V1-verbatim. When a 2+ exercise
+        // chain is active, pull the OTHER exercise's most-recent finalized
+        // force trace out of `SessionStore.lastFinalizedByExercise` and
+        // pass it as a secondary (dashed, dimmed) trace so the user can
+        // compare both exercises in one chart. Labels come from the chain
+        // entries.
+        var secondarySamples: [ForceSample]? = nil
+        var primaryLabel: String? = nil
+        var secondaryLabel: String? = nil
+        if mdm.hasActiveSupersetChain,
+           let active = mdm.activeSupersetEntry,
+           let other  = mdm.nextSupersetEntry,
+           active.exerciseName != other.exerciseName {
+            primaryLabel   = active.exerciseName
+            secondaryLabel = other.exerciseName
+            if let trace = session.lastFinalizedByExercise[other.exerciseName], !trace.isEmpty {
+                secondarySamples = trace
             }
-            ForceChartV2(
-                samples:    samples,
-                peakLb:     peak,
-                resting:    resting,
-                idlePhase:  phase,
-                yAxisMaxLb: yMax,
-                // b58 V4 §1: ECC fill band only when ECC is armed; CHAIN
-                // mirrors the gradient (heaviest at top of ROM). INV CHAIN
-                // is its own gradient direction — here we only flip on
-                // CHAIN to mirror the user-felt build-up; INV CHAIN's
-                // thru-ROM offset is already represented by the polyline
-                // shape itself.
-                eccBandActive:     eccArmed,
-                chainMirrorActive: chainArmed
-            )
-            .frame(maxWidth: .infinity, minHeight: 175)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity)
-        .background(VoltraColor.bgElev)
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(VoltraColor.border, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-    }
 
-    /// b57 V3 §1: y-axis ceiling = max of the four possible peak
-    /// configurations × 1.2, with a 60-lb floor so an unloaded screen
-    /// still draws sensibly. Pulley-multiplied so the chart reflects
-    /// what the user feels (matches LoggedSet storage).
-    ///   working                      — concentric only
-    ///   working + ECC                — eccentric phase
-    ///   working + CHAIN              — top of ROM under chain
-    ///   working + ECC + CHAIN        — eccentric AND chain (rare but
-    ///                                  happens when both armed)
-    /// CHAIN and INV CHAIN are mutually exclusive — INV CHAIN only adds
-    /// at mid-ROM, never exceeds working+CHAIN, so it doesn't bump max.
-    private func computedYAxisMaxLb() -> Double {
-        let m       = logging.pulleyMultiplier
-        let working = (logging.pendingPlannedWeightLb ?? 0) * m
-        let eccEff  = logging.upcomingEccEnabled    ? (logging.upcomingEccLb    * m) : 0
-        let chainEff = logging.upcomingChainsEnabled ? (logging.upcomingChainsLb * m) : 0
-        let total = max(
-            working,
-            working + eccEff,
-            working + chainEff,
-            working + eccEff + chainEff
+        return ForceChartView(
+            samples: samples,
+            peakLb: peak,
+            plannedCeilingLb: planned > 0 ? planned : nil,
+            forceMultiplier: m,
+            secondarySamples: secondarySamples,
+            primaryLabel: primaryLabel,
+            secondaryLabel: secondaryLabel
         )
-        return max(60, total * 1.2)
+        .frame(minHeight: 280)
     }
 
     // MARK: - Helpers

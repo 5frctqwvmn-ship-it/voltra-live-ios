@@ -1,7 +1,7 @@
 # Force Curve — Design Spec & Research
 
 **Doc location:** `docs/handoff/design/force_curve.md`
-**Status:** Design reference for implementing P0 force-curve redesign in V4 (full version targeted at b59 — partial dual-band fill landed in b58 ForceChartV2)
+**Status:** Design reference. **⚠️ 2026-04-30 update (b71 / ADR V4-D20):** the b58/b67 `ForceChartV2` implementation that landed against this doc was reverted. V1's `ForceChartView` (raw-sample phase-colored polyline + Catmull-Rom smoothing) is now the canonical force-curve renderer for both V1 and V2. The Tonal-style dual-band fill / CHAIN gradient mirror / rep-history overlay / parametric sine lobes documented below are NOT currently mounted. They are preserved here as design references in case any of them are reintroduced — but per V4-D20 they must be added to V1's `ForceChartView` (so V1 and V2 stay in sync), not by re-mounting `ForceChartV2.swift` (which is retained on disk with a SUPERSEDED banner for rollback only).
 **Primary inspirations:** Tonal (force/power overlays, dual-phase rendering, rep stacking)  and sport-science force-time conventions [tonal](https://tonal.com/blogs/all/eccentric-mode-improves-performance)
 
 ---
@@ -177,11 +177,23 @@ In the same commit:
 
 ---
 
-## 10. b67 implementation status (Apr 29 2026)
+## 10. b67 implementation status (Apr 29 2026) — SUPERSEDED 2026-04-30
+
+> **⚠️ This entire section is SUPERSEDED by ADR V4-D20 (b71,
+> 2026-04-30).** The b67-10 parametric-sine implementation
+> documented here landed in `ForceChartV2.swift` and was reverted
+> in b71. V1's `ForceChartView` (raw-sample phase-colored polyline)
+> is now the canonical force-curve renderer for both V1 and V2;
+> `ForceChartV2.swift` is retained on disk for rollback only and
+> is no longer mounted anywhere. Read this section as historical
+> context for what was tried and intentionally walked back, not as
+> current implementation. The ground truth is in
+> `03_CURRENT_FEATURE_SPEC.md` §5 and ADR V4-D20 in
+> `04_DECISIONS_AND_CONSTRAINTS.md`.
 
 Bug 10 (B67_BUG_QUEUE.md) closed by commit `660853a` on
 `feat/ui-v4-2-claude`. Implementation per ADR V4-D13 in
-`04_DECISIONS_AND_CONSTRAINTS.md`:
+`04_DECISIONS_AND_CONSTRAINTS.md` (now superseded by V4-D20):
 
 - §3a **Auto-scaled Y-axis** — preserved from b58 (parent-supplied
   `yAxisMaxLb`, 1.5 s ease).
