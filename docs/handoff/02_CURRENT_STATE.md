@@ -1,6 +1,6 @@
 # 02 — Current State
 
-_Last updated: 2026-04-30 (b71 cycle, in flight — force-chart canonicalization + below-chart parity port)._
+_Last updated: 2026-04-30 (b71 cycle, BUMPED — awaiting user push approval. Seven unshipped commits in tree: hotfix + force-chart + below-chart parity + chain UI port + V1 fallback removal + parity audit + version bump)._
 
 > **Maintenance rule:** this file is overwritten on every ship. The
 > append-only history lives in `docs/WORK_LOG.md`. If you're updating
@@ -19,8 +19,8 @@ verify passed; Delivery UUID `fc2f3148-6f9e-484e-b83c-23534bcc1582`,
 duration 29s. HEAD at ship: `e10b428fbf4afdb75db8f3ffc72b4730bac49a65`.
 Awaiting Apple processing before TestFlight surface.
 
-**Active cycle:** b71 / v0.4.44 / build 71 — NOT YET BUMPED OR SHIPPED;
-currently a working diff on `feat/ui-v4-2-claude`. Five unshipped
+**Active cycle:** b71 / v0.4.44 / build 71 — BUMPED, NOT YET PUSHED OR SHIPPED;
+currently a working diff on `feat/ui-v4-2-claude`. Seven unshipped
 commits sit on top of the b70 ship tag:
 - b70 page-badge double-render hotfix (commit `34ba63e`, 2026-04-30 22:02 UTC).
 - b71 force-chart canonicalization — V1's `ForceChartView` is now mounted
@@ -61,13 +61,26 @@ commits sit on top of the b70 ship tag:
   and moved to Recently closed. 08_SUPERSET routing section rewritten
   to reflect the new policy. V1 source code is retained on disk as a
   verbatim rollback artifact — deletion is deferred to a future build
-  (b75+ at the earliest, after 2 clean V2 ships). Commit pending in
-  this session.
+  (b75+ at the earliest, after 2 clean V2 ships). Commit `c7427ce`.
   See ADR **V4-D21 part 3**.
+- b71 V1↔V2 parity verification audit (Step 6) — source-level
+  audit of all eight items in the b71 mandate (LOAD/UNLOAD,
+  ±5/±1 nudgers, Combined dual-fire, 4-row live grid, HR/KCAL,
+  rest/idle, force chart live + `lastFinalizedSamples`, chain
+  routing through V2). All eight pass; six are verbatim ports,
+  one (HR/KCAL) is a behavioral equivalent, one (4-row grid) is
+  a documented intentional V2 redesign. Full table in
+  `docs/handoff/B71_PARITY_VERIFICATION.md`. Commit `c797d7f`.
+- b71 version bump v0.4.43/70 → v0.4.44/71 — `project.yml`,
+  `VoltraLive/Info.plist`, `01_PROJECT_OVERVIEW.md`, this file.
+  Final commit per the b71 mandate (after all six scope items
+  landed). Bot identity. NO push. NO altool.
 
-Version bump and ship are pending explicit user approval per the
-standing constraint AND completion of the remaining b71 scope item
-(Step 6 parity verification pass).
+Version bump committed in this cycle as the FINAL commit per the
+b71 mandate (after all six scope items landed: hotfix retention,
+force chart, below-chart parity, chain UI port, V1 fallback
+removal, parity audit). Push and TestFlight ship are pending
+explicit user approval per the standing constraint.
 
 ## What works today
 

@@ -3739,3 +3739,88 @@ scope item deferred.
 
 **Out of scope (this commit).** No code changes — audit only. No
 version bump. No push.
+
+---
+
+## 2026-04-30 23:15 UTC — b71 version bump v0.4.43/70 → v0.4.44/71 (FINAL commit of b71 cycle)
+
+Final commit of the b71 cycle per the standing mandate ("Keep the
+version bump as the final separate commit only after the full
+scope lands"). All six b71 scope items landed in the preceding
+six commits:
+
+1. b70 page-badge double-render hotfix retained — commit `34ba63e`
+2. V1 ForceChartView canonical for V2 — commit `92cac54`
+3. V1 below-chart UI parity into V2 — commit `b93b4fe`
+4. V1 chain / superset UI port into V2 — commit `2488484`
+5. V1 fallback removal; V2 canonical — commit `c7427ce`
+6. V1↔V2 parity verification audit — commit `c797d7f`
+
+This commit is the version bump only. No code logic changes.
+
+**Files changed.**
+
+- `project.yml`
+  - Settings block (lines ~64-65): `MARKETING_VERSION` 0.4.43 → 0.4.44,
+    `CURRENT_PROJECT_VERSION` 70 → 71.
+  - Info plist generation block (lines ~92-93):
+    `CFBundleShortVersionString` 0.4.43 → 0.4.44,
+    `CFBundleVersion` 70 → 71.
+- `VoltraLive/Info.plist`
+  - `CFBundleShortVersionString` 0.4.43 → 0.4.44.
+  - `CFBundleVersion` 70 → 71.
+- `docs/handoff/01_PROJECT_OVERVIEW.md`
+  - Top-of-file shipping-build line bumped to v0.4.44 / build 71
+    (b71 cycle).
+- `docs/handoff/02_CURRENT_STATE.md`
+  - Header timestamp + cycle summary updated: "BUMPED, awaiting
+    user push approval. Seven unshipped commits in tree."
+  - "Active cycle" section: SHA list extended to include all
+    seven commits (added the parity-audit and version-bump
+    bullets).
+  - Trailing summary updated to reflect that all six b71 scope
+    items have landed and the version bump is the FINAL commit
+    per the b71 mandate.
+- `docs/WORK_LOG.md` (this entry).
+
+Per the b71 process requirement "version bump in `project.yml` +
+`Info.plist` + `01_PROJECT_OVERVIEW.md` + `02_CURRENT_STATE.md`
+(NOT _tmp/archive)" — the `_tmp/archive` tree was deliberately
+NOT touched.
+
+**Verification.**
+
+- `grep -rn '0.4.43\|"70"' project.yml VoltraLive/Info.plist
+   docs/handoff/01_PROJECT_OVERVIEW.md docs/handoff/02_CURRENT_STATE.md`
+  returns no matches outside the historical "Latest shipped build:
+  **v0.4.43 / build 70**" line in 02_CURRENT_STATE (which is
+  correct — it documents the LAST shipped build, which is still
+  b70).
+- `git log --oneline -8` confirms the commit ordering:
+  - b70 ship (e10b428)
+  - b70 hotfix (34ba63e)
+  - b71 force chart (92cac54)
+  - b71 below-chart parity (b93b4fe)
+  - b71 chain UI port (2488484)
+  - b71 V1 fallback removal (c7427ce)
+  - b71 parity audit (c797d7f)
+  - b71 version bump (this commit)
+
+**Risks.**
+
+- Apple's version-component rule: `CFBundleShortVersionString` ≤ 3
+  components. `0.4.44` is 3 components — compliant.
+- Existing TestFlight history shows builds 1-70. Build 71 is the
+  next contiguous integer — compliant with App Store Connect's
+  "build numbers must monotonically increase" rule.
+- The `_tmp/archive` tree was intentionally NOT touched per the
+  b71 process requirement. If a future maintainer expects archived
+  copies of the bumped version strings, that's a separate
+  archival workflow that does not apply here.
+
+**Out of scope (this commit).** No code changes. No push. No
+altool. No release.yml run. No QA_LOG entry (that lives post-
+TestFlight per the b58 process). No Apple submission.
+
+**Pending.** Final summary back to the user. Wait for explicit
+push approval before any TestFlight ship.
