@@ -3103,3 +3103,31 @@ status = success.
 **TestFlight surface:** v0.4.42 (build 69) uploaded to App
 Store Connect on Apr 29 2026 (PDT). Awaiting Apple processing
 before the build appears in TestFlight.
+
+## 2026-04-30T14:52:12Z — chore(handoff): source zip for b70 architect review
+
+Packaged a read-only source bundle for the architect to scope the b70
+patch in a single session.
+
+**Artifact:** `docs/handoff/_tmp/voltra-live-source-b70.zip`
+- Size: 331320 bytes (~324K)
+- SHA-256: `7b5d53f54849e37a1eeaf4ad2835c4013873b5e9608a9049bd8c290fba3a1693`
+- Built from commit: `2b32bec445c0b48e030d8a344d0a50515d2edf84`
+- Contents: 32 Swift source files (verbatim, no modifications) + 19
+  handoff docs snapshot + MANIFEST.txt + GREP.txt + SCREEN_TREE.md +
+  GIT_STATE.md + WORK_LOG_TAIL.md.
+
+**Path deltas surfaced in MANIFEST.txt:**
+- `Logging/Stores/{Logging,Session}Store.swift` are at `Logging/Persistence/LoggingStore.swift` and `Session/SessionStore.swift` respectively.
+- `BLE/MultiDeviceManager.swift` -> `BLE/Dual/MultiDeviceManager.swift`.
+- `BLE/VoltraProtocol.swift` -> `Protocol/VoltraProtocol.swift`.
+- `Shared/HealthKitStore.swift` -> `Health/HealthKitStore.swift`.
+- `Shared/VoltraColor.swift` does not exist as its own file; `VoltraColor` is defined in `Views/VoltraTheme.swift` and that file is included.
+
+**Missing files (architect's manifest listed but repo does not contain):**
+- `Logging/Views/DropSetPlannerSheet.swift` — drop-set planning is implemented inline in `LiveCaptureView` + `LoggingStore`; no dedicated planner sheet exists.
+
+**Next step:** architect returns six paste-blocks for b70 (per their
+contract). No source modifications until those land.
+
+This commit touches docs only — no Swift was modified.
