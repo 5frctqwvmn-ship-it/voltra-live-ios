@@ -59,6 +59,14 @@ struct LiveCaptureView: View {
     // never reach the device because the legacy single-Voltra manager isn't
     // connected when MDM owns both peripherals).
     @EnvironmentObject var mdm: MultiDeviceManager
+    /// b69 (B68-02): demo controller env-injected so V1 can auto-engage
+    /// prePair demo when the user presses LOAD with no Voltra connected,
+    /// matching the V2 wiring that B68-01 added in build 68. B68-01 was
+    /// V2-only — V1 (the production default per LiveCaptureContainer's
+    /// b53 router) silently regressed when ConnectView's prePair entry
+    /// was demoted in B67-01. This restores the auto-engage path on V1
+    /// so single-Voltra-default users get simulated telemetry on LOAD.
+    @EnvironmentObject var demo: DemoController
     /// Build 31: needed so the back-button confirmation can offer a
     /// "Just go back" option that pops the nav stack without ending
     /// the active session. User asked for this third path because
@@ -132,6 +140,13 @@ struct LiveCaptureView: View {
         }
         .animation(.easeInOut(duration: 0.2), value: pendingUndo != nil)
         .navigationBarBackButtonHidden(true)
+        // b69 (B68-02): mirror V2's prePair-demo auto-handoff. When any of
+        // the three connection paths flips to .connected while prePair
+        // demo is active, exit demo so subsequent reps consume real
+        // telemetry. Guarded inside `handleConnectionChange()`.
+        .onChange(of: ble.connectionState)        { _, _ in handleConnectionChange() }
+        .onChange(of: mdm.left.connectionState)   { _, _ in handleConnectionChange() }
+        .onChange(of: mdm.right.connectionState)  { _, _ in handleConnectionChange() }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
@@ -951,12 +966,50 @@ struct LiveCaptureView: View {
     }
 
     /// LOAD command. Prefers MDM when any slot is paired; otherwise legacy ble.
+    /// b69 (B68-02): also auto-engages prePair demo when no Voltra is
+    /// connected, so V1 users get the same "weights loaded → simulated
+    /// telemetry" experience B68-01 added on V2.
     private func sendLoad() {
+        autoEngageDemoIfNeeded()
         if mdm.state != .idle {
             mdm.load()
         } else {
             ble.sendLoad()
         }
+    }
+
+    // MARK: - b69 (B68-02): demo auto-engage on V1
+
+    /// True when no Voltra is paired & connected on any path (legacy single
+    /// `ble`, MDM left, or MDM right). Mirrors V2's helper.
+    private var anyDeviceConnected: Bool {
+        ble.connectionState.isConnected
+            || mdm.left.connectionState.isConnected
+            || mdm.right.connectionState.isConnected
+    }
+
+    /// Auto-engage prePair demo when the user presses LOAD but no Voltra
+    /// is connected. Idempotent — `DemoController.enter` early-returns
+    /// when already active. Ports B68-01's V2 helper verbatim.
+    private func autoEngageDemoIfNeeded() {
+        guard !anyDeviceConnected, !demo.isActive else { return }
+        guard let handler = DemoTelemetryBridge.shared.handler else { return }
+        demo.note(.buttonTap(
+            label: "Auto-engage (no device, LOAD pressed)",
+            screen: "LiveCaptureView"
+        ))
+        demo.enter(source: .prePair, onTelemetry: handler)
+    }
+
+    /// Mid-session real-device handoff: when any device flips to
+    /// connected while prePair demo is active, exit demo so subsequent
+    /// reps consume real telemetry. postPair demo (manually engaged) is
+    /// intentionally left alone.
+    private func handleConnectionChange() {
+        guard demo.isActive,
+              demo.entrySource == .prePair,
+              anyDeviceConnected else { return }
+        _ = demo.exit()
     }
 
     /// UNLOAD command. Same routing as sendLoad().
@@ -1459,7 +1512,11 @@ struct LiveCaptureView: View {
             .disabled(!isLive)
 
             Button {
-                ble.sendLoad()
+                // b69 (B68-02): route through `sendLoad()` so this debug
+                // LOAD button also triggers `autoEngageDemoIfNeeded()`.
+                // Pre-b69 it bypassed the helper, so the prePair auto-
+                // engage gate didn't fire when this surface was used.
+                sendLoad()
             } label: {
                 Label("Load", systemImage: "arrow.down.to.line")
                     .font(.system(size: 13, weight: .semibold))

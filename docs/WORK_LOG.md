@@ -3034,3 +3034,51 @@ status = success.
 **TestFlight surface:** v0.4.41 (build 68) uploaded to App
 Store Connect on Apr 29 2026 (PDT). Awaiting Apple processing
 before the build appears in TestFlight.
+
+---
+
+## 2026-04-29 (b69) — B68-02 demo auto-engage on V1 (LiveCaptureView)
+
+**Bug.** B68-01 (shipped in build 68) added `autoEngageDemoIfNeeded()`
+to `LiveCaptureViewV2` only. User tested 68 on device and confirmed
+Demo Mode engaged but the simulation didn't run — chart inert, reps
+stuck, force at zero. Root cause: `LiveCaptureContainer`'s b53
+router defaults the user to **V1 (`LiveCaptureView`)** unless they
+opt into V2 via the first-launch picker (default = V1) or both
+Voltras pair (forces V2). Production default users hit V1, where
+B68-01's helper does not exist, so Demo Mode never engaged on
+LOAD and synthetic telemetry never fired.
+
+**Fix (V1 parity port of B68-01).** `LiveCaptureView.swift`:
+
+- `@EnvironmentObject var demo: DemoController` added next to
+  `mdm` (root-injected from `VoltraLiveApp:119`).
+- `private var anyDeviceConnected: Bool` derives from
+  `ble || mdm.left || mdm.right` connection states.
+- `private func autoEngageDemoIfNeeded()` records button-tap
+  trace ("Auto-engage (no device, LOAD pressed)" / screen
+  "LiveCaptureView") and calls
+  `demo.enter(source: .prePair, onTelemetry:
+   DemoTelemetryBridge.shared.handler)`. Idempotent.
+- `private func handleConnectionChange()` exits demo when
+  `entrySource == .prePair && anyDeviceConnected`.
+- `sendLoad()` now calls `autoEngageDemoIfNeeded()` first so
+  both the `loadUnloadTile` LOAD button (line ~740) and the
+  debug LOAD button (line ~1462) hit the gate. Promoted the
+  debug button from `ble.sendLoad()` direct call to
+  `sendLoad()` for parity.
+- Three `.onChange(of: …connectionState)` modifiers on V1 body.
+
+**Why hook on `sendLoad()` and not weight steppers.** User
+wording was "loads weights from the Live View screen" — that's
+the explicit LOAD command, not weight stepping. V1 has no
+"tap weight number" gesture; the equivalent intent is the LOAD
+button. Mirrors B68-01's V2 hook on `toggleHardwareLoad()`.
+
+**ADR.** No new ADR. V4-D16 (b68) already documents the
+auto-engage contract and applies to both V1 and V2 by symmetry.
+
+**Bump.** v0.4.42 / build 69.
+
+**Ship.** Pending. Will run `release.yml dry_run=false` after
+this commit lands; 5-gate altool verify, then v0.4.42 / build 69.

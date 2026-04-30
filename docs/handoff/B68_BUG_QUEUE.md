@@ -14,7 +14,7 @@
 | ID      | Title                                                  | Status | Closing commit |
 |---------|--------------------------------------------------------|--------|----------------|
 | B68-01  | Demo mode should auto-engage in Live View when no Voltra is connected | SHIPPED v0.4.41 / build 68 | `408db2e` |
-| B68-02  | Auto-enter **Simulation Mode** when weights are loaded in Demo Mode with no Voltra connected | OPEN   | —              |
+| B68-02  | Auto-enter **Simulation Mode** when weights are loaded in Demo Mode with no Voltra connected | IN PROGRESS — root cause found | (next commit) |
 
 ---
 
@@ -279,10 +279,86 @@ whether "Simulation Mode" is:
 | `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` | 1452–1495 | B68-01 hooks `autoEngageDemoIfNeeded()` at top of `toggleHardwareLoad()` |
 | Symbol search `Simulation\|simulator\|SimMode\|simMode\|isSimulating` | — | exactly one match (`HealthKitStore.swift:411`, unrelated preview/simulator parity stub). No first-class "Simulation Mode" symbol in the codebase. |
 
+### Root cause found (Apr 29 2026, after user confirmed b68 didn't fix it)
+
+User tested build 68 on device and confirmed Demo Mode
+engaged but the simulation didn't run — chart inert, reps
+stuck, force at zero.
+
+**Root cause: B68-01 patched the wrong file.**
+`VoltraLive/Logging/Views/LiveCaptureContainer.swift:43–91`
+is a router that picks between **V1 (`LiveCaptureView`)** and
+**V2 (`LiveCaptureViewV2`)**:
+
+```swift
+if hasChain { return false }                  // V1
+if bothPaired { return true }                  // V2
+return uiVersion == "v2"                       // user pref
+```
+
+The `liveCaptureUIVersion` `@AppStorage` defaults to `""` and
+the first-launch picker recommends **V1**. So the production
+default for a fresh-install single-Voltra (or no-Voltra) user
+is V1. **B68-01's `autoEngageDemoIfNeeded()` lives in V2 and
+never runs for V1 users.**
+
+Grep evidence:
+
+- `VoltraLive/Logging/Views/LiveCaptureView.swift:54–86` — V1
+  has its own `@EnvironmentObject` graph + local `deviceLoaded`
+  state.
+- `LiveCaptureView.swift:953–969` — V1 has clean
+  `private func sendLoad()` and `sendUnload()` (MDM-or-BLE
+  router) used by `loadUnloadTile` (line 740–757).
+- `LiveCaptureView.swift:1462` — a second debug LOAD button
+  bypasses `sendLoad()` and calls `ble.sendLoad()` directly.
+- V1 has no `toggleHardwareLoad()` central wrapper; LOAD
+  routing lives in `sendLoad()`.
+
+### Fix plan (landing in next commit)
+
+Mirror B68-01's V2 pattern onto V1:
+
+1. Add `@EnvironmentObject var demo: DemoController` to
+   `LiveCaptureView`.
+2. Add `private var anyDeviceConnected: Bool` (same derivation
+   as V2: `ble || mdm.left || mdm.right`).
+3. Add `private func autoEngageDemoIfNeeded()` — reads
+   `DemoTelemetryBridge.shared.handler`, records button-tap
+   trace, calls `demo.enter(source: .prePair, onTelemetry:
+   handler)`.
+4. Add `private func handleConnectionChange()` — guards on
+   `demo.isActive && entrySource == .prePair`, calls
+   `demo.exit()` on real-device pair.
+5. Call `autoEngageDemoIfNeeded()` at the top of `sendLoad()`
+   so both V1 LOAD button sites (`loadUnloadTile` and the
+   debug button at line 1462, after promoting it through
+   `sendLoad()`) are covered.
+6. Add three `.onChange(of: …connectionState)` modifiers on V1
+   body for prePair auto-handoff parity.
+7. Promote line 1462's direct `ble.sendLoad()` to call
+   `sendLoad()` so the debug button also auto-engages demo.
+
+Rationale for `sendLoad()` as the hook (vs weight-cell tap or
+`pendingPlannedWeightLb` setters): the user's wording "loads
+weights from the Live View screen" matches the explicit LOAD
+command — not weight stepping. V1 has no "tap weight number"
+binding; the equivalent intent gesture is the LOAD button.
+
+### Held questions (all answered Apr 29 2026, PDT)
+
+- **Q1.** "Simulation Mode" = the observable result of
+  `DemoController.enter(.prePair)`. Not a separate code path.
+  User confirmed b68 engaged Demo Mode — the missing piece is
+  it engaging on the **default V1 screen too**.
+- **Q2.** No additional behaviors needed beyond what B68-01
+  already wires (synthetic chart + rep counter + force).
+- **Q3.** No Demo Mode precondition required — fire on "no
+  device + LOAD pressed" alone, matching B68-01's V2 gate.
+- **Q4.** User confirmed b68 was tested. Bug is real, not a
+  duplicate — V1 wasn't patched.
+
 ### Status
 
-**OPEN.** Holding all questions per HR#2 until user says "done".
-No code changes will be made on B68-02 until the user confirms
-whether (a) build 68 has been installed and tested, and (b)
-Simulation Mode is the same as B68-01's `prePair` demo or a
-distinct concept I'm missing.
+**IN PROGRESS.** Fix landing now. Will ship as v0.4.42 /
+build 69.
