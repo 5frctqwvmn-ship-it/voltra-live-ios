@@ -14,7 +14,7 @@
 | ID      | Title                                                  | Status | Closing commit |
 |---------|--------------------------------------------------------|--------|----------------|
 | B68-01  | Demo mode should auto-engage in Live View when no Voltra is connected | SHIPPED v0.4.41 / build 68 | `408db2e` |
-| B68-02  | Auto-enter **Simulation Mode** when weights are loaded in Demo Mode with no Voltra connected | IN PROGRESS — root cause found | (next commit) |
+| B68-02  | Auto-enter **Simulation Mode** when weights are loaded in Demo Mode with no Voltra connected | SHIPPED v0.4.42 / build 69 | `b0f67ac` |
 
 ---
 
@@ -360,5 +360,8 @@ binding; the equivalent intent gesture is the LOAD button.
 
 ### Status
 
-**IN PROGRESS.** Fix landing now. Will ship as v0.4.42 /
-build 69.
+**SHIPPED in v0.4.42 / build 69** via run
+[`25140763953`](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25140763953),
+Delivery UUID `7e036a7d-7060-4682-8212-c253b815118a`. 5-gate
+altool verify: PASS (52 s, success markers present, blocklist
+clean).

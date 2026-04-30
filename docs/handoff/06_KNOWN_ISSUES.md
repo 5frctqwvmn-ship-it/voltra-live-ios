@@ -18,12 +18,13 @@ auto-engage contract.
   observers when any device pairs mid-session (prePair source
   only). 5-gate altool verify: PASS. Delivery UUID
   `bb7425ca-c619-4db3-b961-15ac5fc83928`.
-- **B68-02** — FIXED in-tree — V1 (`LiveCaptureView`, the
-  production default per `LiveCaptureContainer`'s b53 router)
-  now auto-engages prePair demo on `sendLoad()` when no Voltra
-  is connected, with `.onChange` observers for real-device
-  handoff. B68-01 was V2-only and missed the default user path.
-  Will ship as v0.4.42 / build 69.
+- **B68-02** — SHIPPED v0.4.42 / build 69 (`b0f67ac`) — V1
+  (`LiveCaptureView`, the production default per
+  `LiveCaptureContainer`'s b53 router) now auto-engages prePair
+  demo on `sendLoad()` when no Voltra is connected, with
+  `.onChange` observers for real-device handoff. B68-01 was
+  V2-only and missed the default user path. 5-gate altool
+  verify: PASS. Delivery UUID `7e036a7d-7060-4682-8212-c253b815118a`.
 
 ## b67 Bug Batch — SHIPPED in v0.4.40 / build 67
 
