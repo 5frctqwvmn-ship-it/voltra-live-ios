@@ -37,8 +37,19 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .tint(VoltraColor.accent)
         .buildBadgeOverlay()
-        // b66 V4.2: page-name badge.
-        .pageBadge("ContentView")
+        // b66 V4.2: page-name badge — INTENTIONALLY OMITTED on this
+        // root container. ContentView wraps LoggingHomeView (which owns
+        // the NavigationStack) and every view pushed onto that stack,
+        // so a `.pageBadge(...)` mounted here propagates via SwiftUI's
+        // `.overlay(alignment: .bottomLeading)` and stacks with every
+        // child screen's own badge at the same anchor (visible as
+        // garbled "CoggingMomeView" / "CourCoptureCostainer" double-
+        // render in IMG_2438/2442/2444/2445/2446/2447). Sheet-presented
+        // surfaces (e.g. DebugView) get a fresh overlay context and were
+        // not affected. Containers must not own a `.pageBadge`; only
+        // leaf, user-visible screens do.
+        // See `docs/handoff/03_CURRENT_FEATURE_SPEC.md` §9 and
+        // `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` V4-D19.
         // b70 / V4-D17: real-device handoff. Exit prePair demo as soon as
         // any of the three connection sources transitions to connected.
         // postPair demo is intentionally untouched \u2014 that's a user-explicit

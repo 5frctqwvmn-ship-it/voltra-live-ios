@@ -737,3 +737,55 @@ user already looks for and avoids adding a new affordance.
 - *Put grid-toggle on a separate dev-menu button.* Adds
   chrome and a discoverability problem; tapping the build
   badge is already an "I'm looking at chrome" gesture.
+
+## V4-D19 — Containers must not own `.pageBadge` (b70 hotfix)
+
+**Date.** 2026-04-30 (b70 hotfix, post-ship visual regression
+pass on IMG_2438–IMG_2447).
+
+**Problem.** The b70 ship mounted `.pageBadge("ContentView")` on
+the root container in `VoltraLive/Views/ContentView.swift:41`.
+`PageBadgeOverlay` is implemented as `.overlay(alignment:
+.bottomLeading)`, which propagates to every descendant in the
+same overlay context. ContentView wraps `LoggingHomeView` (which
+owns the app's `NavigationStack`), so the ContentView badge
+rendered simultaneously with each pushed child's own badge at the
+same anchor. The two text layers stacked at 9pt and read as
+garbled "CoggingMomeView" / "CourCoptureCostainer" double-render
+in IMG_2438, IMG_2442, IMG_2444, IMG_2445, IMG_2446, IMG_2447.
+
+DebugView was unaffected because LoggingHomeView presents it via
+`.sheet(isPresented:)`, which creates a fresh overlay context.
+That differential is what isolated the diagnosis to inheritance,
+not to PageBadgeOverlay itself.
+
+**Decided.** Removed the single `.pageBadge("ContentView")` call
+site. Every navigated child already mounts its own `.pageBadge`,
+so no screen lost identification. Replaced the call with a
+load-bearing comment explaining the inheritance trap so future
+agents don't re-introduce a root or container badge.
+
+**Rule going forward.** Only **leaf, user-visible screens** may
+carry `.pageBadge`. Containers (root views, route hosts that wrap
+other screens, NavigationStack hosts) must not. Sheets and
+`.fullScreenCover` surfaces are leaves — they get fresh overlay
+contexts and may carry their own badge.
+
+**Rejected.**
+
+- *PreferenceKey-based suppression in `PageBadgeOverlay` so an
+  inner badge wins over an outer one.* More invasive than
+  needed; the redundant root call site is the actual defect, and
+  removing one line is the smallest correct fix. Keeping
+  `PageBadgeOverlay` simple preserves the b70 dual-overlay
+  contract.
+- *Move the badge to a singleton root-only renderer driven by a
+  Preference.* Would require touching every screen and the
+  registry. Out of scope for a regression hotfix.
+
+**Sacred files.** Untouched.
+
+**Out of scope.** No changes to `PageBadgeOverlay`,
+`BuildBadgeOverlay`, `DebugGridOverlay`, `PageRegistry`, header
+pills, the `⋏`/merge glyph (b71), force chart, or any routing
+logic. No b71 mode-glyph work. No version bump.

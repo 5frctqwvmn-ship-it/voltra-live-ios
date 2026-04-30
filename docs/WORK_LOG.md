@@ -3304,3 +3304,32 @@ before the build appears in TestFlight.
 **Commits in b70 cycle (2):**
 - `af68099` — docs(handoff): b70 ambiguity prompt for Opus adjudication (pre-implementation)
 - `e10b428` — feat(b70): demo entry source connection-aware + page registry + debug grid overlay (v0.4.43 / build 70)
+
+## 2026-04-30 22:02 UTC — b70 hotfix: page-badge double-render (containers must not own .pageBadge)
+
+**Goal.** Fix the b70 visual regression visible in IMG_2438 / 2442 / 2444 / 2445 / 2446 / 2447: the bottom-leading page badge rendered as two stacked text layers (e.g. "CoggingMomeView", "CourCoptureCostainer"). DebugView was unaffected (clean `04 · DebugView`), which isolated the cause to overlay inheritance — not to `PageBadgeOverlay` itself.
+
+**Files changed.**
+
+- `VoltraLive/Views/ContentView.swift` — removed the `.pageBadge("ContentView")` call site at line 41. Replaced it with a load-bearing comment explaining the inheritance trap so a future agent does not re-introduce a root or container badge. No other behavior in this file was modified — `.buildBadgeOverlay()`, the three `.onChange` handoff observers, and `handoffIfNeeded()` are unchanged.
+- `docs/handoff/03_CURRENT_FEATURE_SPEC.md` — added a "Mounting rule" subsection under §9 documenting that only leaf, user-visible screens may carry `.pageBadge`.
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` — appended ADR V4-D19 ("Containers must not own `.pageBadge` (b70 hotfix)") with diagnosis, decision, rule, rejected alternatives, and out-of-scope list.
+
+**What changed.** SwiftUI's `.overlay(alignment: .bottomLeading)` propagates to every descendant inside the same overlay context. ContentView wraps `LoggingHomeView` (which owns the NavigationStack), so the root `.pageBadge("ContentView")` rendered simultaneously with each pushed child's own page badge at the identical anchor. Two 9pt text layers stacking produced the garbled "CoggingMomeView" / "CourCoptureCostainer" effect. Sheet-presented surfaces (DebugView via `.sheet(isPresented:)` at LoggingHomeView:212) get a fresh overlay context, which is why every DebugView screenshot rendered cleanly. Removing the single redundant root call site eliminates the double-render without touching any of the rendering primitives.
+
+**Verification.**
+
+1. `grep -rn '\.pageBadge(' VoltraLive --include='*.swift'` BEFORE: 13 Swift call sites (1 in ContentView, 2 in `Views/`, 10 in `Logging/Views/`). AFTER: 12 Swift call sites — ContentView's is gone; all 12 leaf screens (ConnectView, DashboardView, LoggingHomeView, ExercisePickerView, LiveCaptureView, SetLogView, ExportSheet, ExerciseStartView, DebugView, ExerciseDetailView, LiveCaptureContainer, LiveCaptureViewV2) retain their badges.
+2. ContentView still parses cleanly: braces balanced, no orphan modifier chain, `.buildBadgeOverlay()` followed directly by the three `.onChange` observers as before. No Xcode toolchain on the sandbox; CI `build.yml` on push is the authoritative compile check.
+3. `PageBadgeOverlay`, `BuildBadgeOverlay`, `DebugGridOverlay`, `PageRegistry` — all untouched (verified by `git diff --stat`).
+
+**Risks.** Low.
+
+- The only screen that loses its badge is the root `ContentView` itself, which is never the foreground user-visible screen — `LoggingHomeView` is always rendered on top of it as the cold-launch screen. Every reachable user-visible surface still carries its own `.pageBadge`.
+- No change to the rendering primitives, no change to header chrome, no change to routing, no change to any control write.
+- Sacred files (`VoltraProtocol.swift`, `TelemetryExtractor.swift`, `PacketParser.swift`, `FrameAssembler.swift`) untouched.
+
+**Out of scope.** No version bump. No TestFlight ship. b71 mode-glyph implementation remains paused. No changes to `PageBadgeOverlay` / `BuildBadgeOverlay` / `DebugGridOverlay` / `PageRegistry`, headers, ⋏/merge glyphs, force chart, or routing logic. No removal of the b66 `.settingsRestore` legacy enum case (b70 prompt §12).
+
+**Next step.** Push to `feat/ui-v4-2-claude` and let `build.yml` confirm the unsigned build still compiles. User decides when (or if) to roll the hotfix into a b71 cycle bump and ship.
+

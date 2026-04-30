@@ -283,6 +283,20 @@ Unknown screen names render `-- · ScreenName` so the badge still
 serves its identification purpose; that's the signal to add the
 name to the registry.
 
+**Mounting rule (b70 hotfix, V4-D19): containers must not own a
+`.pageBadge`.** `PageBadgeOverlay` is implemented as a SwiftUI
+`.overlay(alignment: .bottomLeading)`, which **propagates** to
+every descendant in the same overlay context (NavigationStack
+pushes, plain child views). If a parent container that wraps
+other screens mounts a `.pageBadge`, both the parent's and the
+child's badges render at the same anchor and visibly overlap as
+garbled stacked text. Only **leaf, user-visible screens** may
+carry `.pageBadge`. Sheet- and fullScreenCover-presented surfaces
+are fine because they get a fresh overlay context. The shipped
+b70 binary mounted `.pageBadge("ContentView")` on the root
+container; it was removed in the b70 hotfix — see V4-D19 in
+`04_DECISIONS_AND_CONSTRAINTS.md`.
+
 ### Debug grid overlay
 
 A four-state grid shipped behind `@AppStorage("debugGridMode")`:
