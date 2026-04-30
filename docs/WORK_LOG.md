@@ -3666,3 +3666,76 @@ switch only.
 b75+ at the earliest). No Settings toggle for the kill switch
 (deferred). No parity verification (Step 6 next). No version bump.
 No push.
+
+---
+
+## 2026-04-30 23:13 UTC — b71 Step 6: V1↔V2 parity verification (source-level audit)
+
+Pre-ship code-level audit across all eight items the b71 mandate
+called out. Sandbox is Linux with no Xcode toolchain — every item
+is verified by reading source, not by running the app. On-device
+QA happens post-TestFlight per the standing 5-gate ship discipline
+and is captured in `QA_LOG.md`.
+
+**Scope.** The eight items: LOAD/UNLOAD, ±5/±1 nudgers, Combined
+dual-fire, 4-row live grid, HR/KCAL, rest/idle, force chart live +
+`lastFinalizedSamples`, chain routing through V2.
+
+**Result.** All eight items pass. No genuine blockers. No b71
+scope item deferred.
+
+| # | Item | Verdict |
+|---|------|---------|
+| 1 | LOAD/UNLOAD | Verbatim — same `mdm.load`/`mdm.unload`/`ble.sendLoad`/`ble.sendUnload` opcode path |
+| 2 | ±5/±1 nudgers | Verbatim port (b71 V4-D21 part 1, b93b4fe) — both views read `CombinedParity.smallStepLb`/`largeStepLb` |
+| 3 | Combined dual-fire | Verbatim — same `WriterRouter.combined → mdm.applyCombined` graph; both views feed it |
+| 4 | 4-row live grid | Documented intentional redesign — every V1 tile mapped to a V2 surface (table in B71_PARITY_VERIFICATION.md § 4) |
+| 5 | HR/KCAL | Behavioral equivalent — V2 surfaces in `headerStrip` / `dualHeaderCluster` instead of tile grid row 4 |
+| 6 | Rest/idle | Verbatim port + b66 P1-2 honesty fix |
+| 7 | Force chart live + `lastFinalizedSamples` | Verbatim (b71 V4-D20) — same `ForceChartView` instance, same fallback, same secondary trace |
+| 8 | Chain routing through V2 | Verbatim port (b71 V4-D21 part 2, 2488484) — three V1 hooks + V1 7-step swap flow |
+
+**Files changed.**
+
+- `docs/handoff/B71_PARITY_VERIFICATION.md` (new) — full audit
+  with V1 source location, V2 source location, and verdict for
+  each of the eight items, plus the V1→V2 tile-mapping table for
+  item 4 (the only item that's a documented redesign rather than
+  a verbatim port).
+- `docs/WORK_LOG.md` (this entry).
+
+**Verification of the audit itself.**
+
+- Each V1 source location was confirmed via `grep` against
+  `LiveCaptureView.swift`.
+- Each V2 source location was confirmed via `grep` against
+  `LiveCaptureViewV2.swift`.
+- The `WriterRouter.combined → mdm.applyCombined` route was traced
+  via the same router instance that V1 and V2 both share through
+  the SwiftUI environment.
+- Force chart sample-fallback equivalence verified by reading
+  `LiveCaptureViewV2.forceChartCard` lines 1294-1330 against the
+  V1 path; both use
+  `session.currentSet?.samples ?? session.lastFinalizedSamples`
+  and both pull secondary traces from
+  `session.lastFinalizedByExercise[other.exerciseName]`.
+
+**Risks.**
+
+- Source-level parity is necessary but not sufficient. CI
+  `build.yml` is the authoritative compile check; the user's
+  post-build TestFlight QA checklist is the authoritative
+  behavior check. Both are still pending (no push performed).
+- Item 4's "documented intentional redesign" verdict relies on
+  the standing rule "do not restore the b46 4×2 grid unless I
+  explicitly ask for that rollback." If the user disagrees with
+  the V2 surface mapping for any of the eight tiles, that's a
+  scope-discussion item, not a regression.
+- Combined dual-fire is verified at the router level, not at the
+  V2 surface level. V2's WEIGHT card stepper writes through
+  `pendingPlannedWeightLb` which is the same source V1 uses; the
+  router fans the value to both sides via `mdm.applyCombined`
+  identically. The V2 stepper has shipped this path since b54.
+
+**Out of scope (this commit).** No code changes — audit only. No
+version bump. No push.
