@@ -908,3 +908,119 @@ V4-D19. The `force_curve.md` design doc is updated in the same
 commit to reflect the supersede; the rep-stacking / dual-band /
 gradient-mirror sections in that doc remain as design references
 for any future re-introduction (now scoped to V1's renderer).
+
+
+## V4-D21 — V2 must reach below-chart parity with V1 before chain routing flip (b71)
+
+**Cycle.** b71 / v0.4.44 / build 71 (in-flight, not shipped).
+
+**User direction (verbatim).** _"Stop paring scope down. b71 is NOT
+'whatever is already committed.' b71 is the target build scope. Do
+not version bump, push, run release.yml, or TestFlight ship until
+every item below is implemented, documented, committed, and
+summarized back to me."_ Items 3 and 4 of that scope require V2 to
+absorb the entire chain UI and become the unconditional default — but
+that is only safe if V2 already matches V1's below-chart surface area
+for every user, including chain users.
+
+**Decision.** Port the V1 below-chart affordances that V2 was missing
+into `LiveCaptureViewV2` directly, not by widening
+`V1RestoreSection`'s contract. Specifically:
+
+- **`SetMode` chips picker** at the bottom of `weightCard` (working /
+  warmUp / eccentric / band / pause / dropSet / isoHold). V2
+  previously had no surface for any of these mode tags, so
+  warmUp / pause / isoHold sets could not be tagged at all.
+- **`Target N reps` chip** in the `weightCard` header. Hidden when
+  `logging.upcomingTargetReps == 0`.
+- **Visible drop-cascade cancel chip** (`dropCancelChipV2`) mounted
+  between the force chart and `V1RestoreSection`. Self-hides unless
+  `logging.dropSetActive`. V2's prior cancel surface was a long-press
+  on the DROP tile; the user reported it as undiscoverable.
+- **Mode-aware ±step nudgers**. V2 previously hard-coded ±5 / ±1 in
+  `weightCard.stepperButton` calls; V1's `weightNudgerRow` reads
+  `CombinedParity.smallStepLb(for:) / largeStepLb(for:)` so Combined
+  mode shows ±2 / ±6. V2 now reads the same helpers.
+- **onAppear lifecycle parity**: `writerRouter.resetAppliedState()`,
+  `mdm.leftWriter.resetAppliedState()`, `mdm.rightWriter.resetAppliedState()`,
+  `logging.applyWorkoutMode(mdm.workoutMode)`,
+  `enforceCombinedParityOnEntry()`. V2 only had `writerRouter.attach`
+  before; the dual-side writer caches and the workout-mode handoff
+  to `LoggingStore`'s cascade math were leaked.
+- **onChange / onDisappear parity**: `onChange(of: mdm.workoutMode)`
+  re-applies workout mode + Combined parity (so the user toggling
+  `[⇄ MERGE]` mid-session lands on an even pendingPlannedWeightLb);
+  `onDisappear { health.stop() }` so HR / kcal pollers stop on
+  navigation pop.
+
+**Equivalences not ported.** V1's `upcomingSetCard` outer chrome
+(label "UPCOMING SET", bordered card) is intentionally NOT replicated.
+V2's `weightCard` is the canonical "upcoming set" surface and already
+hosts every nudger / mod tile / stepper / LOAD-toggle the user
+needs — adding a second card would duplicate the visual hierarchy.
+V1's separate `loadUnloadRow` (LOAD / UNLOAD pair buttons) is also
+NOT replicated as a separate row; V2 already binds those opcodes to
+the big-WEIGHT-NUMBER tap (`toggleHardwareLoad`) plus the LOADED/
+UNLOADED pill, both of which fire `ble.sendLoad()` / `ble.sendUnload()`
+through the same path V1 does.
+
+**Sequencing.** This commit is part 1 of three closely-coupled
+b71 V4-D21 commits, intentionally split for review reversibility:
+
+1. **Below-chart parity** (this commit) — non-chain ports listed
+   above. Reversible without affecting chain UI.
+2. **Chain UI port** (next commit) — port the V1 `supersetBanner`
+   chain-aware behavior into V2: full chain swap flow (auto-end
+   in-flight set + UNLOAD outgoing + flip slot + switch
+   `activeInstance` + restore chain-entry weight + push device
+   state), onAppear chain restoration, onChange `currentSet != nil`
+   → `lockSupersetTag()`, onChange `mdm.supersetActiveSlot` →
+   `switchActiveInstanceByExerciseName`. May replace the
+   `SupersetSwitcherBanner.swap` simple-mirror path with the V1
+   verbatim flow (or layer the chain-aware behavior on top).
+3. **Routing flip** (commit after) — remove
+   `if hasChain { return false }` (and any other V1-fallback branch)
+   from `LiveCaptureContainer.shouldUseV2`. Document
+   `@AppStorage("liveCaptureUIVersion")` as an emergency-only kill
+   switch, NOT the default route. Update `08_SUPERSET.md`,
+   `02_CURRENT_STATE.md`, `04_DECISIONS_AND_CONSTRAINTS.md` (this
+   ADR), and `10_OPEN_QUESTIONS.md` (resolve the "Should V2 become
+   the default?" question).
+
+A Step 6 parity verification pass follows the routing flip; the
+final commit is the version bump (`project.yml` + `Info.plist` +
+`01_PROJECT_OVERVIEW.md` + `02_CURRENT_STATE.md`) only after every
+item above is implemented and the user has been given a final
+summary.
+
+**Alternatives considered.**
+
+1. **Widen `V1RestoreSection` to host the new affordances.** Rejected.
+   `V1RestoreSection` is specifically the "below the force curve"
+   sub-tree (LOGGED SETS + Next-exercise + End-session). The new
+   chips, target-reps, and mode picker belong with the WEIGHT card
+   (above the force curve), and the drop-cancel chip belongs
+   directly under the chart. Mounting them inside `V1RestoreSection`
+   would force odd parent-child plumbing (`logging.dropSetActive`,
+   `logging.upcomingMode`, `logging.upcomingTargetReps`,
+   `mdm.workoutMode` to compute step sizes) for no UI win.
+2. **Change V1 hard-coded ±5 / ±1 to V2 hard-coded ±5 / ±1.**
+   Rejected. V1's `CombinedParity`-aware nudger is the correct
+   behavior — Combined mode totals must stay even per b47 / V4-D9.
+   V2 was silently regressed.
+3. **Defer below-chart parity to b72.** Rejected per the b71 scope
+   mandate ("Do not use 'this is large' as a reason to move items
+   to b72/b73/b74"). Step 3's routing flip in the same cycle would
+   route chain users into a V2 that lacked any way to tag a warm-up
+   set, see their target reps, or visibly cancel a drop cascade —
+   that is a regression we cannot ship.
+4. **Build a new V2-native upcomingSetCard equivalent.** Rejected.
+   The ports above are surgical adds inside `weightCard`; building
+   a new card would mean another wave of layout review for no
+   user-visible benefit.
+
+**Out of scope (this ADR).** No routing change — `LiveCaptureContainer`
+is untouched. No chain UI port — V2 still gates on
+`SupersetSwitcherBanner`'s `supersetTag && bothPaired` predicate;
+chain semantics are unchanged. No version bump, no push, no ship.
+No sacred-file changes.

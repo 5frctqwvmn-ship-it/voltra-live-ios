@@ -3366,3 +3366,79 @@ before the build appears in TestFlight.
 - No version bump, no push, no TestFlight ship — strictly per the standing constraint. CI has not yet compiled this change.
 
 **Next step.** Awaiting explicit user approval before any push, version bump, or TestFlight ship. When that approval comes, the cycle is b71 / v0.4.44 / build 71. Pre-ship: bump `project.yml` + `Info.plist` + `01_PROJECT_OVERVIEW.md` + `02_CURRENT_STATE.md` (NOT `_tmp/archive`), run lint gates, push to `feat/ui-v4-2-claude` with bot identity, let `build.yml` compile, then `release.yml dry_run=false` with the 5-gate altool verify protocol.
+
+
+## 2026-04-30 23:30 UTC — b71 below-chart parity port: SetMode chips, target reps, drop-cancel chip, mode-aware nudgers, lifecycle hooks (V4-D21 part 1 of 3)
+
+**Goal.** Step 5 of the b71 full-scope mandate: diff V1's below-chart UI (`upcomingSetCard`, `dropSetSection`, `loggedSetsSection`, `bottomActions`) against V2's `LiveCaptureViewV2` + `V1RestoreSection` and either port missing pieces or document the equivalence. b71 routing flip (Step 3) will send EVERY user — including chain users — through V2, so any V1-only affordance below the force chart that can't be reached on V2 is a regression and must be closed before the flip.
+
+**Parity diff result.** Audit of the four V1 sections vs the V2 surface:
+
+| V1 element | V2 status | Action this commit |
+|---|---|---|
+| `upcomingSetCard` "UPCOMING SET" header card | Absent in V2; weight + mods live inline in `weightCard` | **Equivalence documented** — V2's `weightCard` is the canonical "upcoming set" surface. The label text is gone but every control is reachable. Cleaner UI; no port. |
+| `weightNudgerRow` big number | Present (`weightCard` big number) | Equivalent |
+| `weightNudgerRow` ±5 / ±1 steps | Present BUT hard-coded ±5 / ±1 — broke Combined-mode parity (V1 advertises ±2 / ±6 in Combined to keep totals even per b47) | **Bug fix** — V2 stepperButtons now read `CombinedParity.smallStepLb(for: mdm.workoutMode)` / `largeStepLb(...)` like V1's `weightNudgerRow` does. |
+| `eccentricNudgerRow` ECC nudger | Present (`ModStepperRowV2` for ECC, with `clampedECC` 5–400 lb range) | Equivalent |
+| `effectiveTargetReps` "Target N reps" chip | Absent in V2 | **Ported** — small chip in `weightCard` header, hidden when no target. Mirrors V1 LiveCaptureView.swift:1480. |
+| `modeChipsRow` (`SetMode` picker for working / warmUp / eccentric / band / pause / dropSet / isoHold) | Absent in V2 — V2 only had armed-mods (ecc / chain / inv / drop), so `warmUp` / `pause` / `isoHold` could not be selected at all | **Ported** — new `modeChipsRow` view at the bottom of `weightCard`, ScrollView of seven `Capsule` buttons identical in behavior to V1. |
+| `loadUnloadRow` (LOAD / UNLOAD pair buttons) | Present via `toggleHardwareLoad` (tap big WEIGHT NUMBER toggles + LOADED pill) | Equivalent (different surface, same opcode path). |
+| `addedWeightSection` (pulley chip + plates picker) | Present via `PulleyAndPlatesBarV3` mounted above `forceChartCard` | Equivalent. |
+| `dropSetSection` / `dropCancelChip` (visible cancel chip when cascade live) | Absent in V2 (cancel only via long-press on DROP tile, not discoverable) | **Ported** — new `dropCancelChipV2` mounted between `forceChartCard` and `V1RestoreSection`, self-hides unless `logging.dropSetActive`. Mirrors V1 LiveCaptureView.swift:1958. |
+| `loggedSetsSection` LOGGED SETS list | Present via `V1RestoreSection.loggedSetsSection` (literally the same `SwipeableSetRow` code) | Equivalent. |
+| `undoToast` for set deletion | Present in `V1RestoreSection` | Equivalent. |
+| `bottomActions` (Next exercise / End session) | Present in `V1RestoreSection` | Equivalent. |
+| onAppear `writerRouter.attach + writerRouter.resetAppliedState + mdm.left/rightWriter.resetAppliedState` (writer-cache wipe so first LOAD after device power-cycle isn't no-op'd) | Partial — V2 only did `writerRouter.attach`. Dual-side writer caches were leaked across sessions. | **Ported** — V2 onAppear now wipes all three cached states. |
+| onAppear `applyWorkoutMode(mdm.workoutMode) + enforceCombinedParityOnEntry()` | Absent in V2 — drop-set cascade math could use the wrong step (-5 vs -6) on Combined entry, and a non-even pendingPlannedWeightLb was never rounded | **Ported** — V2 onAppear now applies workout mode + Combined parity. |
+| onChange `mdm.workoutMode` → re-apply mode + parity | Absent in V2 | **Ported.** |
+| onDisappear `health.stop()` | Absent in V2 — HR / kcal pollers were leaked across navigation pops. | **Ported.** |
+
+Two V1 lifecycle hooks are scoped to the chain UI port (Step 4) and intentionally NOT included in this commit:
+
+- onAppear chain restoration (V1 LiveCaptureView.swift:242-248 — switch to `activeSupersetEntry`'s exercise / weight / cascade anchor + push device state).
+- onChange `currentSet != nil` → `lockSupersetTag()`.
+- onChange `mdm.supersetActiveSlot` → `switchActiveInstanceByExerciseName`.
+- Full chain swap flow (auto-end in-flight set + UNLOAD outgoing + flip slot + switch instance + restore chain-entry weight + push), replacing `SupersetSwitcherBanner.swap` which currently only does the simple weight mirror.
+
+These will land in the Step 4 commit (b71 chain UI in V2) so the chain port stays reviewable as one unit. Keeping them out of this commit also means Step 5 can be reverted independently if a chain bug surfaces and the surgery needs to be split.
+
+**Files changed.**
+
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
+  - `weightCard` top row: added "Target N reps" chip between the WEIGHT label and the `loadedPill`. Hidden when `effectiveTargetReps == nil`.
+  - `weightCard` stepper row: replaced hard-coded `\u00B15 / \u00B11` literals with `CombinedParity.smallStepLb(for: mdm.workoutMode)` / `largeStepLb(...)` — Combined mode now nudges in `\u00B12 / \u00B16` like V1.
+  - `weightCard` body: added `modeChipsRow` at the bottom of the card (seven `SetMode` chips, identical to V1 `modeChipsRow`).
+  - Body stack: mounted `dropCancelChipV2` between `forceChartCard` and `V1RestoreSection`. Self-hides unless `logging.dropSetActive`.
+  - `onAppear`: added `writerRouter.resetAppliedState()`, `mdm.leftWriter.resetAppliedState()`, `mdm.rightWriter.resetAppliedState()`, `logging.applyWorkoutMode(mdm.workoutMode)`, `enforceCombinedParityOnEntry()` — port of V1 LiveCaptureView.swift:213-224.
+  - Added `.onChange(of: mdm.workoutMode)` → `applyWorkoutMode + enforceCombinedParityOnEntry` (V1 LiveCaptureView.swift:250).
+  - Added `.onDisappear { health.stop() }` (V1 LiveCaptureView.swift:289).
+  - New private members: `effectiveTargetReps` computed property, `modeChipsRow` view, `dropCancelChipV2` view, `enforceCombinedParityOnEntry()` helper.
+
+No changes to LoggingStore, MultiDeviceManager, WriterRouter, CombinedParity, ForceChartView, ForceChartV2, V1RestoreSection, SupersetSwitcherBanner, or any sacred file.
+
+**Verification.**
+
+- Brace / paren / bracket balance via comment-and-string-stripped Python regex pass on `LiveCaptureViewV2.swift` (1693 lines): braces 0 / parens 0 / brackets 0 — balanced.
+- All referenced symbols exist:
+  - `logging.upcomingTargetReps: Int` (LoggingStore.swift:49)
+  - `logging.upcomingMode: SetMode` (LoggingStore.swift:47)
+  - `logging.dropSetActive`, `logging.cascadeStepLabel` (LoggingStore.swift:171, 517-context)
+  - `logging.cancelDropSet()` (LoggingStore.swift:517)
+  - `logging.applyWorkoutMode(_:)` (LoggingStore.swift:244)
+  - `logging.reanchorCascadeIfActive(toLb:)` (LoggingStore.swift:609)
+  - `mdm.workoutMode.requiresEvenWeight` (DualMode.swift:107)
+  - `mdm.leftWriter.resetAppliedState()` / `mdm.rightWriter.resetAppliedState()` (MultiDeviceManager.swift:64-65, VoltraWriter.swift:128)
+  - `CombinedParity.smallStepLb(for:)` / `largeStepLb(for:)` / `roundDownToEven(_:)` (CombinedParity.swift)
+  - `SetMode` cases + `.label` (LoggingModels.swift:77-99)
+- Sacred files (`VoltraProtocol.swift` / `TelemetryExtractor.swift` / `PacketParser.swift` / `FrameAssembler.swift`) untouched — git diff scope is `LiveCaptureViewV2.swift` only.
+- No Xcode toolchain on the sandbox; CI `build.yml` on push is the authoritative compile check.
+
+**Risks.**
+
+- The new `modeChipsRow` adds a horizontally-scrolling row of seven capsules at the bottom of `weightCard`. Vertical footprint of the card grows by ~36 pt. Mitigated by the existing `ScrollView` enclosing `weightCard`.
+- `pushUpcomingStateToDevice()` is now called when the user picks a new `SetMode`. If `voltraMode == .band` the BLE write switches `VoltraMode.band` on the device; this is the V1 behavior verbatim and correct.
+- `onChange(of: mdm.workoutMode)` will fire `applyWorkoutMode + enforceCombinedParityOnEntry` whenever the user toggles `[⇄ MERGE]` mid-session. The parity helper rounds DOWN per b47 Q1, so the user never silently gains weight. If they were at 35 lb in Independent and toggle to Combined they land at 34 lb on the device; toggling back to Independent leaves them at 34 (no automatic restore). Behavior matches V1.
+- Combined-mode step parity is a real fix that changes user-visible nudger labels (\u00B15 / \u00B11 \u2192 \u00B16 / \u00B12 in Combined). V1 has shipped this since b47 / v0.4.25; V2 was silently regressed.
+- `health.stop()` on disappear may race a session-end path that also pops navigation. `HealthKitStore.stop()` is documented as idempotent (verified on the V1 path which has shipped this for the entire HealthKit lifetime), so a redundant call is a no-op.
+
+**Out of scope (this commit).** No routing change (Step 3); no chain UI port (Step 4); no parity verification pass (Step 6); no version bump; no push.

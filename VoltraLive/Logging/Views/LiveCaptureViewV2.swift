@@ -190,6 +190,10 @@ struct LiveCaptureViewV2: View {
                     PulleyAndPlatesBarV3()
                         .padding(.bottom, 8)
                     forceChartCard
+                    // b71 (V4-D21): visible drop cascade cancel chip,
+                    // ported from V1's dropSetSection. Self-hides when
+                    // no cascade is active.
+                    dropCancelChipV2
                     V1RestoreSection(onEndTapped: { showingEndConfirm = true })
                         .padding(.top, 12)
                 }
@@ -239,6 +243,23 @@ struct LiveCaptureViewV2: View {
         .onAppear {
             health.start()
             writerRouter.attach(ble: ble)
+            // b71 (V4-D21): mirror V1's onAppear writer-cache wipe.
+            // V1 LiveCaptureView.swift:213 clears writerRouter +
+            // mdm.left/rightWriter applied-state on every entry to
+            // the live screen. Without it the writer's cached
+            // baseLb may equal the new target after a device
+            // power-cycle, no-op'ing the first LOAD. V2 only wiped
+            // writerRouter; the dual-side writers were leaked.
+            writerRouter.resetAppliedState()
+            mdm.leftWriter.resetAppliedState()
+            mdm.rightWriter.resetAppliedState()
+            // b71 (V4-D21): mirror V1 LiveCaptureView.swift:223 —
+            // push current workoutMode into LoggingStore so the
+            // drop-set cascade math knows whether to use even (-6 lb)
+            // or odd (-5 lb) steps, and round the standing pending
+            // weight to even on Combined entry.
+            logging.applyWorkoutMode(mdm.workoutMode)
+            enforceCombinedParityOnEntry()
             withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
                 pulseOn = true
             }
@@ -246,6 +267,19 @@ struct LiveCaptureViewV2: View {
             Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
                 Task { @MainActor in self.blinkOn.toggle() }
             }
+        }
+        // b71 (V4-D21): mirror V1 LiveCaptureView.swift:250 — keep
+        // cascade math + Combined parity in sync if the user
+        // switches mode mid-session (back out to picker, re-enter).
+        .onChange(of: mdm.workoutMode) { _, newMode in
+            logging.applyWorkoutMode(newMode)
+            enforceCombinedParityOnEntry()
+        }
+        // b71 (V4-D21): mirror V1 LiveCaptureView.swift:289 — stop
+        // HealthKit polling when the live screen vanishes so HR /
+        // kcal observers don't leak across navigation.
+        .onDisappear {
+            health.stop()
         }
         // b66 V4.2: page-name badge — bottom-leading, faint mint,
         // Swift type name verbatim. Always visible in TestFlight.
@@ -747,12 +781,21 @@ struct LiveCaptureViewV2: View {
         let weightLb = Int(((logging.pendingPlannedWeightLb ?? 0) * pulleyM).rounded())
 
         return VStack(spacing: 10) {
-            // Top row: WEIGHT label + LOADED/UNLOADED pill
-            HStack {
+            // Top row: WEIGHT label + Target chip + LOADED/UNLOADED pill
+            HStack(spacing: 8) {
                 Text("WEIGHT")
                     .font(.system(size: 9, weight: .bold))
                     .kerning(1.6)
                     .foregroundColor(VoltraColor.textDim)
+                // b71 (V4-D21): port V1 effectiveTargetReps display.
+                // Renders the "Target N reps" hint that V1 surfaced on
+                // upcomingSetCard so users can see their reps target on
+                // the V2 live screen too. Hidden when no target is set.
+                if let reps = effectiveTargetReps {
+                    Text("Target \(reps) reps")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(VoltraColor.textDim)
+                }
                 Spacer()
                 loadedPill
             }
@@ -821,10 +864,16 @@ struct LiveCaptureViewV2: View {
                 }
 
                 Spacer(minLength: 4)
-                stepperButton("\u{2212}5") { adjustWeight(-5) }
-                stepperButton("\u{2212}1") { adjustWeight(-1) }
-                stepperButton("+1")        { adjustWeight(+1) }
-                stepperButton("+5")        { adjustWeight(+5) }
+                // b71 (V4-D21): mode-aware step sizes via CombinedParity,
+                // matching V1's weightNudgerRow. Combined mode advertises
+                // \u00B12 / \u00B16 so totals stay even per b47 parity rule;
+                // every other mode keeps the legacy \u00B11 / \u00B15 steps.
+                let small = CombinedParity.smallStepLb(for: mdm.workoutMode)
+                let large = CombinedParity.largeStepLb(for: mdm.workoutMode)
+                stepperButton("\u{2212}\(large)") { adjustWeight(-large) }
+                stepperButton("\u{2212}\(small)") { adjustWeight(-small) }
+                stepperButton("+\(small)")        { adjustWeight(+small) }
+                stepperButton("+\(large)")        { adjustWeight(+large) }
             }
 
             // Nested mod rows — render only ARMED rows in fixed order.
@@ -914,6 +963,15 @@ struct LiveCaptureViewV2: View {
                     ) { delta in adjustDropStep(delta) }
                 }
             }
+
+            // b71 (V4-D21): port V1 modeChipsRow. SetMode picker for
+            // working / warmUp / eccentric / band / pause / dropSet /
+            // isoHold. V2 previously had no surface for these tags so
+            // warmUp / pause / isoHold sets could not be tagged at all.
+            // Selecting a mode mirrors V1's behavior: write to
+            // logging.upcomingMode and re-push device state (band
+            // toggles VoltraMode.band on the BLE write).
+            modeChipsRow
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -924,6 +982,83 @@ struct LiveCaptureViewV2: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(.bottom, 8)
+    }
+
+    /// b71 (V4-D21): port of V1 effectiveTargetReps. Returns the
+    /// upcoming target reps when > 0, otherwise nil so the chip
+    /// hides. Mirrors V1 LiveCaptureView.swift:1480.
+    private var effectiveTargetReps: Int? {
+        let r = logging.upcomingTargetReps
+        return r > 0 ? r : nil
+    }
+
+    /// b71 (V4-D21): port of V1 modeChipsRow (LiveCaptureView.swift:
+    /// 1588). Horizontal scroll of seven SetMode chips. Selected chip
+    /// fills with accent; tapping re-pushes device state so the
+    /// VoltraMode.band branch fires on band selection.
+    private var modeChipsRow: some View {
+        let modes: [SetMode] = [.working, .warmUp, .eccentric, .band, .pause, .dropSet, .isoHold]
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(modes, id: \.self) { m in
+                    Button {
+                        logging.upcomingMode = m
+                        pushUpcomingStateToDevice()
+                    } label: {
+                        Text(m.label)
+                            .font(.system(size: 12, weight: .semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                logging.upcomingMode == m
+                                    ? VoltraColor.accent
+                                    : VoltraColor.bgElev2
+                            )
+                            .foregroundColor(
+                                logging.upcomingMode == m
+                                    ? VoltraColor.bg
+                                    : VoltraColor.text
+                            )
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    /// b71 (V4-D21): visible drop cascade cancel chip, ported from V1
+    /// dropSetSection / dropCancelChip. V2 previously only allowed
+    /// cancellation via long-press on the DROP tile, which the user
+    /// reported was not discoverable. The chip self-hides unless
+    /// `logging.dropSetActive` is true.
+    @ViewBuilder
+    private var dropCancelChipV2: some View {
+        if logging.dropSetActive {
+            HStack {
+                Text("Cascade live · step \(logging.cascadeStepLabel)")
+                    .font(.system(size: 11))
+                    .foregroundColor(VoltraColor.textDim)
+                Spacer()
+                Button {
+                    logging.cancelDropSet()
+                } label: {
+                    Text("Cancel cascade")
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(VoltraColor.bgElev2)
+                        .foregroundColor(VoltraColor.textDim)
+                        .overlay(
+                            Capsule().stroke(VoltraColor.border, lineWidth: 1)
+                        )
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 6)
+        }
     }
 
     /// "✓ LOADED" / "UNLOADED" pill — mirrors deviceLoaded.
@@ -1366,6 +1501,22 @@ struct LiveCaptureViewV2: View {
     }
 
     // MARK: - Stepper actions
+
+    /// b71 (V4-D21): port of V1 enforceCombinedParityOnEntry
+    /// (LiveCaptureView.swift:300). When entering Combined mode,
+    /// round the standing pendingPlannedWeightLb DOWN to the nearest
+    /// even pound. No-op in any other mode. Per b47 Q1 = A: round
+    /// down so we never silently add weight the user didn't request.
+    private func enforceCombinedParityOnEntry() {
+        guard mdm.workoutMode.requiresEvenWeight else { return }
+        let cur = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
+        let even = CombinedParity.roundDownToEven(cur)
+        if even != cur {
+            logging.pendingPlannedWeightLb = Double(even)
+            logging.reanchorCascadeIfActive(toLb: Double(even))
+            pushUpcomingStateToDevice()
+        }
+    }
 
     private func adjustWeight(_ delta: Int) {
         let cur  = Int((logging.pendingPlannedWeightLb ?? 0).rounded())

@@ -1,6 +1,6 @@
 # 02 — Current State
 
-_Last updated: 2026-04-30 (b71 cycle, in flight — force-chart canonicalization)._
+_Last updated: 2026-04-30 (b71 cycle, in flight — force-chart canonicalization + below-chart parity port)._
 
 > **Maintenance rule:** this file is overwritten on every ship. The
 > append-only history lives in `docs/WORK_LOG.md`. If you're updating
@@ -20,7 +20,7 @@ duration 29s. HEAD at ship: `e10b428fbf4afdb75db8f3ffc72b4730bac49a65`.
 Awaiting Apple processing before TestFlight surface.
 
 **Active cycle:** b71 / v0.4.44 / build 71 — NOT YET BUMPED OR SHIPPED;
-currently a working diff on `feat/ui-v4-2-claude`. Two unshipped
+currently a working diff on `feat/ui-v4-2-claude`. Three unshipped
 commits sit on top of the b70 ship tag:
 - b70 page-badge double-render hotfix (commit `34ba63e`, 2026-04-30 22:02 UTC).
 - b71 force-chart canonicalization — V1's `ForceChartView` is now mounted
@@ -29,8 +29,24 @@ commits sit on top of the b70 ship tag:
   but is no longer mounted anywhere. See ADR **V4-D20** in
   `04_DECISIONS_AND_CONSTRAINTS.md` (supersedes V4-D13). The user's
   verbatim rationale: "the V1 ForceChartView is the one that displays
-  the force curve correctly in practice." Version bump and ship are
-  pending explicit user approval per the standing constraint.
+  the force curve correctly in practice." Commit `92cac54`.
+- b71 below-chart parity port (V4-D21 part 1 of 3) — V2 now matches V1's
+  `upcomingSetCard` / `dropSetSection` / `loggedSetsSection` /
+  `bottomActions` surface area: `SetMode` chips picker, `Target N reps`
+  chip, visible drop-cascade cancel chip, mode-aware ±step nudgers (V1
+  Combined parity ±2 / ±6), full onAppear writer-cache wipe + workout-
+  mode + Combined-parity hooks, onChange `mdm.workoutMode`, onDisappear
+  `health.stop()`. Required before the Step 3 routing flip so chain
+  users routed through V2 still see every below-chart affordance.
+  Equivalence documented for `upcomingSetCard` chrome and load/unload
+  pair (V2 surfaces both via `weightCard` + `toggleHardwareLoad`).
+  See ADR **V4-D21** (Step 4 chain UI port + Step 3 routing flip
+  follow as separate commits in the same cycle).
+
+Version bump and ship are pending explicit user approval per the
+standing constraint AND completion of the remaining b71 scope items
+(Step 4 chain UI port; Step 3 routing flip; Step 6 parity verification
+pass).
 
 ## What works today
 
@@ -43,8 +59,13 @@ commits sit on top of the b70 ship tag:
   grid + per-engaged-mod stepper rows → REPS / TOTAL VOLUME tiles →
   force chart (b71: now V1's `ForceChartView` raw-sample phase-colored
   polyline + Catmull-Rom smoothing + secondary-trace superset overlay,
-  per ADR V4-D20) → V1RestoreSection (pulley chip + added-plates picker
-  + LOGGED SETS swipeable list + Next-exercise + End-session).
+  per ADR V4-D20) → drop-cascade cancel chip (b71 V4-D21, self-hides
+  unless cascade is live) → V1RestoreSection (pulley chip + added-plates
+  picker + LOGGED SETS swipeable list + Next-exercise + End-session).
+  As of b71 V4-D21 the WEIGHT card also surfaces a `Target N reps`
+  chip in its header and a horizontal `SetMode` chips row at its
+  bottom (working / warmUp / eccentric / band / pause / dropSet /
+  isoHold), and its ±step nudgers are mode-aware via `CombinedParity`.
 - Dual-Voltra Independent + Combined modes (V1 only); Twin Mode pill
   cluster with focus-aware mod routing (b58/V4-D9).
 - Superset chain (V1 only) with per-instance `assignedVoltra` routing
