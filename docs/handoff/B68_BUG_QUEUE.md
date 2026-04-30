@@ -13,7 +13,8 @@
 
 | ID      | Title                                                  | Status | Closing commit |
 |---------|--------------------------------------------------------|--------|----------------|
-| B68-01  | Demo mode should auto-engage in Live View when no Voltra is connected | FIXED  | (this commit)  |
+| B68-01  | Demo mode should auto-engage in Live View when no Voltra is connected | SHIPPED v0.4.41 / build 68 | `408db2e` |
+| B68-02  | Auto-enter **Simulation Mode** when weights are loaded in Demo Mode with no Voltra connected | OPEN   | —              |
 
 ---
 
@@ -147,5 +148,141 @@ connection) are unchanged.
 
 ### Status
 
-**FIXED.** Awaiting `release.yml dry_run=false` ship verify.
-Will ship as v0.4.41 / build 68.
+**SHIPPED in v0.4.41 / build 68** via run
+[`25138837190`](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25138837190),
+Delivery UUID `bb7425ca-c619-4db3-b961-15ac5fc83928`. 5-gate
+altool verify: PASS (57 s, success markers present, blocklist
+clean).
+
+---
+
+## B68-02 — Auto-enter **Simulation Mode** when weights are loaded in Demo Mode with no Voltra connected
+
+**Reported:** Apr 29 2026, 19:05 CDT (≈ 2 minutes after b68 ship
+verify, before TestFlight processing could surface build 68
+to a device).
+
+**User report (verbatim):**
+
+> **Title:** Auto-enter Simulation Mode when weights are loaded
+> in Demo Mode with no Voltra connected
+>
+> **Type:** Bug / Regression
+>
+> **Summary.** When the user is in Demo Mode with no Voltra
+> device connected and loads weights from the Live View screen,
+> the app should automatically transition into Simulation Mode
+> — running as if real equipment were in use. This currently
+> does not happen.
+>
+> **Previous Behavior.** Simulation Mode used to engage
+> automatically when entering Demo Mode from the original start
+> screen. That start-screen entry point was removed in the
+> latest update, and the simulation trigger was lost along with
+> it.
+>
+> **Expected Behavior.**
+> 1. User is in Demo Mode with no Voltra paired/connected
+> 2. User opens Live View and loads weights
+> 3. App detects "Demo Mode + no device + weights loaded" →
+>    automatically enters Simulation Mode
+> 4. Live View behaves as if the user were actually using the
+>    equipment
+>
+> **Actual Behavior.** Loading weights in Demo Mode with no
+> Voltra connected does nothing — Simulation Mode never
+> engages, and there's no longer any path to reach it from a
+> cold start.
+>
+> **Suggested Fix.** Re-hook the Simulation Mode trigger to
+> fire on the "weights loaded + no device connected" state
+> inside Live View, instead of relying on the deprecated
+> start-screen entry point.
+
+### Possible interpretation conflict with B68-01 (CRITICAL)
+
+B68-01 (just shipped in build 68) hooked
+`autoEngageDemoIfNeeded()` into
+`LiveCaptureViewV2.toggleHardwareLoad()` such that **tapping a
+weight with no device connected calls `demo.enter(source:
+.prePair, onTelemetry: DemoTelemetryBridge.shared.handler)`**.
+`DemoController.enter(.prePair)` already starts a
+`SyntheticTelemetryGenerator` that pushes synthetic frames
+through the same `telemetryHandler` closure the real BLE
+manager uses (verified at
+`VoltraLive/VoltraLiveApp.swift:148–174`,
+`VoltraLive/Demo/DemoController.swift:135–142`).
+
+The user's wording for B68-02 ("Demo Mode + no device + weights
+loaded → automatically enters Simulation Mode") frames Demo
+Mode and Simulation Mode as **two distinct states**, with
+Simulation Mode being the downstream behavior ("Live View
+behaves as if the user were actually using the equipment").
+B68-01's code engages Demo Mode on weight tap; whether it also
+delivers the "behaves as if real equipment" result depends on
+whether "Simulation Mode" is:
+
+- **Interpretation A.** A user-facing label for the
+  observable side-effect of `DemoController.enter(.prePair)` —
+  i.e. synthetic telemetry already drives the chart and rep
+  counter through `telemetryHandler`. If true, B68-01 already
+  closes B68-02 functionally, and the report is the user
+  rephrasing the same regression in different language ~2 min
+  before build 68 could possibly be on their device.
+- **Interpretation B.** A *separate* code path that the old
+  start screen invoked alongside `DemoController.enter`, lost
+  when `ConnectView` was demoted in B67-01 — e.g. a
+  `SimulationMode` flag on `LoggingStore` / `SessionStore`,
+  pulley + mode plumbing, ECC/CHAIN behavior, rep-detection
+  thresholds, or a writer-router fake. Symbol search for
+  `Simulation`, `simulator`, `SimMode`, `simMode`,
+  `isSimulating` in `VoltraLive/` returns **only one match**
+  (`HealthKitStore.swift:411` — unrelated parity stub for
+  Xcode preview/simulator builds), strongly suggesting there
+  was no separate Swift-symbol Simulation Mode and the user is
+  using the term colloquially. But the user is the
+  authoritative source of truth for product naming — do not
+  assume.
+
+### Held questions (per HR#2 + HR#3 — ask after user says "done")
+
+- **Q1 — Is "Simulation Mode" the same observable state that
+  `DemoController.enter(.prePair)` already produces (synthetic
+  telemetry through `telemetryHandler`), or a separate state?**
+  If same: please test build 68 once TestFlight processes it;
+  the fix may already cover this. If separate: what is the
+  product surface called and where in the old start-screen
+  flow did it live?
+- **Q2 — If separate, what specific behaviors should Simulation
+  Mode produce that B68-01's auto-engage does not?** E.g.
+  pulley multiplier mock, ECC/CHAIN simulated tension, rep
+  cadence pacing, weight-vs-band mode switch, writer-router
+  no-op vs fake — which of these (if any) used to trigger?
+- **Q3 — Should this gate require Demo Mode to *already* be
+  active** (entered manually from `LoggingHomeView`'s
+  postPair button or DebugView toggle), as the user's wording
+  suggests, **or fire on "no device + weights loaded" alone**
+  as B68-01 implements? The phrasing "User is in Demo Mode
+  with no Voltra paired" reads like a precondition.
+- **Q4 — Is build 68 already on the user's device?** If not,
+  please install and re-test before any code changes — this
+  may be a duplicate of B68-01 reframed, and writing more code
+  on a misread risks breaking the working B68-01 wiring.
+
+### Evidence trace (already grepped)
+
+| File | Line | Note |
+|------|------|------|
+| `VoltraLive/Demo/DemoTelemetryBridge.swift` | full file | singleton holds canonical `(Telemetry) → Void` handler; set once at app launch |
+| `VoltraLive/VoltraLiveApp.swift` | 148–174 | `telemetryHandler` closure assigned to `bleManager.onTelemetry` AND to `DemoTelemetryBridge.shared.handler` so synthetic + real telemetry route identically |
+| `VoltraLive/Demo/DemoController.swift` | 135–142 | on `.prePair`, spins up `SyntheticTelemetryGenerator(onTelemetry: { telem in onTelemetry(telem); logger?.recordTelemetry(telem) })` and calls `gen.start()` |
+| `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` | 1452–1495 | B68-01 hooks `autoEngageDemoIfNeeded()` at top of `toggleHardwareLoad()` |
+| Symbol search `Simulation\|simulator\|SimMode\|simMode\|isSimulating` | — | exactly one match (`HealthKitStore.swift:411`, unrelated preview/simulator parity stub). No first-class "Simulation Mode" symbol in the codebase. |
+
+### Status
+
+**OPEN.** Holding all questions per HR#2 until user says "done".
+No code changes will be made on B68-02 until the user confirms
+whether (a) build 68 has been installed and tested, and (b)
+Simulation Mode is the same as B68-01's `prePair` demo or a
+distinct concept I'm missing.

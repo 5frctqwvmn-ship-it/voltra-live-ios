@@ -4,18 +4,27 @@
 > `docs/WORK_LOG.md` and are deleted from here. Unfixed items
 > stay until shipped.
 
-## b68 Bug Batch — FIXED in-tree, awaiting altool ship
+## b68 Bug Batch — in flight
 
 Cycle opened Apr 29 2026 (PDT) immediately after b67 TestFlight
-ship verify. Cycle target: v0.4.41 / build 68 on
-`feat/ui-v4-2-claude`. See `B68_BUG_QUEUE.md` for per-bug
-detail + Q&A and `04_DECISIONS_AND_CONSTRAINTS.md` ADR V4-D16
-for the auto-engage contract.
+ship verify. Active branch: `feat/ui-v4-2-claude`. See
+`B68_BUG_QUEUE.md` for per-bug detail + Q&A and
+`04_DECISIONS_AND_CONSTRAINTS.md` ADR V4-D16 for the B68-01
+auto-engage contract.
 
-- **B68-01** — FIXED in-tree — demo mode auto-engages on
-  `LiveCaptureViewV2.toggleHardwareLoad()` when no Voltra is
-  connected, and auto-exits via `.onChange` observers when any
-  device pairs mid-session (prePair source only).
+- **B68-01** — SHIPPED v0.4.41 / build 68 (`408db2e`) — demo
+  mode auto-engages on `LiveCaptureViewV2.toggleHardwareLoad()`
+  when no Voltra is connected, and auto-exits via `.onChange`
+  observers when any device pairs mid-session (prePair source
+  only). 5-gate altool verify: PASS. Delivery UUID
+  `bb7425ca-c619-4db3-b961-15ac5fc83928`.
+- **B68-02** — OPEN — Auto-enter "Simulation Mode" when
+  weights are loaded in Demo Mode with no Voltra connected.
+  Possible duplicate-of / reframing-of B68-01 (reported ≈ 2 min
+  after b68 ship verify, before TestFlight could surface
+  build 68); the codebase has no first-class "Simulation Mode"
+  symbol. Holding for user clarification per HR#2 before any
+  code changes.
 
 ## b67 Bug Batch — SHIPPED in v0.4.40 / build 67
 
