@@ -3277,3 +3277,30 @@ changes, H1/H2/H4 fixes — all deferred per b70 prompt §12.
 
 **Ship.** Pending. Will run `release.yml dry_run=false` after
 this commit lands; 5-gate altool verify, then v0.4.43 / build 70.
+
+### Ship verification (5-gate altool, b70)
+
+Workflow run: [25176969283](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25176969283)
+status = success.
+
+1. **Exit code 0** — confirmed (`altool upload succeeded
+   (duration 29s, success marker present).`).
+2. **Wall-clock duration ≥20s** — 29s.
+3. **Positive success markers** — `UPLOAD SUCCEEDED with no errors`
+   AND `No errors uploading archive at 'build/export/VoltraLive.ipa'`
+   both present in the altool log.
+4. **Zero failure markers** — blocklist grep clean against the live
+   altool stdout. Only blocklist-pattern hits in the run log are
+   script-source comment lines (prefix `[36;1m`) that document the
+   gate itself, not actual upload errors.
+5. **Delivery UUID:** `fc2f3148-6f9e-484e-b83c-23534bcc1582`.
+
+**TestFlight surface:** v0.4.43 (build 70) uploaded to App Store
+Connect on Apr 30 2026 at 16:34 UTC. Awaiting Apple processing
+before the build appears in TestFlight.
+
+**HEAD SHA at ship:** `e10b428fbf4afdb75db8f3ffc72b4730bac49a65`.
+
+**Commits in b70 cycle (2):**
+- `af68099` — docs(handoff): b70 ambiguity prompt for Opus adjudication (pre-implementation)
+- `e10b428` — feat(b70): demo entry source connection-aware + page registry + debug grid overlay (v0.4.43 / build 70)
