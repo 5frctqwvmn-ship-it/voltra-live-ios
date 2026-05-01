@@ -2595,3 +2595,24 @@ hours of ship — exactly the gap it's meant to close.
 - **Risks:** None to runtime. Pure documentation addition.
 - **Next step:** None — informational handoff doc for future
   sessions.
+
+## 2026-05-01 05:08 UTC — Open B74 bug queue (post-b74 ship feedback)
+
+- **Files changed:** `docs/handoff/B74_BUG_QUEUE.md` (new),
+  `docs/WORK_LOG.md` (this entry).
+- **What changed:** Opened the B74 bug queue capturing seven
+  post-b74-ship feedback items: F1 auto-connect L/R by
+  advertised-name substring (QUEUED FOR GPT-5), F2 surface
+  Merge AND Mirror as distinct modes, F3 Merge button performs
+  Mirror behavior (semantics need separation), F4 V2 weight
+  label ellipsis above ~100 lb (twin-mode layout shift),
+  F5 Merge-mode minus-weight is left-favored, F6 twin-mode L/R
+  isolate tap does not isolate (LOAD still fires both), F7 misc
+  Merge UI polish bucket. All statuses OPEN except F1.
+- **Verification:** No code changes. No release. No TestFlight.
+  No `release.yml` dispatch. No signing/altool/secrets touched.
+  Docs-only PR per release-only mode (`11_AGENT_ROLES.md`).
+- **Risks:** None to runtime. Pure documentation addition.
+- **Next step:** Wait for GPT-5 to open a feature PR fixing F1
+  (the prerequisite for reproducing F2/F3/F5/F6). Claude is
+  release-only until the user says "Ship PR #N as build X."
