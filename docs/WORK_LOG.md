@@ -3989,3 +3989,86 @@ fires).
 on push will be the first compile gate; user has not approved
 push of the bookkeeping commit `8bdd88b` yet, so this commit
 also stays local).
+
+---
+
+## 2026-05-01 02:35 UTC — b72 version bump v0.4.44/71 → v0.4.45/72 (FINAL commit of b72 cycle)
+
+Final commit of the b72 cycle per the standing mandate ("Keep
+the version bump as the final separate commit only after the
+full scope lands"). The b72 scope (debug grid overlay upgrade)
+landed in the preceding two commits:
+
+1. Bookkeeping (log b71 ship, open b71 QA skeleton, capture
+   b72 grid prompt) — commit `8bdd88b`
+2. Replace 9-anchor debug overlay with progressive-density
+   grid (V4-D22) — commit `65ddd5c`
+
+This commit is the version bump only. No code logic changes.
+This is a debug-overlay-only build per user request — pre-b72
+the only behavioral delta from v0.4.44/71 is the State 0→4
+debug grid cycle on the build-badge tap. No protocol, routing,
+chart, or page-registry changes.
+
+**Files changed.**
+
+- `project.yml`
+  - Settings block (lines ~64-65): `MARKETING_VERSION` 0.4.44 →
+    0.4.45, `CURRENT_PROJECT_VERSION` 71 → 72.
+  - Info plist generation block (lines ~92-93):
+    `CFBundleShortVersionString` 0.4.44 → 0.4.45,
+    `CFBundleVersion` 71 → 72.
+- `VoltraLive/Info.plist`
+  - `CFBundleShortVersionString` 0.4.44 → 0.4.45.
+  - `CFBundleVersion` 71 → 72.
+- `docs/handoff/01_PROJECT_OVERVIEW.md`
+  - Top-of-file shipping-build line bumped to v0.4.45 / build
+    72 (b72 cycle).
+- `docs/handoff/02_CURRENT_STATE.md`
+  - Header: "Last shipped b71 (v0.4.44 / build 71)" preserved
+    as canonical last-shipped reference.
+  - Active-cycle banner rewritten for b72 / v0.4.45 / build 72,
+    listing all three b72 commits (`8bdd88b`, `65ddd5c`, this
+    bump).
+- `docs/WORK_LOG.md` (this entry).
+
+Per the standing process requirement "version bump in
+`project.yml` + `Info.plist` + `01_PROJECT_OVERVIEW.md` +
+`02_CURRENT_STATE.md` (NOT _tmp/archive)" — the `_tmp/archive`
+tree was deliberately NOT touched.
+
+**Verification.**
+
+- `git log --oneline -3` confirms the commit ordering on top of
+  b71's shipped HEAD `26af534`:
+  - b72 bookkeeping (`8bdd88b`)
+  - b72 grid implementation (`65ddd5c`)
+  - b72 version bump (this commit)
+- CI on `65ddd5c`: run
+  [25199140398](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25199140398)
+  = `BUILD SUCCEEDED`. SwiftCompile log confirms
+  `DebugGridOverlay.swift`, `BuildBadgeOverlay.swift`,
+  `PageBadgeOverlay.swift` all genuinely recompiled (not
+  cached).
+
+**Risks.**
+
+- Apple's version-component rule: `CFBundleShortVersionString`
+  ≤ 3 components. `0.4.45` is 3 components — compliant.
+- Existing TestFlight history shows builds 1-71. Build 72 is
+  the next contiguous integer — compliant with App Store
+  Connect's "build numbers must monotonically increase" rule.
+- The `_tmp/archive` tree was intentionally NOT touched per the
+  carryover process requirement. Same as b71.
+
+**Out of scope (this commit).** No code changes. No QA_LOG
+entry yet (lives post-TestFlight per b58 process). The pending
+b71 post-build QA pass is paused while this b72 ship lands;
+when it resumes it will cover BOTH b71 items AND the new b72
+debug grid overlay.
+
+**Pending.** Push approval already granted by user ("Bump to
+v0.4.45 / build 72, push, ship to TestFlight"). Next steps
+after this commit: push to `feat/ui-v4-2-claude`, trigger
+`release.yml` with `dry_run=false`, poll to completion, verify
+altool upload step success, report ship complete.

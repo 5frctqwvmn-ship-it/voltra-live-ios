@@ -19,9 +19,41 @@ verify passed; Delivery UUID `fc2f3148-6f9e-484e-b83c-23534bcc1582`,
 duration 29s. HEAD at ship: `e10b428fbf4afdb75db8f3ffc72b4730bac49a65`.
 Awaiting Apple processing before TestFlight surface.
 
-**Active cycle:** b71 / v0.4.44 / build 71 — BUMPED, NOT YET PUSHED OR SHIPPED;
-currently a working diff on `feat/ui-v4-2-claude`. Seven unshipped
-commits sit on top of the b70 ship tag:
+**Last shipped:** b71 / v0.4.44 / build 71 — V2 canonical live capture
+view, V1 chain UI ported, force chart canonical, page-badge hotfix.
+Shipped 2026-04-30 23:43 UTC,
+[run 25194880211](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25194880211),
+HEAD `26af534`. 5-gate altool verify passed.
+
+**Active cycle:** b72 / v0.4.45 / build 72 — debug-overlay-only ship.
+Replaces the b70/V4-D18 9-anchor marker overlay with a 5-state
+progressive-density spreadsheet-style grid (off / base 32pt / half
+16pt / quarter 8pt / max + region outlines). Same toggle gesture
+(build-badge tap), same AppStorage key, new behavior. See ADR
+**V4-D22**. Commits on top of the b71 ship tag:
+
+- b72 bookkeeping commit `8bdd88b` — logged the b71 ship to
+  `docs/WORK_LOG.md`, opened a b71 QA skeleton in `QA_LOG.md`,
+  and captured the b72 design prompt verbatim at
+  `docs/handoff/B72_DEBUG_GRID_PROMPT.md` so the repo (not chat)
+  is the source of truth.
+- b72 grid implementation commit `65ddd5c` —
+  `VoltraLive/Views/DebugGridOverlay.swift` rewritten in place
+  (Canvas-based renderer, single draw call, anchor-preference
+  region overlay for State 4); `BuildBadgeOverlay.swift` tap
+  cycles `DebugGridDensity.next()`; legacy `DebugGridMode` enum
+  retained behind `// SUPERSEDED` marker for one-line rollback;
+  AppStorage key `"debugGridMode"` preserved with legacy-value
+  migration via `DebugGridDensity.from(_:)`. CI run
+  [25199140398](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25199140398)
+  green; `BUILD SUCCEEDED` with all three b72 files in the
+  SwiftCompile manifest.
+- b72 version bump v0.4.44/71 → v0.4.45/72 (this commit) —
+  `project.yml`, `VoltraLive/Info.plist`, `01_PROJECT_OVERVIEW.md`,
+  this file. Bot identity.
+
+**Historical (pre-b72):** Seven unshipped b71 commits sat on top
+of the b70 ship tag before the b71 cycle landed:
 - b70 page-badge double-render hotfix (commit `34ba63e`, 2026-04-30 22:02 UTC).
 - b71 force-chart canonicalization — V1's `ForceChartView` is now mounted
   inside `LiveCaptureViewV2.forceChartCard`; the b67-10 parametric-sine
