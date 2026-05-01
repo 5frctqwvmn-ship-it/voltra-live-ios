@@ -3824,3 +3824,69 @@ TestFlight per the b58 process). No Apple submission.
 
 **Pending.** Final summary back to the user. Wait for explicit
 push approval before any TestFlight ship.
+
+---
+
+## b71 ship — v0.4.44 / build 71 — 2026-04-30 23:43 UTC
+
+**HEAD shipped:** `26af534` (commit 7 of the b71 chain — version
+bump). Branch `feat/ui-v4-2-claude` pushed to origin earlier the
+same evening (`41556db..26af534`).
+
+**Ship workflow.** `release.yml` triggered via
+`workflow_dispatch` with `dry_run=false` on
+`feat/ui-v4-2-claude`. Run ID
+[25194880211](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25194880211).
+Conclusion = `success`. Run duration consistent with prior signed
+TestFlight ships on this branch (~6m).
+
+**5-gate verification (release.yml steps).**
+1. `Run protocol unit tests` — success. Sacred-file goldens
+   green, including the b58 5-gate signing assertions.
+2. `Build and archive (signed)` — success. Xcode 26 / iOS 26 SDK,
+   Release configuration, signed with the App Store
+   distribution profile.
+3. `Verify signed IPA` — success.
+4. `Verify embedded entitlements (HealthKit, iCloud)
+   [b49 hardened]` — success.
+5. `Upload to TestFlight via altool` — **success**. This is the
+   canonical TestFlight-acceptance signal (altool exits 0 only
+   when ASC has accepted the IPA into processing).
+
+**Skipped steps (intentional).** Dry-run-only artifact upload and
+tag-only GitHub-release publish skipped because the dispatch was
+`dry_run=false` and not tag-driven. Matches the b66-b70 ship
+pattern.
+
+**ASC cross-check.** `asc-status.yml` triggered manually
+(run 25195421641, conclusion = success). Log readback was
+blocked by a transient GitHub Actions jobs-API rate limit on the
+sandbox IP, so the parsed processing state was not captured
+inline. Not a blocker — altool success is the load-bearing
+signal; ASC status is supplementary.
+
+**Build context.** This is the FIRST TestFlight build with V2 as
+the canonical live capture view. The V1 source tree remains on
+disk as a rollback artifact (deletion deferred to b75+, after 2
+clean V2 ships per V4-D21 part 3). `liveCaptureUIVersion="v1"`
+AppStorage value is now an emergency kill switch, not the
+default.
+
+**User-visible changes shipped.**
+- b70 page-badge double-render hotfix (V4-D19).
+- Force chart canonical implementation in V2 (V4-D20).
+- V1 below-chart UI parity in V2 (V4-D21 part 1).
+- V1 chain/superset UI ported into V2 with full SWAP safety,
+  chain restore, secondary force trace (V4-D21 part 2).
+- V2 routing predicate collapsed to `uiVersion != "v1"`
+  (V4-D21 part 3).
+
+**Post-build QA pass.** OWED per AGENTS.md §"Post-build QA
+checklist". A skeleton entry has been added to
+`docs/handoff/QA_LOG.md` with "User responses" left pending; the
+agent will run the multiple-choice QA pass with the user before
+the next ship cycle starts.
+
+**Out of scope (this entry).** Bookkeeping only. No code changes.
+No version bump. No push (the b71 commit chain was already pushed
+during the original cycle).

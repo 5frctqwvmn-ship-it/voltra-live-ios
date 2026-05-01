@@ -174,3 +174,48 @@
 ### Actions taken
 
 (to be filled in post-ship)
+
+
+## b71 — v0.4.44-build71 — 2026-04-30
+
+### Items shipped
+
+1. **b70 page-badge double-render hotfix (V4-D19).** Removed
+   `.pageBadge("ContentView")` from the root container so leaf
+   screens are the only `.pageBadge` mount points. Fixes the
+   garbled stacked-badge text where parent + child overlays
+   collided at the same anchor.
+2. **Force chart canonical in V2 (V4-D20).** V2 now uses the
+   V1 `ForceChartView` directly (live trace + lastFinalizedSamples
+   stub) instead of a separate V2-only re-render path.
+3. **V1 below-chart UI parity in V2 (V4-D21 part 1).**
+   `V1RestoreSection` now contains: upcomingSetCard,
+   dropSetSection, loggedSetsSection, bottomActions — verbatim
+   ports of the V1 surfaces.
+4. **V1 chain/superset UI in V2 (V4-D21 part 2).**
+   `SupersetSwitcherBanner` mounted with `session` and
+   `onAfterSwap`; chain restore in `onAppear`; `lockSupersetTag`
+   and slot-flip `onChange` hooks; widened gate to
+   `(supersetTag && bothPaired) || hasActiveSupersetChain`.
+   B53 SWAP safety preserved (no auto-LOAD on incoming side).
+5. **V2 canonical routing (V4-D21 part 3).**
+   `LiveCaptureContainer.shouldUseV2` collapsed to
+   `uiVersion != "v1"`. V1 is now an emergency kill switch only.
+
+### User responses
+
+(pending — will be filled in via post-build QA pass before the
+next ship cycle starts)
+
+### Actions taken
+
+(pending — will be filled in alongside user responses)
+
+### Notes
+
+- This skeleton entry was added during a bookkeeping commit on
+  2026-04-30 ~01:38 UTC, after the agent realized the b71 ship
+  had completed without the AGENTS.md §"Post-build QA checklist"
+  pass. Earlier ship cycles (b61-b70) also lack QA_LOG entries;
+  the gap is acknowledged but is not retroactively filled here
+  to avoid fabricating user responses.
