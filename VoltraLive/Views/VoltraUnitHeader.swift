@@ -18,18 +18,21 @@
 //   • ExerciseDetailView                   → VoltraUnitHeader(mdm: …, hk: …, exerciseName: name)
 //   • LiveCaptureViewV2 / LiveWorkoutScreen → VoltraUnitHeader(mdm: …, hk: …, exerciseName: name, isReadOnly: live)
 //
-// Spec (locked via B67_BUG_QUEUE.md, Bug 08 + cross-cutting flag #3):
-//   • Single horizontal row: `L`  `R`  `⋏`  `●●`
+// Spec (locked via B67_BUG_QUEUE.md, Bug 08 + cross-cutting flag #3;
+// HR surface revised by B74-F8):
+//   • Single horizontal row: `L`  `R`  `⋏`  `●`
 //   • NO `SS` pill (superset lives in `SupersetSwitcherBanner` only).
 //   • NO `VL1` device label, NO `⌚` watch glyph, NO `VOLTRA` wordmark,
 //     NO separate header glyph row, NO `Left ● Right ●` summary pill.
 //   • NO breathing ring on the active pill (B67-03 reverts the b66 V4.2 delta).
 //   • Tap-to-pair on greyed L/R (fast warn-color pulse while pair-scan in flight).
 //   • L/R always render. ⋏ (combined) only renders when BOTH paired.
-//   • `●●` HR pill is 3-state per B67-03:
-//       dark  — HK auth not yet requested
-//       blink — HK authorized but no recent HR sample
-//       solid — receiving live HR samples
+//   • `●` Health signal indicator (B74-F8): single neutral dot, 2-state.
+//     Live (header text color) when HK is available, authorized, has a
+//     non-nil currentHR, and lastHRSampleAt is within a 10 s freshness
+//     window. Idle (textFaint, NOT hidden) otherwise. Tap calls
+//     `hk.requestAuthIfNeeded()` when the user has not yet been asked;
+//     after that the tap is a deliberate no-op.
 //   • Mirror rule 1A: no exerciseName → writes mdm.workoutMode
 //                     exerciseName     → writes mdm.exerciseAssignmentOverride[name]
 //   • isReadOnly = true locks every pill (mid-set lock).
@@ -116,7 +119,7 @@ struct VoltraUnitHeader: View {
                 pill(.combined, glyph: "\u{22CF}", enabled: true)  // ⋏
             }
             Spacer(minLength: 4)
-            heartRatePill
+            healthSignalIndicator
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -187,62 +190,37 @@ struct VoltraUnitHeader: View {
         }
     }
 
-    // MARK: - HR pill (3-state per B67-03)
+    // MARK: - Health signal indicator (B74-F8)
 
-    private enum HRState { case dark, blinking, solid }
+    private static let hrFreshnessWindow: TimeInterval = 10
 
-    private var hrState: HRState {
-        // Dark: HK never authorized.
-        guard hk.hasRequestedAuthorization else { return .dark }
-        // Blinking: authorized but no current HR sample.
-        if hk.currentHR == nil { return .blinking }
-        // Solid: live HR streaming.
-        return .solid
+    private var healthSignalLive: Bool {
+        guard hk.isAvailable,
+              hk.hasRequestedAuthorization,
+              hk.currentHR != nil,
+              let last = hk.lastHRSampleAt
+        else { return false }
+        return Date().timeIntervalSince(last) <= Self.hrFreshnessWindow
     }
 
-    private var heartRatePill: some View {
-        // Two stacked dots — the `●●` glyph that the design language uses.
-        // Color and animation driven by hrState.
-        Group {
-            switch hrState {
-            case .dark:
-                hrDots(color: VoltraColor.textFaint, opacity: 0.45)
-            case .blinking:
-                TimelineView(.animation(minimumInterval: 0.5)) { ctx in
-                    let t = ctx.date.timeIntervalSinceReferenceDate
-                    let on = Int(t / 0.5) % 2 == 0
-                    hrDots(color: VoltraColor.accent, opacity: on ? 0.95 : 0.25)
-                }
-            case .solid:
-                hrDots(color: VoltraColor.accent, opacity: 0.95)
+    private var healthSignalIndicator: some View {
+        Button {
+            if !hk.hasRequestedAuthorization {
+                hk.requestAuthIfNeeded()
+            }
+        } label: {
+            // TimelineView tick keeps the freshness check live even when no
+            // @Published property changes — `lastHRSampleAt` going stale must
+            // flip live → idle without a new HR sample arriving.
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                Text("\u{2022}")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(healthSignalLive ? VoltraColor.text : VoltraColor.textFaint)
+                    .frame(minWidth: 28, minHeight: 28)
+                    .accessibilityLabel(healthSignalLive ? "Health signal active" : "Health signal idle")
             }
         }
-        .frame(minWidth: 28, minHeight: 28)
-        .padding(.horizontal, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(VoltraColor.bgElev2)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(VoltraColor.border, lineWidth: 1)
-        )
-        .accessibilityLabel(hrAccessibilityLabel)
-    }
-
-    private func hrDots(color: Color, opacity: Double) -> some View {
-        Text("\u{2022}\u{2022}")
-            .font(.system(size: 12, weight: .bold, design: .monospaced))
-            .kerning(0.8)
-            .foregroundColor(color.opacity(opacity))
-    }
-
-    private var hrAccessibilityLabel: String {
-        switch hrState {
-        case .dark:     return "Heart rate not authorized"
-        case .blinking: return "Heart rate authorized, awaiting first sample"
-        case .solid:    return "Heart rate \(hk.currentHR ?? 0) bpm"
-        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Tap dispatch

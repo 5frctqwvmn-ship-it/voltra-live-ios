@@ -4470,3 +4470,75 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   pairs only the right-named device, both as solo and
   as a sequenced pair. Then unblock B74-F2/F3/F5/F6 per
   the bug queue note that F1 is a prereq for repro.
+
+## 2026-05-01 22:10 UTC — B74-F8: replace dual-dot HR pill with single neutral Health signal indicator
+
+- **Files changed:** `VoltraLive/Views/VoltraUnitHeader.swift`,
+  `docs/handoff/B74_BUG_QUEUE.md`, `docs/WORK_LOG.md`.
+- **What changed:** Replaced the legacy `●●` HR pill (3-state
+  dark / blinking-accent / solid-accent surface with rounded
+  background + border) with a single neutral `●` Health signal
+  indicator at the same mount point in `VoltraUnitHeader`. New
+  contract: live when
+  `hk.isAvailable && hk.hasRequestedAuthorization &&
+  hk.currentHR != nil && lastHRSampleAt` is within a 10 s
+  freshness window — rendered in the existing header text color.
+  Otherwise idle, rendered in `VoltraColor.textFaint` (faint,
+  not hidden). Tap routes through `hk.requestAuthIfNeeded()`
+  iff the user has not yet been asked; after that the tap is
+  a deliberate no-op (no system sheet, no analytics). A
+  `TimelineView(.periodic(from:.now, by:1))` wraps the dot so
+  the freshness check re-evaluates without requiring a new
+  `@Published` change — staleness flips live → idle on the wall
+  clock. Removed the old `HRState` enum, `hrState`,
+  `heartRatePill`, `hrDots`, and `hrAccessibilityLabel`
+  members. Did NOT touch `HealthKitStore.swift`; did NOT use
+  `HKHealthStore.authorizationStatus(for:)`; did NOT introduce
+  `heartRateAuthStatus`. Did NOT touch BLE / pairing /
+  WatchConnectivity / Watch target / Info.plist / project.yml /
+  entitlements / version-build-feature-label / release
+  workflows. Added an `IN PROGRESS` row + full entry section
+  for B74-F8 in `B74_BUG_QUEUE.md`.
+- **Verification:** Cannot run `xcodebuild` or `swift build`
+  in this environment (Windows; iOS Swift project). Static
+  searches confirm: zero hits for `authorizationStatus` and
+  `heartRateAuthStatus` across the working tree (existing
+  guardrail searches pass). The new `healthSignalIndicator`
+  / `healthSignalLive` / `hrFreshnessWindow` symbols compile
+  in this Swift dialect by construction (TimelineView
+  `.periodic(from:by:)` and `Button { } label: { }` are
+  iOS 17 standard SwiftUI surface already used in this
+  project). Mac-side verification needed before this is
+  trusted: (a) Xcode compile clean, (b) idle dot visible and
+  faint before HK auth, (c) tap-when-unauthorized shows the
+  system HK consent sheet, (d) post-auth + live HR sample =
+  normal header text color (not accent green), (e) >10 s of
+  no samples flips the dot back to faint without app
+  re-foreground, (f) no regressions on the L / R / ⋏ pills.
+- **Risks:** (a) The 1 Hz `TimelineView` tick is cheap but
+  runs continuously while the header is on screen; if any
+  performance-sensitive screen mounts multiple
+  `VoltraUnitHeader` instances simultaneously this would
+  multiply — current mount-point invariant is one header per
+  screen so this should be fine. (b) The freshness window is
+  hardcoded at 10 s as `hrFreshnessWindow`; tuning will need
+  a code change rather than a runtime knob — by design, per
+  F8 spec. (c) The header text color (`VoltraColor.text`) is
+  used for the live state; if a future theme change makes
+  that color hard to distinguish from the idle `textFaint` at
+  small dot sizes the affordance could weaken — flag for
+  design review if it lands. (d) No unit tests added —
+  `healthSignalLive` is pure-Swift (`hk` published state +
+  `Date()`) and would be testable, but the spec did not
+  require tests and adding them would expand the change
+  surface beyond the F8 contract.
+- **Next step:** Open the changed file in Xcode on macOS,
+  confirm a clean build, run the app on TestFlight or a
+  signed dev build, and walk the four verification scenarios
+  above (idle pre-auth, tap → consent sheet, live sample =
+  text color, 10 s staleness flip). When verified, revise
+  the queue row from `IN PROGRESS` to `VERIFIED` and append
+  the verifying commit / TestFlight build to this entry.
+  This branch (`feat/b74-f8-watch-presence-indicator`) is
+  committed locally only — `git push` is deferred per the
+  F8 contract.
