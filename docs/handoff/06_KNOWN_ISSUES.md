@@ -377,35 +377,52 @@ ships in whatever feature build is open at the time. KI-12
 closes when the 7 high-priority regions above are all
 instrumented on `LiveCaptureViewV2` and `LoggingHomeView`.
 
-### KI-13 (b73) — Non-scrolling screens fall back to viewport-pinned rows (by design)
+### KI-13 (b73 → b74) — Scroll-anchored row labels (CLOSED in b74)
 
-**Status.** Open / non-issue / documented.
+**Status.** Closed in b74 / V4-D24.
 
-**What.** The b73 / V4-D23 split coordinate system requires a
-screen to attach `.debugGridContent()` to its ScrollView's inner
-content stack for row labels (1, 2, 3, …) to anchor to the
-content coordinate space. Screens that have no ScrollView —
-notably `ConnectView` — omit `.debugGridContent()`, so the
-overlay receives `metrics = .zero` and renders row labels
-viewport-pinned (matching b72 behavior on those screens).
+**Original problem (b72/b73).** b72's grid was viewport-anchored
+on both axes; "C10" pointed to a physical pixel rather than a UI
+element, so the row coordinate of an element changed with scroll.
+b73 / V4-D23 attempted to fix this with a `DebugGridContentMetricsKey`
+PreferenceKey + `contentMinY` translation in the viewport-level
+overlay, but on device the grid still rendered viewport-pinned —
+the translation pass either never updated, never produced a
+visible offset, or was clipped by the overlay frame.
 
-**Why this is fine.** Without a ScrollView there is no
-content-coordinate-vs-viewport-coordinate divergence to
-reconcile — the content frame *is* the viewport frame minus
-safe-area inset. "C10" on `ConnectView` already means the same
-physical UI element across taps because the screen does not
-scroll. The split mechanic is a no-op there.
+**b74 / V4-D24 fix.** The grid is split into two physical
+layers. The viewport-pinned half (vertical lines + column
+letters + region overlay) lives in `.debugGridOverlay()` on the
+screen body. The content-space half (horizontal lines + row
+labels) is implemented as `DebugGridContentLayer` and attached
+via `.background(DebugGridContentLayer())` (modifier
+`.debugGridContentLayer()`) to the inner content container of
+each ScrollView. SwiftUI's background sizing makes the layer's
+frame inherit the host's intrinsic frame, so the layer covers
+the full scrollable content and physically scrolls with it —
+no PreferenceKey, no named coordinate space, no translation.
 
-**Screens currently wired** (10): `LoggingHomeView`,
+**Screens wired in b74** (10): `LoggingHomeView`,
 `LiveCaptureView`, `LiveCaptureViewV2`, `ExerciseDetailView`,
 `ExerciseStartView`, `DebugView`, `DashboardView`,
 `ExercisePickerView`, `SetLogView`, `ExportSheet`.
 
 **Screens intentionally NOT wired** (3): `ConnectView` (no
 ScrollView), `LiveCaptureContainer` (b53 router forwarder, owns
-no content), `ContentView` (host shell, owns no content).
+no content), `ContentView` (host shell, owns no content). On
+those screens row labels do not render at all — there is no
+ScrollView for the layer to attach to. The viewport-pinned
+column letters + vertical gridlines are still drawn so the X
+axis remains useful.
 
 **When to revisit.** If a future cycle adds a ScrollView to
 `ConnectView` or any other currently-unwired screen, that
-screen must add `.debugGridContent()` to its inner content
+screen must add `.debugGridContentLayer()` to its inner content
 stack in the same commit. Otherwise no action.
+
+**Verification status.** b74 PR opened on
+`feat/b74-debug-grid-content-space` is UNVERIFIED — awaiting
+on-device verification on TestFlight (b73 still shipping). When
+the user confirms the grid moves with scroll on device, this
+entry should be revised to "Closed — VERIFIED on device on
+build N."

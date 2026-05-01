@@ -321,7 +321,7 @@ b70 binary mounted `.pageBadge("ContentView")` on the root
 container; it was removed in the b70 hotfix — see V4-D19 in
 `04_DECISIONS_AND_CONSTRAINTS.md`.
 
-### Debug grid overlay (b72 / V4-D22 → b73 / V4-D23)
+### Debug grid overlay (b72 / V4-D22 → b73 / V4-D23 → b74 / V4-D24)
 
 A five-state progressive-density spreadsheet-style grid behind
 `@AppStorage("debugGridMode")`. Replaces the b70/V4-D18
@@ -329,39 +329,42 @@ four-state 9-anchor marker overlay (C-TL / M-T / F-CTR / …)
 because anchor markers were not precise enough for design
 feedback. Lives in `VoltraLive/Views/DebugGridOverlay.swift`.
 
-**b73 / V4-D23 update — scroll anchoring.** The grid's coordinate
-system is now SPLIT to keep `(column, row)` coordinates stable
-under scroll:
+**b74 / V4-D24 update — TRUE content-space layer.** The b73
+PreferenceKey/`contentMinY` translation path failed on device:
+the grid still rendered viewport-pinned under scroll. b74
+abandons that path entirely and splits the grid into two
+physical layers:
 
-- **Vertical gridlines + column letters (A, B, C…)** stay pinned
-  to the viewport horizontally. There is no horizontal scroll, so
-  column coordinates are stable in screen space.
-- **Horizontal gridlines + row numbers (1, 2, 3…)** anchor to the
-  ScrollView's CONTENT coordinate space. Row 1 sits at the top of
-  the content (not the top of the screen) and row labels travel
-  with the content as the user scrolls. Result: the same UI
-  element keeps the same row coordinate regardless of scroll
-  position, which was the whole point of having a coordinate
-  system.
+- **Vertical gridlines + column letters (A, B, C…)** stay
+  VIEWPORT-pinned via `.debugGridOverlay()` on the screen body.
+  There is no horizontal scroll, so column coordinates are
+  stable in screen space.
+- **Horizontal gridlines + row numbers (1, 2, 3…)** physically
+  live INSIDE the scrollable content via
+  `.debugGridContentLayer()` attached as a `.background(...)`
+  on the inner content stack of each page-badged ScrollView.
+  SwiftUI's `.background(...)` sizing makes the layer's frame
+  equal to its host's intrinsic frame, so the layer covers the
+  full content extent and scrolls with it natively — the layer
+  is genuinely a sibling of the content, not an overlay above
+  it. Row 1 sits at the top of content; "C10" identifies the
+  same UI element regardless of scroll offset.
 
-Mechanic: a new view modifier `.debugGridContent()` is attached
-to the inner content stack of every page-badged ScrollView. It
-backs the receiver with a `GeometryReader` that measures itself
-in a `"debugGridViewport"` named coordinate space (established
-by the overlay modifier on the same screen) and publishes the
-content's `(minY, height)` via `DebugGridContentMetricsKey`
-(PreferenceKey). The overlay translates horizontal lines + row
-labels by `contentMinY` so they follow scroll. Screens without a
-ScrollView (e.g. `ConnectView`) omit `.debugGridContent()` and
-the overlay falls back to viewport-pinned rows — matching the b72
-behavior — because the metrics default is `.zero`.
+No PreferenceKey, no named coordinate space, no translation
+pass. The previous `DebugGridContentMetricsKey`,
+`.debugGridContent()` modifier, and `"debugGridViewport"`
+coordinate space are removed.
 
-Screens currently wired with `.debugGridContent()` (b73 ship
-coverage): `LoggingHomeView`, `LiveCaptureView`,
-`LiveCaptureViewV2`, `ExerciseDetailView`, `ExerciseStartView`,
-`DebugView`, `DashboardView`, `ExercisePickerView`, `SetLogView`,
-`ExportSheet`. Adding the modifier is a one-line change and is
-the expected pattern for any future page-badged ScrollView.
+Screens currently wired with `.debugGridContentLayer()` (b74
+coverage — same 10 as b73): `LoggingHomeView`,
+`LiveCaptureView`, `LiveCaptureViewV2`, `ExerciseDetailView`,
+`ExerciseStartView`, `DebugView`, `DashboardView`,
+`ExercisePickerView`, `SetLogView`, `ExportSheet`. Adding the
+modifier is a one-line change and is the expected pattern for
+any future page-badged ScrollView. Non-scrolling screens
+(`ConnectView`, `LiveCaptureContainer`, `ContentView`) simply
+omit it — there is no scroll content to anchor to and the
+viewport-pinned column/letters layer is sufficient.
 
 Density cases (`enum DebugGridDensity`):
 

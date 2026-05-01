@@ -1537,3 +1537,165 @@ ships only after a green CI run on `feat/ui-v4-2-claude`.
 open). No removal of the b72 SUPERSEDED legacy `DebugGridMode`
 enum (delete target slips to post-b74 to keep two clean ships
 of distance).
+
+---
+
+## V4-D24 — Debug grid: TRUE content-space layer via `.background(...)` (b74)
+
+**Date.** 2026-05-01.
+
+**Status.** Active. Supersedes the mechanic of V4-D23 (the
+split-coordinate-system goal of V4-D23 stands; the
+implementation is replaced).
+
+**Cycle.** PR-only on `feat/b74-debug-grid-content-space`,
+branched from `feat/ui-v4-2-claude`. No version bump, no
+TestFlight ship. Verification path A (UNVERIFIED — awaiting
+on-device verification by the user).
+
+**Context.** V4-D23 / b73 attempted to make the debug grid's
+row labels travel with scroll by piping the ScrollView's
+content frame (`minY`, `height`) up to the viewport-level
+overlay via a `DebugGridContentMetricsKey` PreferenceKey, and
+translating the horizontal lines + row labels by `contentMinY`
+inside the overlay's Canvas. The build shipped as
+`v0.4.46 / build 73` on 2026-05-01. The user reported the grid
+on device "remains effectively static / viewport overlay and
+does not move with scroll content" — the fix did not work.
+The PreferenceKey approach is the wrong shape: the overlay
+still draws viewport-level above the ScrollView, the
+translation pass either never updated, never produced a
+visible offset, or was clipped by the overlay's own frame.
+
+**Decision.**
+
+1. **Remove the V4-D23 PreferenceKey/translation path
+   entirely.** Delete `DebugGridContentMetrics`,
+   `DebugGridContentMetricsKey`, the `.debugGridContent()`
+   modifier, the `"debugGridViewport"` named coordinate space,
+   and the `originY` translation pass in the canvas renderer.
+   No window-level overlay pretending to be content-anchored.
+
+2. **Implement a real `DebugGridContentLayer`** attached to
+   the ScrollView's inner content container via
+   `.background(DebugGridContentLayer())`. SwiftUI's
+   `.background(...)` sizing makes the layer's frame match
+   its host's intrinsic frame — for a `LazyVStack` /
+   `VStack` inside a `ScrollView` that's the full content
+   extent, automatically. The layer is genuinely a sibling
+   of the content; when the content scrolls, the layer
+   scrolls with it, because the layer is part of the same
+   subtree the ScrollView is moving.
+
+3. **Layer split.** Horizontal gridlines + row labels live
+   in the content-space layer (inside the scroll subtree).
+   Vertical gridlines + column letters + the State 4
+   region overlay live in the screen-body modifier
+   (`.debugGridOverlay()`), viewport-pinned. There is no
+   horizontal scroll, so column coordinates are stable in
+   screen space.
+
+4. **Density semantics preserved verbatim from V4-D22.**
+   States `.off / .base / .half / .quarter / .max` (5 cycle).
+   `.allowsHitTesting(false)` everywhere.
+
+5. **Adoption pattern (b74 wired list — same 10 as b73).**
+   `LoggingHomeView`, `LiveCaptureView`, `LiveCaptureViewV2`,
+   `ExerciseDetailView`, `ExerciseStartView`, `DebugView`,
+   `DashboardView`, `ExercisePickerView`, `SetLogView`,
+   `ExportSheet`. Each call site changes from
+   `.debugGridContent()` to `.debugGridContentLayer()` on
+   the same inner content stack. Non-scrolling screens
+   (`ConnectView`, `LiveCaptureContainer`, `ContentView`)
+   simply omit the modifier — there is nothing for the
+   layer to scroll with, and the viewport-pinned vertical
+   lines + column letters are correct on those screens.
+
+**Why .background(...) and not other approaches.**
+
+- *.background sizing inherits the host's intrinsic frame.*
+  This is the entire point. The layer doesn't need to know
+  the content height, doesn't need a GeometryReader on the
+  outside, doesn't need a PreferenceKey to publish that
+  height upward. SwiftUI gives the layer the host's frame
+  for free, every layout pass.
+
+- *.background lives in the same subtree as the content.*
+  When the ScrollView translates that subtree, the
+  background goes with it. No explicit translation, no
+  named coordinate space, no per-frame preference republish.
+
+- *Hit-testing is unaffected.* `.background(...)` does not
+  add hits in front of the content; even with
+  `.allowsHitTesting(false)` on the layer, the host's hits
+  pass through cleanly because the layer is behind, not above.
+
+- *Falls back gracefully on non-scrolling screens.* If a
+  screen accidentally attaches the layer to a fixed-frame
+  container, the layer simply renders at that fixed frame
+  (which is also correct — rows beyond the host's frame
+  would be off-content anyway).
+
+**Why not alternatives considered.**
+
+- *Move the entire overlay inside each ScrollView.* That
+  would put column letters inside the scroll content and
+  scroll them off the top. Wrong axis.
+
+- *Use a `ScrollPosition` / `onScrollGeometryChange` API
+  (iOS 17).* Adds an `ObservedObject` per screen and forces
+  every adopting screen to wire a `.scrollPosition($var)`
+  binding. The `.background(...)` approach is one line per
+  screen, no extra state, and is the standard SwiftUI
+  pattern for content-frame composition.
+
+- *Put a ZStack inside the ScrollView with the grid layer
+  as the back element.* Equivalent in spirit, but requires
+  every adopting screen to restructure its ScrollView
+  body. The `.background(...)` pattern is a strict overlay
+  modifier and doesn't change layout.
+
+**Files changed (this commit).**
+
+- `VoltraLive/Views/DebugGridOverlay.swift` — rewrite. Removed
+  `DebugGridContentMetrics`, `DebugGridContentMetricsKey`,
+  the V4-D23 `.debugGridContent()` modifier, the
+  `"debugGridViewport"` named coordinate space, and the
+  `contentOriginY` translation in the canvas renderer.
+  Added `DebugGridContentLayer` view, `View.debugGridContentLayer()`
+  modifier, and split `DebugGridViewportLayer` (private)
+  for the viewport half.
+
+- 10 page-badge screens — `.debugGridContent()` →
+  `.debugGridContentLayer()`. No layout changes.
+
+- `docs/handoff/03_CURRENT_FEATURE_SPEC.md` — Debug grid
+  section amended.
+
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` — this ADR.
+
+- `docs/handoff/06_KNOWN_ISSUES.md` — KI-13 closed (the
+  scroll-anchoring concern is now actually solved); the
+  fall-back-on-non-scroll-screens caveat is restated.
+
+- `docs/handoff/02_CURRENT_STATE.md` — file-map row updated.
+
+- `docs/WORK_LOG.md` — entry appended.
+
+**Verification path.** Path A (UNVERIFIED — awaiting on-device
+verification). Path B (CI-driven screenshot artifact workflow)
+was deemed infeasible in this single sequential pass: the repo
+has no UI test target, `xcrun simctl io booted screenshot` can
+capture one screenshot but cannot programmatically scroll a
+SwiftUI ScrollView, and adding a UI test target expands scope
+beyond debug-overlay surgery. The user's explicit fallback
+applies; the PR is tagged UNVERIFIED with a TestFlight checklist
+in the body.
+
+**Out of scope.** No protocol/BLE changes. No version bump. No
+push to `release.yml`. No TestFlight ship. No
+`VOLTRAFeatureLabel` change. No region instrumentation (KI-12
+stays open). Legacy `DebugGridMode` enum still retained behind
+`// SUPERSEDED`. CI `build.yml` on push remains the
+authoritative compile check; this PR is held for a green CI run
+on the b74 branch before merge into `feat/ui-v4-2-claude`.

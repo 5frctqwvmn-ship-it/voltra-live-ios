@@ -213,9 +213,9 @@ struct LiveCaptureViewV2: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 22)
-                // b73 V4-D23: report content metrics so debug grid row
+                // b74 V4-D24: attach content-space debug grid layer so row
                 // labels track the user's scroll position.
-                .debugGridContent()
+                .debugGridContentLayer()
             }
         }
         .navigationBarBackButtonHidden(true)

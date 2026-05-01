@@ -4269,3 +4269,135 @@ behind `// SUPERSEDED` marker.
 `dry_run=false`, poll ~5-6 min for signed TestFlight ship,
 verify all 5 gates including altool upload, fill in the CI
 verification block above, report ship complete.
+
+---
+
+## 2026-05-01 — b74 (V4.6) — Debug grid TRUE content-space layer (PR-only, UNVERIFIED)
+
+**Goal.** Fix the b73 / V4-D23 ship that failed on device: the
+debug grid's row labels remained effectively viewport-pinned
+under scroll despite the `DebugGridContentMetricsKey`
+PreferenceKey + `contentMinY` translation path. Replace the
+PreferenceKey approach with a real content-space layer
+(`DebugGridContentLayer`) attached via `.background(...)` on
+each ScrollView's inner content stack. Horizontal gridlines and
+row labels now physically live INSIDE the scrollable content
+and scroll with it for free — no preference-key plumbing, no
+named-coordinate-space translation. See ADR **V4-D24** in
+`04_DECISIONS_AND_CONSTRAINTS.md`.
+
+**Context.** b73 / v0.4.46 / build 73 shipped 2026-05-01 03:56
+UTC and the user reported the grid still does not move with
+scroll on device. The PreferenceKey path is the wrong shape:
+the overlay still renders viewport-level above the ScrollView,
+and the translation pass ran but did not produce a visible
+travel of the rows. b74 abandons that path entirely and uses
+SwiftUI's native composition: the `.background(...)` modifier
+makes the layer's frame match its host's intrinsic frame, so a
+content-stack-attached background is genuinely a sibling of
+that content and physically scrolls with it.
+
+**Files changed.**
+
+- `VoltraLive/Views/DebugGridOverlay.swift` — rewrite. Removed:
+  `DebugGridContentMetrics`, `DebugGridContentMetricsKey`
+  PreferenceKey, the old `.debugGridContent()` modifier, the
+  `"debugGridViewport"` named coordinate space, and the
+  `originY/contentOriginY` translation pass in the canvas
+  renderer. Added: `struct DebugGridContentLayer` (Canvas +
+  ZStack of row labels), `View.debugGridContentLayer()`
+  modifier (attaches the layer via `.background(...)`),
+  `private struct DebugGridViewportLayer` (vertical lines +
+  column letters + region overlay only, viewport-pinned). The
+  density enum (`DebugGridDensity`), region anchor preference,
+  `.debugRegion("name")` modifier, and `// SUPERSEDED` legacy
+  `DebugGridMode` enum are unchanged.
+- 10 page-badged ScrollView screens — each `.debugGridContent()`
+  replaced with `.debugGridContentLayer()` on the same inner
+  stack: `LoggingHomeView`, `LiveCaptureView`,
+  `LiveCaptureViewV2`, `ExerciseDetailView`, `ExerciseStartView`,
+  `DebugView`, `DashboardView`, `ExercisePickerView`,
+  `SetLogView`, `ExportSheet`. Inline comments updated from
+  "b73 V4-D23: pipe content metrics …" to "b74 V4-D24: attach
+  content-space debug grid layer …".
+- `docs/handoff/03_CURRENT_FEATURE_SPEC.md` — Debug grid
+  section amended: rows + horizontal lines content-anchored,
+  columns + vertical lines viewport-pinned. Mechanic is
+  `.debugGridContentLayer()` (background sizing), not the b73
+  PreferenceKey.
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` — appended
+  ADR **V4-D24**.
+- `docs/handoff/06_KNOWN_ISSUES.md` — KI-13 closed; the
+  non-scrolling-screen note is now a one-line caveat under
+  KI-13 because non-scrolling screens simply omit the modifier
+  (no preference default, no fallback path).
+- `docs/handoff/02_CURRENT_STATE.md` — file-map row updated
+  for the new mechanic.
+- `docs/WORK_LOG.md` — this entry.
+
+**Screens wired (b74 coverage list — same 10 as b73).**
+
+`LoggingHomeView`, `LiveCaptureView`, `LiveCaptureViewV2`,
+`ExerciseDetailView`, `ExerciseStartView`, `DebugView`,
+`DashboardView`, `ExercisePickerView`, `SetLogView`,
+`ExportSheet`. Non-scrolling screens (`ConnectView`,
+`LiveCaptureContainer`, `ContentView`) intentionally untouched
+— there is no scroll content for the layer to scroll with, so
+attaching it would be a no-op-with-extra-render-cost.
+
+**No version bump.** This is a PR-only fix on
+`feat/b74-debug-grid-content-space`, branched from
+`origin/feat/ui-v4-2-claude`. PR base: `feat/ui-v4-2-claude`
+(b72/b73 code is on this branch, not on `main`). No push to
+`release.yml`. No TestFlight ship. No `VOLTRAFeatureLabel`
+change.
+
+**Verification (UNVERIFIED — Path A, awaiting on-device).**
+
+The user requested Path B (CI-driven screenshot artifacts) as
+the preferred verification, with Path A (UNVERIFIED PR awaiting
+on-device verification) as the fallback. Path B was deemed
+infeasible in this single sequential pass because:
+
+1. The repo has no UI test target (`VoltraLiveUITests/`
+   doesn't exist). Adding one expands scope beyond debug-
+   overlay surgery and would touch `project.yml` (XcodeGen).
+2. `xcrun simctl io booted screenshot` can capture a screenshot
+   post-launch but cannot programmatically scroll a SwiftUI
+   ScrollView without a UI test driving the gesture.
+3. A launch-arg-driven scroll-on-launch path would require
+   shipping-surface code (a `ScrollViewReader` + `.onAppear`
+   `proxy.scrollTo(...)` in every adopting screen), which is
+   shipping code, not debug-overlay scope.
+
+The user's explicit fallback applies: "Open the PR anyway.
+Mark it clearly UNVERIFIED — awaiting on-device verification."
+The PR title and body are tagged accordingly. A human-tester
+TestFlight checklist is included in the PR body.
+
+**Risks.**
+
+- `.background(DebugGridContentLayer())` adds one
+  GeometryReader-backed Canvas + ZStack per ScrollView screen.
+  When density is `.off` the layer body returns `Color.clear`
+  immediately, so the runtime cost on shipped builds is a
+  single empty `Color` background per adopting screen.
+- The layer's `GeometryReader` reads its host's intrinsic
+  frame — for a `LazyVStack` inside a ScrollView that means
+  the grid covers the full content extent (the desired
+  behavior). If a screen wraps a fixed-height container, the
+  grid will only cover that height; this is also correct
+  (rows beyond the host's frame would be off-content anyway).
+- iOS 17 deployment target unchanged.
+
+**Out of scope.** No protocol/BLE changes, no telemetry
+changes, no logging changes, no chart changes, no HealthKit
+changes, no MDM changes, no chain-UI changes, no LiveCapture
+set logic changes. No region instrumentation (KI-12 stays
+open). Legacy `DebugGridMode` enum still retained behind
+`// SUPERSEDED`. No version bump. No CI workflow added.
+
+**Pending (post-PR).** Human-on-device verification on
+TestFlight build (b73 still shipping; b74 is PR-only). When
+the user confirms on device, this entry should be revised
+from UNVERIFIED to VERIFIED with a screenshot link.

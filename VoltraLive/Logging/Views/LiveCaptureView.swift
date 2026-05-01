@@ -129,9 +129,9 @@ struct LiveCaptureView: View {
                     Spacer(minLength: 60)
                 }
                 .padding(16)
-                // b73 V4-D23: pipe content metrics to the debug grid
+                // b74 V4-D24: attach content-space debug grid layer
                 // overlay so row labels track scroll position.
-                .debugGridContent()
+                .debugGridContentLayer()
             }
 
             if let snap = pendingUndo {
