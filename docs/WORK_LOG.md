@@ -2579,3 +2579,19 @@ checklist" + `docs/handoff/QA_LOG.md`). CI green and altool
 running on real hardware caught that the dual UI never
 rendered. The QA checklist for b58 surfaced this within
 hours of ship — exactly the gap it's meant to close.
+
+## 2026-05-01 04:20 UTC — Add agent roles handoff doc
+
+- **Files changed:** `docs/handoff/11_AGENT_ROLES.md` (new),
+  `docs/WORK_LOG.md` (this entry).
+- **What changed:** Added new handoff doc `11_AGENT_ROLES.md`
+  documenting the split-role process between the GPT-5
+  Implementation Agent, Claude Release Agent, and User Broker.
+  Captures authority boundaries (PRs vs. release/TestFlight),
+  the standard handoff sequence, WORK_LOG ownership, and the
+  UI-screenshot verification rule. Docs-only.
+- **Verification:** No code changes. No release. No TestFlight.
+  No `release.yml` dispatch. No signing/altool/secrets touched.
+- **Risks:** None to runtime. Pure documentation addition.
+- **Next step:** None — informational handoff doc for future
+  sessions.
