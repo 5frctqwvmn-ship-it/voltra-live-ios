@@ -185,6 +185,10 @@ struct LoggingHomeView: View {
                         Spacer(minLength: 30)
                     }
                     .padding(.top, 14)
+                    // b73 V4-D23: report this VStack's frame to the
+                    // debug-grid overlay so row numbers travel with
+                    // scroll instead of staying pinned to the viewport.
+                    .debugGridContent()
                 }
             }
             .navigationDestination(item: $pickedDayType) { dt in

@@ -1,6 +1,6 @@
 # 02 — Current State
 
-_Last updated: 2026-04-30 (b71 cycle, BUMPED — awaiting user push approval. Seven unshipped commits in tree: hotfix + force-chart + below-chart parity + chain UI port + V1 fallback removal + parity audit + version bump)._
+_Last updated: 2026-05-01 (b73 cycle, IN FLIGHT — debug grid scroll-anchor fix on top of the b72 ship. Single-commit feature build per the one-feature-per-build convention.)_
 
 > **Maintenance rule:** this file is overwritten on every ship. The
 > append-only history lives in `docs/WORK_LOG.md`. If you're updating
@@ -12,45 +12,60 @@ _Last updated: 2026-04-30 (b71 cycle, BUMPED — awaiting user push approval. Se
 
 ## Latest shipped build
 
-**v0.4.43 / build 70** — label "b70 demo entry source connection-aware +
-page registry + debug grid overlay" (shipped 2026-04-30). 5-gate altool
-verify passed; Delivery UUID `fc2f3148-6f9e-484e-b83c-23534bcc1582`,
-[run 25176969283](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25176969283)
-duration 29s. HEAD at ship: `e10b428fbf4afdb75db8f3ffc72b4730bac49a65`.
-Awaiting Apple processing before TestFlight surface.
+**v0.4.45 / build 72** — label "b72 debug grid overlay (progressive
+density, 5 states)" — shipped 2026-05-01 02:41 UTC. 5-gate altool
+verify passed,
+[run 25199600713](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25199600713)
+duration ~5m. HEAD at ship: `bea7243`. Awaiting Apple processing.
 
-**Last shipped:** b71 / v0.4.44 / build 71 — V2 canonical live capture
-view, V1 chain UI ported, force chart canonical, page-badge hotfix.
-Shipped 2026-04-30 23:43 UTC,
-[run 25194880211](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25194880211),
-HEAD `26af534`. 5-gate altool verify passed.
+## Active cycle
 
-**Active cycle:** b72 / v0.4.45 / build 72 — debug-overlay-only ship.
-Replaces the b70/V4-D18 9-anchor marker overlay with a 5-state
-progressive-density spreadsheet-style grid (off / base 32pt / half
-16pt / quarter 8pt / max + region outlines). Same toggle gesture
-(build-badge tap), same AppStorage key, new behavior. See ADR
-**V4-D22**. Commits on top of the b71 ship tag:
+**b73 / v0.4.46 / build 73** — debug grid SCROLL-ANCHOR fix.
+Single-feature ship per the one-feature-per-build convention. The
+b72 grid was viewport-anchored on both axes, so the row coordinate of a
+UI element changed when the user scrolled. b73 splits the coordinate
+system: column letters stay viewport-pinned (no horizontal scroll, so
+that's correct already) and row numbers anchor to the ScrollView's
+content coordinate space via a new `.debugGridContent()` modifier and a
+`DebugGridContentMetricsKey` PreferenceKey. Result: "C10" identifies
+the same UI element regardless of scroll position. See ADR
+**V4-D23** in `04_DECISIONS_AND_CONSTRAINTS.md`.
 
-- b72 bookkeeping commit `8bdd88b` — logged the b71 ship to
-  `docs/WORK_LOG.md`, opened a b71 QA skeleton in `QA_LOG.md`,
-  and captured the b72 design prompt verbatim at
-  `docs/handoff/B72_DEBUG_GRID_PROMPT.md` so the repo (not chat)
-  is the source of truth.
-- b72 grid implementation commit `65ddd5c` —
-  `VoltraLive/Views/DebugGridOverlay.swift` rewritten in place
-  (Canvas-based renderer, single draw call, anchor-preference
-  region overlay for State 4); `BuildBadgeOverlay.swift` tap
-  cycles `DebugGridDensity.next()`; legacy `DebugGridMode` enum
-  retained behind `// SUPERSEDED` marker for one-line rollback;
-  AppStorage key `"debugGridMode"` preserved with legacy-value
-  migration via `DebugGridDensity.from(_:)`. CI run
-  [25199140398](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25199140398)
-  green; `BUILD SUCCEEDED` with all three b72 files in the
-  SwiftCompile manifest.
-- b72 version bump v0.4.44/71 → v0.4.45/72 (this commit) —
-  `project.yml`, `VoltraLive/Info.plist`, `01_PROJECT_OVERVIEW.md`,
-  this file. Bot identity.
+Files touched (single commit):
+- `VoltraLive/Views/DebugGridOverlay.swift` — split renderer (vertical
+  lines viewport-pinned, horizontal lines + row labels content-pinned
+  via `contentMinY` translation). New public modifier
+  `.debugGridContent()`. Backward compatible: screens without scroll
+  default to viewport-pinned rows, matching b72.
+- 10 page-badge screens with ScrollView gain `.debugGridContent()` on
+  their inner content stack: `LoggingHomeView`, `LiveCaptureView`,
+  `LiveCaptureViewV2`, `ExerciseDetailView`, `ExerciseStartView`,
+  `DebugView`, `DashboardView`, `ExercisePickerView`, `SetLogView`,
+  `ExportSheet`. Non-scrolling screens (`ConnectView`,
+  `LiveCaptureContainer`) intentionally untouched.
+- `project.yml`, `VoltraLive/Info.plist` — version bump to
+  v0.4.46 / 73; `VOLTRAFeatureLabel` = "Grid scroll fix".
+- `docs/handoff/01_PROJECT_OVERVIEW.md`, this file,
+  `03_CURRENT_FEATURE_SPEC.md`, `04_DECISIONS_AND_CONSTRAINTS.md`
+  (V4-D23 ADR), `06_KNOWN_ISSUES.md`, `docs/WORK_LOG.md`.
+- `docs/handoff/screenshots/b73/grid_scroll_invariant.png` — visual
+  validator showing LEG DAY at content row 10 in both before- and
+  after-scroll panels.
+- `scripts/render_b73_grid_diagram.py` — the renderer that produced
+  the validator diagram.
+
+## Recent shipped (history)
+
+- **b71 / v0.4.44 / build 71** — shipped 2026-04-30 23:43 UTC, run
+  [25194880211](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25194880211),
+  HEAD `26af534`. V2 canonical live capture, V1 chain UI ported, force
+  chart canonical, page-badge hotfix.
+- **b70 / v0.4.43 / build 70** — shipped 2026-04-30 16:27 UTC, run
+  [25176969283](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25176969283),
+  Delivery UUID `fc2f3148-6f9e-484e-b83c-23534bcc1582`,
+  HEAD `e10b428`. Demo entry source connection-aware + page registry +
+  initial debug grid overlay (V4-D18 9-anchor markers; superseded by
+  b72).
 
 **Historical (pre-b72):** Seven unshipped b71 commits sat on top
 of the b70 ship tag before the b71 cycle landed:
@@ -260,7 +275,7 @@ source-of-truth), NOT the incoming `source` parameter.
 | Pair sheet coordinator (b67) | `VoltraLive/Coordinators/PairingCoordinator.swift` |
 | Unit-status header (b67) | `VoltraLive/Views/VoltraUnitHeader.swift` |
 | Page registry (b70) | `VoltraLive/Views/PageRegistry.swift` |
-| Debug grid overlay (b70 → b72) | `VoltraLive/Views/DebugGridOverlay.swift` |
+| Debug grid overlay (b70 → b72 → b73) | `VoltraLive/Views/DebugGridOverlay.swift` (b73 split adds `.debugGridContent()` modifier; renderer translates row labels by `contentMinY`) |
 | Page badge (b66, edited b70) | `VoltraLive/Views/PageBadgeOverlay.swift` |
 | Build badge (edited b70 for tap) | `VoltraLive/Views/BuildBadgeOverlay.swift` |
 | Design system spec | `design-system/` on branch `design-studio` |

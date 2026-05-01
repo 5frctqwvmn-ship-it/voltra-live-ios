@@ -125,6 +125,9 @@ struct ExerciseDetailView: View {
                     Spacer(minLength: 24)
                 }
                 .padding(20)
+                // b73 V4-D23: pipe content metrics so debug grid rows
+                // travel with scroll.
+                .debugGridContent()
             }
         }
         .navigationTitle(navTitle)

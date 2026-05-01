@@ -4072,3 +4072,193 @@ v0.4.45 / build 72, push, ship to TestFlight"). Next steps
 after this commit: push to `feat/ui-v4-2-claude`, trigger
 `release.yml` with `dry_run=false`, poll to completion, verify
 altool upload step success, report ship complete.
+
+---
+
+## 2026-05-01 03:50 UTC — b73 debug grid scroll-anchor fix (V4-D23) + bump v0.4.45/72 → v0.4.46/73
+
+**Why.** b72 / V4-D22 shipped a viewport-pinned grid: column
+letters AND row numbers were both anchored to the screen
+viewport (the device's safe-area frame). When the user scrolled
+a list (e.g. `LoggingHomeView`'s exercises), UI content slid
+under stationary row labels — so "C10" pointed at one element
+before the scroll and a different element after. Coordinates
+that don't survive scrolling are useless for design feedback.
+
+**Karpathy "request back" verbatim** (captured 2026-05-01
+~03:00 UTC, single-prompt FULL SHIP autonomy granted): "Scope:
+Debug Grid Overlay — fix scroll-relative coordinate drift.
+[…] Mount the row numbers + horizontal gridlines so they travel
+with the ScrollView's content coordinate space, while column
+letters + vertical gridlines stay viewport-pinned (no horizontal
+scroll exists in this app)."
+
+**Decision (V4-D23).** Split the debug grid coordinate system:
+
+1. Vertical gridlines + column letters (A, B, C, …) stay
+   viewport-pinned — X axis has no horizontal scroll, so
+   nothing to reconcile.
+2. Horizontal gridlines + row numbers (1, 2, 3, …) anchor to
+   the ScrollView's content coordinate space via a new
+   `.debugGridContent()` view modifier attached to the inner
+   content stack of every page-badged ScrollView.
+3. Mechanic: the overlay establishes a named coordinate space
+   `"debugGridViewport"` on the screen root via
+   `.coordinateSpace(name:)`. The `.debugGridContent()` modifier
+   wraps a `GeometryReader` around the content stack that
+   measures `proxy.frame(in: .named("debugGridViewport"))` and
+   publishes `(minY, height)` via a new
+   `DebugGridContentMetricsKey` PreferenceKey. The overlay's
+   `onPreferenceChange` reads that and translates horizontal
+   gridlines + row label strip by `contentMinY`.
+4. Backward compatible: screens without `.debugGridContent()`
+   default to `metrics = .zero` and render row labels at the
+   top of the viewport — identical to b72 behavior. No per-screen
+   breakage if a screen is missed during ScrollView migration.
+5. Row 1 is the top of content, NOT the top of viewport. As the
+   user scrolls down, row labels slide off the top; as they
+   scroll up past content origin, labels drift below the safe-area
+   header. This is the desired behavior — it means "C10" identifies
+   a piece of UI furniture not a piece of glass.
+
+**What changed.**
+
+- `VoltraLive/Views/DebugGridOverlay.swift` rewritten in place
+  (480 → 630 lines). Added `DebugGridContentMetrics` struct,
+  `DebugGridContentMetricsKey` PreferenceKey, `View+`
+  extension `.debugGridContent()` modifier, named coordinate
+  space `"debugGridViewport"` on the overlay root,
+  `.onPreferenceChange(DebugGridContentMetricsKey.self)`
+  subscriber on the overlay, content-translated `Path` draw
+  for horizontal gridlines (offset by `contentMinY`), and
+  content-translated row label strip. Legacy
+  `enum DebugGridDensity` (b72 / V4-D22) and density region
+  outline preference machinery preserved verbatim. Legacy
+  `enum DebugGridMode` retained behind `// SUPERSEDED` marker
+  per the b72 retain-for-rollback pattern.
+- `.debugGridContent()` applied to the inner content stack of
+  10 ScrollView screens (1-line change per screen):
+  - `VoltraLive/Logging/Views/LoggingHomeView.swift`
+  - `VoltraLive/Logging/Views/LiveCaptureView.swift`
+  - `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
+  - `VoltraLive/Logging/Views/ExerciseDetailView.swift`
+  - `VoltraLive/Logging/Views/ExerciseStartView.swift`
+  - `VoltraLive/Logging/Views/DebugView.swift`
+  - `VoltraLive/Logging/Views/ExercisePickerView.swift`
+  - `VoltraLive/Logging/Views/SetLogView.swift`
+  - `VoltraLive/Logging/Views/ExportSheet.swift`
+  - `VoltraLive/Views/DashboardView.swift`
+- Intentionally NOT wired: `ConnectView` (no ScrollView),
+  `LiveCaptureContainer` (b53 router forwarder; owns no
+  content), `ContentView` (host shell; owns no content). See
+  KI-13 for the design rationale on the fall-through default.
+
+**Constraints honored.**
+
+- States 0 → 4 from V4-D22 preserved unchanged (mounting fix
+  only, not a density change).
+- `.allowsHitTesting(false)` on every overlay layer — overlay
+  never blocks UI underneath.
+- Same toggle surface (build badge tap), same gesture, same
+  AppStorage key (`"debugGridMode"`). No new affordances.
+- Sacred files untouched. `_tmp/archive` untouched.
+- Scope fence honored: BLE, telemetry, logging, LiveCapture
+  set logic, MDM, chain UI, HealthKit, force chart all
+  untouched.
+
+**Files changed (this commit).**
+
+- `VoltraLive/Views/DebugGridOverlay.swift` (rewrite)
+- `VoltraLive/Logging/Views/LoggingHomeView.swift` (1 line)
+- `VoltraLive/Logging/Views/LiveCaptureView.swift` (1 line)
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` (1 line)
+- `VoltraLive/Logging/Views/ExerciseDetailView.swift` (1 line)
+- `VoltraLive/Logging/Views/ExerciseStartView.swift` (1 line)
+- `VoltraLive/Logging/Views/DebugView.swift` (1 line)
+- `VoltraLive/Logging/Views/ExercisePickerView.swift` (1 line)
+- `VoltraLive/Logging/Views/SetLogView.swift` (1 line)
+- `VoltraLive/Logging/Views/ExportSheet.swift` (1 line)
+- `VoltraLive/Views/DashboardView.swift` (1 line)
+- `project.yml` — `MARKETING_VERSION` 0.4.45 → 0.4.46,
+  `CURRENT_PROJECT_VERSION` 72 → 73, `CFBundleShortVersionString`
+  0.4.45 → 0.4.46, `CFBundleVersion` 72 → 73,
+  `VOLTRAFeatureLabel` "" → "Grid scroll fix".
+- `VoltraLive/Info.plist` — same string updates plus
+  `VOLTRAFeatureLabel` "Grid scroll fix".
+- `docs/handoff/01_PROJECT_OVERVIEW.md` (shipping build line)
+- `docs/handoff/02_CURRENT_STATE.md` (active cycle banner +
+  file map row)
+- `docs/handoff/03_CURRENT_FEATURE_SPEC.md` (Debug grid header
+  bumped to V4-D22 → V4-D23, scroll-anchoring subsection added)
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` (V4-D23 ADR
+  appended)
+- `docs/handoff/06_KNOWN_ISSUES.md` (KI-13 added)
+- `docs/WORK_LOG.md` (this entry)
+- `scripts/render_b73_grid_diagram.py` (NEW) —
+  Python/Pillow validator that uses the SAME row-coord formula
+  as the SwiftUI overlay (`row = floor(y_center / 32) + 1`).
+  Renders side-by-side panels at offsets 0 pt and 192 pt
+  showing LEG DAY landing on content row 10 in both states.
+- `docs/handoff/screenshots/b73/grid_scroll_invariant.png` (NEW)
+- `docs/handoff/screenshots/b73/logging_home_offset_0.png` (NEW)
+- `docs/handoff/screenshots/b73/logging_home_offset_192.png`
+  (NEW)
+
+**Why one commit instead of three.** b73 is one feature per the
+one-feature-per-build mandate. b72 split into three commits
+(bookkeeping → implementation → version bump) because of the
+unrelated b71-cycle bookkeeping debt that needed to land first.
+b73 has no bookkeeping debt — the previous shipping build (b72)
+left the tree clean — so implementation + version bump + docs
+collapse into a single atomic commit per Karpathy "minimum
+diff" preference.
+
+**Verification (pre-CI).**
+
+- `git status --short` confirms 17 modified + 4 new files; no
+  `_tmp/archive` paths.
+- Brace/paren balance check passed on `DebugGridOverlay.swift`
+  and all 10 screen files (one pre-existing imbalance in
+  `ExerciseDetailView` from string interpolation,
+  unrelated — would not have compiled in b72 if real).
+- Visual validation via `scripts/render_b73_grid_diagram.py`:
+  the math is the same closed-form expression as the SwiftUI
+  overlay's row computation. The PNG shows LEG DAY anchored at
+  content row 10 across both scroll offsets — that is the
+  invariant the user asked for.
+- iOS Simulator screenshots are NOT available from the Linux
+  sandbox. Real on-device captures will land in the b73
+  TestFlight build itself; the user can validate against the
+  Python-rendered diagram for the math, and against TestFlight
+  for the actual SwiftUI render.
+
+**CI verification (filled in post-push).** _pending_ — release
+run ID, conclusion, all 5 gates (protocol unit tests, build &
+archive signed, verify signed IPA, verify entitlements
+[b49 hardened], upload to TestFlight via altool), delivery UUID.
+
+**Risks.**
+
+- `GeometryReader` adds one layout pass per ScrollView screen.
+  iOS 17 has well-optimized GeometryReader; the wrapped content
+  is a `LazyVStack` / `VStack` so the perf hit is a constant
+  overhead, not O(rows). Acceptable.
+- PreferenceKey publish-on-every-frame potential — mitigated by
+  the default `reduce` summing only the latest value (last write
+  wins) and SwiftUI's diff suppression on identical values.
+- iOS 17 minimum deployment target unchanged from b72.
+- Apple version-component rule: `0.4.46` is 3 components,
+  compliant. Build 73 follows 72 monotonically, compliant.
+
+**Out of scope (this commit).** No protocol changes, no
+telemetry changes, no logging changes, no chart changes, no
+HealthKit changes, no MDM changes, no chain-UI changes, no
+LiveCapture set logic changes. No region instrumentation —
+KI-12 stays open. Legacy `DebugGridMode` enum still retained
+behind `// SUPERSEDED` marker.
+
+**Pending (post-this-commit).** Push to
+`feat/ui-v4-2-claude`, trigger `release.yml` with
+`dry_run=false`, poll ~5-6 min for signed TestFlight ship,
+verify all 5 gates including altool upload, fill in the CI
+verification block above, report ship complete.

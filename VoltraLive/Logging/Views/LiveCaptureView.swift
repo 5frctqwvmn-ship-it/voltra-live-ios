@@ -129,6 +129,9 @@ struct LiveCaptureView: View {
                     Spacer(minLength: 60)
                 }
                 .padding(16)
+                // b73 V4-D23: pipe content metrics to the debug grid
+                // overlay so row labels track scroll position.
+                .debugGridContent()
             }
 
             if let snap = pendingUndo {

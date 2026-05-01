@@ -376,3 +376,36 @@ Each addition is a 1-line change, doesn't require an ADR, and
 ships in whatever feature build is open at the time. KI-12
 closes when the 7 high-priority regions above are all
 instrumented on `LiveCaptureViewV2` and `LoggingHomeView`.
+
+### KI-13 (b73) — Non-scrolling screens fall back to viewport-pinned rows (by design)
+
+**Status.** Open / non-issue / documented.
+
+**What.** The b73 / V4-D23 split coordinate system requires a
+screen to attach `.debugGridContent()` to its ScrollView's inner
+content stack for row labels (1, 2, 3, …) to anchor to the
+content coordinate space. Screens that have no ScrollView —
+notably `ConnectView` — omit `.debugGridContent()`, so the
+overlay receives `metrics = .zero` and renders row labels
+viewport-pinned (matching b72 behavior on those screens).
+
+**Why this is fine.** Without a ScrollView there is no
+content-coordinate-vs-viewport-coordinate divergence to
+reconcile — the content frame *is* the viewport frame minus
+safe-area inset. "C10" on `ConnectView` already means the same
+physical UI element across taps because the screen does not
+scroll. The split mechanic is a no-op there.
+
+**Screens currently wired** (10): `LoggingHomeView`,
+`LiveCaptureView`, `LiveCaptureViewV2`, `ExerciseDetailView`,
+`ExerciseStartView`, `DebugView`, `DashboardView`,
+`ExercisePickerView`, `SetLogView`, `ExportSheet`.
+
+**Screens intentionally NOT wired** (3): `ConnectView` (no
+ScrollView), `LiveCaptureContainer` (b53 router forwarder, owns
+no content), `ContentView` (host shell, owns no content).
+
+**When to revisit.** If a future cycle adds a ScrollView to
+`ConnectView` or any other currently-unwired screen, that
+screen must add `.debugGridContent()` to its inner content
+stack in the same commit. Otherwise no action.

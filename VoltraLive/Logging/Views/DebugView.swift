@@ -218,6 +218,8 @@ struct DebugView: View {
                             .foregroundColor(VoltraColor.textFaint)
                     }
                     .padding(20)
+                    // b73 V4-D23: pipe content metrics for the debug grid.
+                    .debugGridContent()
                 }
             }
             .navigationTitle("Debug")

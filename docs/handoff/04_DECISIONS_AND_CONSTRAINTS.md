@@ -1380,3 +1380,160 @@ commit — partial coverage is acceptable for the first ship of
 the new overlay; the user can tap through 0 → 1 → 2 → 3 fully
 on every page-badged screen, and `.max` regions appear only on
 screens that opt in. KI-12 tracks the follow-up.
+
+---
+
+## V4-D23 — Debug grid coordinate system: column letters viewport-pinned, row numbers content-pinned (b73)
+
+**Date.** 2026-05-01.
+
+**Status.** Active.
+
+**Cycle.** v0.4.46 / build 73.
+
+**Context.** The b72 (V4-D22) progressive-density debug grid was
+mounted at the screen-body level via `PageBadgeOverlay`'s
+`.debugGridOverlay()` modifier. That modifier puts the entire
+overlay above ANY ScrollView on the screen, so vertical position
+on the overlay (a row label) maps to a fixed PHYSICAL pixel —
+not to a fixed UI element. Two screenshots of `LoggingHomeView`
+shipped on b72 (IMG_2450 unscrolled, IMG_2451 scrolled) show
+"LEG DAY" at row 5 in the first and row 11 in the second. That
+means a coordinate like "C10" referred to whatever the user
+happened to be looking at, not to a stable element of the
+design. The whole point of having a coordinate system is to
+make a phrase like "tighten the spacing around C10" land
+unambiguously on the same UI element regardless of scroll
+position. b72's grid did not deliver that.
+
+The fix has to split the coordinate system because the X axis
+and the Y axis behave differently in this app: there is NO
+horizontal scroll anywhere, so column coordinates are already
+stable when pinned to the viewport; the Y axis is where the
+scroll happens, and only that axis needs to follow the content.
+
+**Decision.**
+
+1. **Vertical gridlines + column letters stay viewport-pinned.**
+   They render in the screen's coordinate space, full width,
+   full height. Letters `A, B, C, …` start at the leading edge
+   and wrap `Z, AA, AB, …` per the b72 spec.
+
+2. **Horizontal gridlines + row numbers anchor to the
+   ScrollView's content coordinate space.** Row 1 is the top of
+   the SCROLLABLE CONTENT, not the top of the screen. Row labels
+   travel with the content as the user scrolls. The grid extends
+   to cover the full content height, so row N is meaningful even
+   when N is currently off-screen.
+
+3. **Mechanic.** A new public modifier `.debugGridContent()` is
+   attached to the inner content stack inside each page-badged
+   ScrollView. It backs the receiver with a `GeometryReader`
+   that measures itself in the `"debugGridViewport"` named
+   coordinate space (established by `.debugGridOverlay()` on the
+   same screen) and publishes the `(minY, height)` of the
+   content via a new `DebugGridContentMetricsKey`. The overlay
+   reads that preference and translates horizontal lines + row
+   labels by `contentMinY`. The translation is the entire
+   correction: `minY = 0` at rest, `minY < 0` after the user
+   scrolls down by `|minY|` points.
+
+4. **Backward compatibility.** Screens without a ScrollView
+   (e.g. `ConnectView`) do not call `.debugGridContent()`. The
+   metrics default is `.zero`, so the overlay's row labels land
+   at viewport-y = 0 + i * 32 — exactly the b72 behavior. There
+   is no per-screen breakage from screens that don't opt in.
+
+5. **Scope of adoption (this commit).** Every existing
+   page-badged screen with a ScrollView gets `.debugGridContent()`
+   on its inner content stack: `LoggingHomeView`,
+   `LiveCaptureView`, `LiveCaptureViewV2`, `ExerciseDetailView`,
+   `ExerciseStartView`, `DebugView`, `DashboardView`,
+   `ExercisePickerView`, `SetLogView`, `ExportSheet`. Future
+   page-badged ScrollView screens must add the modifier;
+   omission is detectable visually because rows visibly fail to
+   travel with scroll.
+
+**Why not these alternatives.**
+
+- *Move the entire overlay inside each ScrollView.* That would
+  put column letters inside the scrollable content too, so they
+  would scroll off the top — wrong behavior. The whole point of
+  this fix is that the X axis and Y axis are different.
+
+- *Use an `onScrollGeometryChange` / `ScrollPosition` API
+  (iOS 17+).* iOS 17 is the deployment target, so this is
+  technically available, but it adds an extra type per screen
+  (a `ScrollPosition` ObservedObject) and forces every adopting
+  screen to wire a `.scrollPosition($var)` binding. The
+  `GeometryReader + PreferenceKey` pattern is one line per
+  screen, has no extra state, and is the standard SwiftUI
+  pattern for content-frame measurement. Reach for the iOS 17
+  API only if the preference-key approach proves laggy in
+  practice.
+
+- *Use a content `coordinateSpace(name:)` from inside the
+  ScrollView.* Equivalent in spirit but harder to wire because
+  the OVERLAY, which lives at the screen-body level, would have
+  to look INTO the ScrollView's named space. The chosen
+  direction (overlay establishes the viewport name; content
+  measures itself against it) flows the dependency in the same
+  direction layout already does and avoids cross-tree lookups.
+
+- *Reset row 1 to "current viewport top" by reading the visible
+  scroll offset on every frame and recomputing.* This is what
+  b72 effectively did and it's exactly the bug we're fixing. A
+  coordinate system whose origin moves with the camera is not a
+  coordinate system.
+
+**Files changed (this commit).**
+
+- `VoltraLive/Views/DebugGridOverlay.swift` — split renderer.
+  New `enum DebugGridContentMetrics`, `DebugGridContentMetricsKey`
+  PreferenceKey, public `.debugGridContent()` modifier. Canvas
+  draws vertical lines in viewport space and horizontal lines
+  shifted by `contentMinY`; row label `position(y:)` shifted by
+  the same amount. Density enum, region preference key, and
+  `// SUPERSEDED` legacy `DebugGridMode` kept verbatim from
+  b72.
+
+- 10 page-badge screens with ScrollView: `LoggingHomeView`,
+  `LiveCaptureView`, `LiveCaptureViewV2`, `ExerciseDetailView`,
+  `ExerciseStartView`, `DebugView`, `DashboardView`,
+  `ExercisePickerView`, `SetLogView`, `ExportSheet` — each gains
+  one `.debugGridContent()` call on its inner content stack.
+
+- `project.yml`, `VoltraLive/Info.plist` — version bump
+  v0.4.45/72 → v0.4.46/73; `VOLTRAFeatureLabel` = "Grid scroll
+  fix".
+
+- `docs/handoff/01_PROJECT_OVERVIEW.md`,
+  `docs/handoff/02_CURRENT_STATE.md`,
+  `docs/handoff/03_CURRENT_FEATURE_SPEC.md` (this ADR + spec
+  amendment), `docs/handoff/06_KNOWN_ISSUES.md` (KI-13 added),
+  `docs/WORK_LOG.md`.
+
+- `docs/handoff/screenshots/b73/grid_scroll_invariant.png` —
+  visual validator (mathematical render, not on-device capture
+  — see WORK_LOG for the explicit caveat).
+
+- `scripts/render_b73_grid_diagram.py` — generator for the
+  validator diagram.
+
+**Verification.** The visual validator renders LEG DAY (a UI
+element at content y=270, height=80) using the same formula as
+the SwiftUI overlay (`row = floor((y_center) / 32) + 1 = 10`).
+At scroll offset 0 LEG DAY appears next to row label 10; at
+scroll offset 192 LEG DAY again appears next to row label 10
+(because the row labels translated by -192 along with the
+content). Side-by-side comparison saved at
+`docs/handoff/screenshots/b73/grid_scroll_invariant.png`.
+
+CI `build.yml` is the authoritative compile check; this commit
+ships only after a green CI run on `feat/ui-v4-2-claude`.
+
+**Out of scope.** No protocol/BLE changes. No new
+`debugRegion(...)` instrumentation (KI-12 from b72 remains
+open). No removal of the b72 SUPERSEDED legacy `DebugGridMode`
+enum (delete target slips to post-b74 to keep two clean ships
+of distance).

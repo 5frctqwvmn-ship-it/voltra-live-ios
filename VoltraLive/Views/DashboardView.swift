@@ -79,6 +79,8 @@ struct DashboardView: View {
                         .frame(height: 72)
                 }
                 .padding(14)
+                // b73 V4-D23: pipe content metrics for the debug grid.
+                .debugGridContent()
             }
         }
         .background(VoltraColor.bg)
