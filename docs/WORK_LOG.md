@@ -4542,3 +4542,46 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   This branch (`feat/b74-f8-watch-presence-indicator`) is
   committed locally only — `git push` is deferred per the
   F8 contract.
+
+## 2026-05-01 22:50 UTC — b76 v0.4.49: bump build 75 -> 76, feature label "Health signal indicator" (B74-F8 release-only ship)
+
+- **Files changed:** `project.yml`, `VoltraLive/Info.plist`,
+  `docs/handoff/00_START_HERE.md`,
+  `docs/handoff/02_CURRENT_STATE.md`,
+  `docs/handoff/03_ROADMAP.md`, `docs/WORK_LOG.md`.
+- **What changed:** Release-only ship of B74-F8 ("Health signal
+  indicator") from `feat/ui-v4-2-claude`. The implementation was
+  already merged at `713a851` via PR #8 (`8fd6f95`) — this commit
+  bumps `MARKETING_VERSION` 0.4.48 → 0.4.49 and
+  `CURRENT_PROJECT_VERSION` 75 → 76 in both `project.yml` (lines
+  64–65 and 92–93) and `VoltraLive/Info.plist`, sets
+  `VOLTRAFeatureLabel` to exactly `Health signal indicator` in
+  both files, and overwrites the durable handoff sections per
+  `00_START_HERE.md` ship discipline (Latest shipped, Done table,
+  Last shipped line). Zero implementation changes — this is the
+  ship commit, not a code commit. Per task brief, the release was
+  dispatched via `gh workflow run release.yml --ref
+  feat/ui-v4-2-claude -f dry_run=false`. CI conclusion + altool
+  5-gate verification recorded in the commit message and in the
+  task's `/tmp/claude_code_output.md` report.
+- **Verification:** `grep -nE
+  'MARKETING_VERSION|CURRENT_PROJECT_VERSION|CFBundleShortVersionString|CFBundleVersion|VOLTRAFeatureLabel'
+  project.yml VoltraLive/Info.plist` shows all 7 lines consistent
+  at `0.4.49` / `76` / `Health signal indicator`. No
+  `xcodebuild`/`swift build` available in this Linux container —
+  compile validation is the release workflow's responsibility.
+- **Risks:** (a) If the release workflow's compile gate fails on
+  any of the B74-F8 Swift surface (`TimelineView(.periodic(...))`,
+  the new `healthSignalIndicator` view, the removed `HRState`
+  symbols), the ship will be aborted and the user will be asked
+  before any forward fix — per the task contract this is a
+  release-only ship and we do not alter implementation under any
+  CI failure. (b) The b75 ship verification status was not
+  recorded in `02_CURRENT_STATE.md`'s "Latest shipped build"
+  block before this bump, so the prior-build TestFlight history
+  is sourced from `git log` rather than from the durable docs.
+- **Next step:** Six-item user device QA checklist (idle dot
+  faint pre-auth, tap → consent sheet, live HR sample = header
+  text color, >10 s stale flip, L/R/⋏ pills unchanged, Xcode
+  compile via release workflow). After user QA, append to
+  `docs/handoff/QA_LOG.md` per b58 sticky requirement.

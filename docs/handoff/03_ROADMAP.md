@@ -1,6 +1,6 @@
 # 03 — Roadmap
 
-_Last updated: 2026-04-28 (post-b54)._
+_Last updated: 2026-05-01 (b76 release dispatched — B74-F8 Health signal indicator)._
 
 > **Maintenance rule:** overwritten on every ship. Items that ship move to "Done" with the build number; items that emerge get added to "Next up". History lives in `docs/WORK_LOG.md`.
 
@@ -8,6 +8,10 @@ _Last updated: 2026-04-28 (post-b54)._
 
 | Build | Tag | Label | Highlights |
 |---|---|---|---|
+| 76 | v0.4.49-build76 | Health signal indicator | B74-F8: replaced legacy dual-dot HR pill in `VoltraUnitHeader` with a single neutral Health signal indicator. Idle = faint but visible pre-HK auth; tap-while-unauthorized → HK consent sheet; live = header text color when HR sample within 10 s freshness window; >10 s stale flips back to faint without app re-foreground. L / R / ⋏ pills unchanged. Release-only ship — implementation already merged at `713a851`. |
+| 75 | v0.4.48-build75 | L/R auto-connect | B74-F1: L/R buttons auto-connect to Voltras whose advertised names contain "left"/"right" (case-insensitive). |
+| 74 | v0.4.47-build74 | Grid scroll fix v2 | b74 V4-D24 debug grid TRUE content-space layer (PR-only / unverified) + b74 grid scroll-anchor fix. |
+| 73 | v0.4.46-build73 | Grid scroll fix | Debug grid scroll-anchor fix (V4-D23). |
 | 54 | v0.4.32-build54 | V2 spec match | V2 LiveCaptureView rewritten as 1:1 port of design-system/ui-kit.html. V2 gate tightened to fall back on any chain entry. |
 | 53 | v0.4.31-build53 | V2 preview + chain fixes | Per-instance `assignedVoltra` routing, 3-way Left/Right/Both picker, "Superset · {head} · HR · {day}" header, no SWAP auto-LOAD, session vitals + comparison cards, EXERCISES count fix, markdown export fixed-width. V2 itself was wrong, hotfixed in b54. |
 | 52 | v0.4.30-build52 | Chain logging + summary | Chain logging foundations, multi-card export, totals + vitals lines. |

@@ -1,6 +1,6 @@
 # 02 — Current State
 
-_Last updated: 2026-05-01 (b73 SHIPPED — debug grid scroll-anchor fix. Single-commit feature build per the one-feature-per-build convention. Awaiting Apple processing on TestFlight.)_
+_Last updated: 2026-05-01 (b76 SHIPPING — B74-F8 Health signal indicator. Single-commit feature build per the one-feature-per-build convention. Release dispatch in flight on `feat/ui-v4-2-claude`.)_
 
 > **Maintenance rule:** this file is overwritten on every ship. The
 > append-only history lives in `docs/WORK_LOG.md`. If you're updating
@@ -12,16 +12,24 @@ _Last updated: 2026-05-01 (b73 SHIPPED — debug grid scroll-anchor fix. Single-
 
 ## Latest shipped build
 
-**v0.4.46 / build 73** — label "Grid scroll fix" — shipped
-2026-05-01 03:56 UTC. 5-gate altool verify passed,
-[run 25201372318](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25201372318)
-duration ~5m. HEAD at ship: `68b4a0e`. Delivery UUID
-`6b12a064-b20a-4152-82c5-d578edb0c9d9`. altool reported
-`UPLOAD SUCCEEDED with no errors`. Awaiting Apple processing.
+**v0.4.49 / build 76** — label "Health signal indicator" — release
+dispatched 2026-05-01 ~22:50 UTC on `feat/ui-v4-2-claude`. Ships
+B74-F8: replaces the legacy dual-dot HR pill with a single neutral
+Health signal indicator on `VoltraUnitHeader`. Idle dot is faint but
+visible before HealthKit auth; tap-while-unauthorized routes to the
+HK consent sheet; live HR sample renders the dot in the header text
+color (not accent green); >10 s of no samples flips the dot back to
+faint without app re-foreground. L / R / ⋏ pills unchanged. Pre-b76
+shipped state: **v0.4.48 / build 75** ("L/R auto-connect", B74-F1) —
+HEAD `8fd6f95`, last build before this ship.
 
 ## Active cycle
 
-No active cycle. Awaiting next user prompt.
+b76 release-only ship in progress on `feat/ui-v4-2-claude`. No
+implementation changes — only `project.yml`, `VoltraLive/Info.plist`,
+handoff docs, and `docs/WORK_LOG.md` were touched in the release
+commit. Implementation lives at `713a851` (B74-F8 merged via PR #8 /
+`8fd6f95`). Awaiting CI workflow conclusion + altool 5-gate.
 
 ## Last cycle (b73, just shipped) — debug grid SCROLL-ANCHOR fix
 
