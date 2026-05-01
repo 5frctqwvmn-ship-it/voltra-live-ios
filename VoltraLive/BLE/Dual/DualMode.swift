@@ -138,6 +138,23 @@ enum DeviceSlot: String, CaseIterable, Equatable, Identifiable {
         case .right: return .left
         }
     }
+
+    /// B74-F1: case-insensitive substring used to recognize an advertised
+    /// Voltra name as belonging to this slot. The user names each Voltra
+    /// "...left" / "...right" via the iPad app; the iOS app must respect that
+    /// labelling when auto-pairing rather than picking by RSSI / discovery
+    /// order.
+    var advertisedNameKeyword: String {
+        switch self {
+        case .left:  return "left"
+        case .right: return "right"
+        }
+    }
+
+    /// True if `advertisedName` contains this slot's keyword (case-insensitive).
+    func matchesAdvertisedName(_ advertisedName: String) -> Bool {
+        advertisedName.range(of: advertisedNameKeyword, options: .caseInsensitive) != nil
+    }
 }
 
 // MARK: - DeviceSlotAssignment (b53)

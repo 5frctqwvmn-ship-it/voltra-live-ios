@@ -32,6 +32,11 @@ struct UnifiedConnectSheet: View {
 
     @EnvironmentObject var ble: VoltraBLEManager
     @EnvironmentObject var mdm: MultiDeviceManager
+    /// B74-F1: when present, the user tapped a specific L/R slot in the
+    /// header pill. We auto-connect to the first advertised Voltra whose
+    /// name contains the slot keyword (case-insensitive) and dismiss
+    /// without showing the picker. `nil` = no slot intent → manual flow.
+    @EnvironmentObject var pairing: PairingCoordinator
     @Environment(\.dismiss) private var dismiss
 
     @StateObject private var scanner = VoltraDiscoveryScanner()
@@ -40,6 +45,11 @@ struct UnifiedConnectSheet: View {
     /// If the user taps a third row, we drop the OLDEST selection (FIFO)
     /// so the newest tap is always honored.
     @State private var selectedIDs: [UUID] = []
+
+    /// B74-F1: latched once we've fired the slot-targeted connect, so we
+    /// don't double-connect if more discoveries arrive before dismiss
+    /// finishes animating.
+    @State private var didAutoConnectForSlot: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -59,8 +69,23 @@ struct UnifiedConnectSheet: View {
         }
         .background(VoltraColor.bg)
         .preferredColorScheme(.dark)
-        .onAppear { scanner.start() }
-        .onDisappear { scanner.stop() }
+        .onAppear {
+            didAutoConnectForSlot = false
+            scanner.start()
+            // If the user already had matching Voltras discovered from a
+            // prior open of the sheet, fire immediately on appear.
+            tryAutoConnectForRequestedSlot()
+        }
+        .onDisappear {
+            scanner.stop()
+            // Clear the slot intent so a follow-up tap on the generic
+            // "Connect to VOLTRA" entry point falls back to the manual
+            // multi-select picker.
+            pairing.requestedSlot = nil
+        }
+        .onChange(of: scanner.discovered) { _, _ in
+            tryAutoConnectForRequestedSlot()
+        }
     }
 
     // MARK: - Header
@@ -111,6 +136,13 @@ struct UnifiedConnectSheet: View {
     }
 
     private var instructionText: String {
+        // B74-F1: when the sheet was opened by tapping a specific L/R
+        // header pill, surface the side-name search instead of the
+        // multi-select copy. This banner is only seen if the matching
+        // Voltra hasn't appeared yet — we dismiss as soon as it does.
+        if let slot = pairing.requestedSlot {
+            return "Searching for a Voltra named \u{201C}\(slot.advertisedNameKeyword)\u{201D}\u{2026}"
+        }
         switch selectedIDs.count {
         case 0: return "Tap a Voltra to use it. Tap a second to use both at once."
         case 1: return "Tap Connect to use this one, or tap a second Voltra for dual mode."
@@ -287,6 +319,22 @@ struct UnifiedConnectSheet: View {
         }
     }
 
+    /// B74-F1: when the sheet was opened with a slot intent (user tapped
+    /// the L or R pill), find the first discovered Voltra whose advertised
+    /// name contains the slot keyword (case-insensitive) and route through
+    /// `mdm.connect(slot:discovered:)` directly, bypassing the manual
+    /// picker. If no match is currently visible we keep scanning — the
+    /// caller does NOT silently fall back to the wrong-side device.
+    private func tryAutoConnectForRequestedSlot() {
+        guard let slot = pairing.requestedSlot, !didAutoConnectForSlot else { return }
+        guard let match = scanner.discovered.first(where: { slot.matchesAdvertisedName($0.name) })
+        else { return }
+        didAutoConnectForSlot = true
+        scanner.stop()
+        mdm.connect(slot: slot, discovered: match)
+        dismiss()
+    }
+
     private func performConnect() {
         let picks = selectedIDs.compactMap { id -> VoltraDiscoveryScanner.Discovered? in
             scanner.discovered.first(where: { $0.id == id })
@@ -313,4 +361,5 @@ struct UnifiedConnectSheet: View {
     UnifiedConnectSheet()
         .environmentObject(VoltraBLEManager())
         .environmentObject(MultiDeviceManager())
+        .environmentObject(PairingCoordinator())
 }

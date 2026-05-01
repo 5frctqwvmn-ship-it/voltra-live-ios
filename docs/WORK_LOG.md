@@ -4411,3 +4411,62 @@ from UNVERIFIED to VERIFIED with a screenshot link.
 - **Verification:** Will be `release.yml` dryRun=false on `feat/ui-v4-2-claude` — TestFlight ship + altool 5-gate verification.
 - **Risks:** PR #5 is tagged UNVERIFIED — shipping to TestFlight so the user can verify on device. No forward fix attempted.
 - **Next step:** Monitor CI run, capture Delivery UUID, post TestFlight status. If CI fails with a compile error, stop and surface the log per user release instruction.
+
+## 2026-05-01 05:16 UTC — B74-F1: auto-connect L/R buttons by Voltra advertised name
+
+- **Files changed:** `VoltraLive/BLE/Dual/DualMode.swift`,
+  `VoltraLive/Views/UnifiedConnectSheet.swift`,
+  `VoltraLiveTests/SideNameMatchTests.swift` (new),
+  `docs/WORK_LOG.md`, `docs/handoff/B74_BUG_QUEUE.md`.
+- **What changed:** Tapping the greyed L or R pill in
+  `VoltraUnitHeader` already routed through
+  `PairingCoordinator.presentPair(slot:)`, but
+  `UnifiedConnectSheet` then ignored the slot intent and
+  presented the manual multi-select picker — which
+  RSSI-sorted the discoveries strongest-first, so users
+  reported L and R both pairing to the closer Voltra
+  regardless of which side button they tapped. The fix:
+  (1) added `DeviceSlot.advertisedNameKeyword` /
+  `matchesAdvertisedName(_:)` (case-insensitive substring
+  on `left` / `right`); (2) when the sheet appears with
+  `pairing.requestedSlot != nil`, watch
+  `scanner.discovered` and as soon as a Voltra whose
+  advertised name contains the slot keyword shows up,
+  call `mdm.connect(slot:discovered:)` and dismiss
+  immediately. Until a side-name match is found the
+  sheet stays visible with "Searching for a Voltra
+  named "left"…" (or "right") so the user does not get
+  silently auto-connected to the wrong device. The
+  generic "Connect to VOLTRA" entry on `ConnectView`
+  is unchanged: it opens the sheet with no slot intent
+  and the multi-select flow still works.
+- **Verification:** Pure-Swift unit tests in
+  `SideNameMatchTests.swift` pin the case-insensitive
+  substring contract (positive: "voltra-left",
+  "VOLTRA Left", "VoltraLEFT", "Voltra Left A1B2";
+  negative: opposite-side names, "VOLTRA" alone, ""
+  empty string). Cannot run `xcodebuild test` in this
+  environment (Linux container, no Xcode toolchain) —
+  unit tests must be run on macOS as part of the merge
+  CI / human verification. No hardware BLE verification
+  performed; that needs both Voltras paired by the user
+  on TestFlight.
+- **Risks:** (a) If a Voltra is named with both keywords
+  ("left-right-rig"), the L tap will match it; this is
+  the user's labelling problem and the user spec
+  explicitly chose the substring-match contract. (b) If
+  no matching device is in range when the user taps L/R,
+  the sheet stays open with the searching banner — user
+  must Cancel manually. We deliberately do NOT fall back
+  to the wrong-side device or to RSSI order. (c) The
+  `.onChange(of: scanner.discovered)` hook compares
+  arrays element-wise via `Discovered`'s id-only
+  `==`; pure RSSI re-sorts that don't change the id set
+  won't re-fire the matcher, but the matcher already ran
+  on the previous emission so this is fine.
+- **Next step:** Human on-device verification with two
+  Voltras named "...left" and "...right" — confirm that
+  L pill pairs only the left-named device and R pill
+  pairs only the right-named device, both as solo and
+  as a sequenced pair. Then unblock B74-F2/F3/F5/F6 per
+  the bug queue note that F1 is a prereq for repro.
