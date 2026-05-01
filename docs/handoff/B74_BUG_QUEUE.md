@@ -22,6 +22,7 @@
 | B74-F5 | Merge-mode minus-weight only decrements one Voltra (left-favored)     | OPEN                | —              |
 | B74-F6 | Twin-mode L/R isolate tap does not actually isolate; LOAD fires both  | OPEN                | —              |
 | B74-F7 | Misc Merge UI polish (bucket for items found while fixing F3/F5)      | OPEN                | —              |
+| B74-F8 | Replace dual-dot HR pill with single neutral Health signal indicator  | IN PROGRESS         | feat/b74-f8-watch-presence-indicator |
 
 ---
 
@@ -173,6 +174,68 @@ sub-bullet (F7-a, F7-b, …) when discovered, with a one-line
 description and a closing commit.
 
 - (none yet — populate as discovered.)
+
+---
+
+## B74-F8 — Replace dual-dot HR pill with single neutral Health signal indicator
+
+**Status:** IN PROGRESS. Code edit lives on branch
+`feat/b74-f8-watch-presence-indicator`. Awaiting Xcode
+compile and on-device verification on macOS.
+
+**Reported:** May 1 2026.
+
+**User spec (verbatim from F8 contract):**
+
+> Replace the legacy dual-dot HR pill surface with a single
+> neutral Health signal indicator at the same mount point.
+> Glyph: single dot. Freshness window: 10 s. Live when
+> `hk.isAvailable && hk.hasRequestedAuthorization &&
+> hk.currentHR != nil && hk.lastHRSampleAt` is within 10 s.
+> Otherwise idle. Idle color: `VoltraColor.textFaint`, not
+> hidden. Live color: existing normal/header text color, not
+> accent green. Tap behavior: if
+> `!hk.hasRequestedAuthorization`, call
+> `hk.requestAuthIfNeeded()`; otherwise no-op. Accessibility:
+> "Health signal active" / "Health signal idle".
+
+**What this means.** The legacy `●●` HR pill in
+`VoltraUnitHeader` was a 3-state surface (dark / blinking-accent
+/ solid-accent) with its own pill chrome (rounded background +
+border). F8 collapses that to a single neutral dot at the same
+mount point. Two states only: live (header text color) when
+HealthKit is authorized and a sample arrived within the last
+10 s; idle (`textFaint`) otherwise. The indicator stays visible
+in the idle state — faint, not hidden — so the slot is always
+discoverable. Tapping is the explicit auth entry point when the
+user has not yet been asked (`hk.requestAuthIfNeeded()`); after
+that the tap is a deliberate no-op.
+
+**What changed (this branch).**
+- `VoltraLive/Views/VoltraUnitHeader.swift`: removed the
+  `HRState` enum, `hrState`, `heartRatePill`, `hrDots`,
+  `hrAccessibilityLabel`. Added `hrFreshnessWindow = 10 s`,
+  `healthSignalLive` (the four-fact gate), and
+  `healthSignalIndicator` (a `Button` wrapping a
+  `TimelineView(.periodic(from:.now, by:1))` so the freshness
+  check re-evaluates against the wall clock — necessary because
+  `lastHRSampleAt` going stale must flip live → idle without
+  any new `@Published` change). Top-of-file spec comment
+  updated to record the new `●` 2-state contract.
+- No changes to `HealthKitStore.swift`. No use of
+  `HKHealthStore.authorizationStatus(for:)`. No introduction
+  of `heartRateAuthStatus`.
+- No changes to BLE / pairing / WatchConnectivity / Watch
+  target / `Info.plist` / `project.yml` / entitlements /
+  version-build-feature-label / release workflows.
+
+**Verification rule reminder.** This is a UI surface change.
+On-device verification on macOS must confirm: (a) idle dot is
+faint but visible before HK auth; (b) tap when unauthorized
+shows the system HK consent sheet; (c) after auth + a live HR
+sample, dot uses the normal header text color (not accent
+green); (d) when no sample arrives for >10 s the dot returns to
+faint without requiring app re-foreground.
 
 ---
 
