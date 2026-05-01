@@ -1,8 +1,11 @@
 # B72 — Debug Grid Overlay upgrade (prompt on disk)
 
-**Status:** Open — pending two design confirmations from the user
-before implementation begins. Captured here so a new agent can
-resume from the repo alone (Karpathy "repo is source of truth").
+**Status:** IMPLEMENTED in b72. Both design confirmations
+received (32 pt base spacing, margin-only quarter labels). Code
+in `VoltraLive/Views/DebugGridOverlay.swift` (rewrite),
+`BuildBadgeOverlay.swift` (tap handler), `PageBadgeOverlay.swift`
+(comment only). ADR V4-D22 logged. Held local pending user push
+approval. See `docs/WORK_LOG.md` for the full entry and SHA.
 
 **Scope discipline.** Debug overlay only. No other feature work.
 No version bump. No push. No TestFlight ship. No touching

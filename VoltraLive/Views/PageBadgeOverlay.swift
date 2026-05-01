@@ -26,6 +26,17 @@
 //     page-badges automatically gets the debug grid (which is invisible
 //     until the user taps the build badge to flip the mode).
 //
+// b72 V4.5 update (V4-D22):
+//   • `.debugGridOverlay()` is now the progressive-density spreadsheet
+//     grid (5 states) instead of the b70 9-anchor markers. Mount order
+//     is unchanged: the grid is the LAST modifier in the chain so it
+//     renders ABOVE this page-badge layer in z-order. Margin labels
+//     therefore remain legible over the badge text.
+//   • No layout change here. Screens that opt into the State 4 region
+//     overlay use the new `.debugRegion("name")` modifier (declared in
+//     `DebugGridOverlay.swift`); those calls go on the screen body, not
+//     on this page badge.
+//
 // Usage:
 //   SomeView()
 //       .pageBadge("SomeView")

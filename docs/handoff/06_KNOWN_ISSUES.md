@@ -330,3 +330,49 @@ ECC / CHAIN values by `pulleyMultiplier` before writing to
 BLE. The device received doubled values under 2× pulley. Fixed
 by removing the `* m` from baseLb / eccLb / chainsLb in the
 push function. Display side still multiplies (correct).
+
+### KI-12 (b72) — Debug grid State 4 region overlay coverage is partial
+
+**Status.** Open. Acceptable trade-off; tracked here so the
+follow-up is not lost.
+
+**What.** The b72 / V4-D22 progressive-density grid's State 4
+(`.max`) renders translucent outlines around named UI regions
+that the screen publishes via `.debugRegion("name")`. As of the
+b72 commit, NO screens have been instrumented yet. State 4 still
+works — it just shows the quarter-step grid with no region
+outlines. Tap-through 0 → 1 → 2 → 3 is fully populated on every
+page-badged screen.
+
+**Why partial.** The user's b72 prompt explicitly required
+"replace the existing overlay with the new one in a single
+commit only after you have visually validated the new renderer
+compiles and lays out sanely" — so the renderer + state machine
+ship first, screen instrumentation lands incrementally. Every
+region added is per-screen surgical work that can land in
+isolation without touching the overlay infrastructure.
+
+**Planned region names** (per the user's b72 prompt — these are
+the identifiers the agent will use when the user references them
+by name):
+
+- `headerPillRow` — the b67 unit-status pill row at the top of
+  Workout / Live / Detail screens.
+- `tileGrid` — the V2 4-up live tile grid on
+  `LiveCaptureViewV2`.
+- `forceChartCard` — the force chart container.
+- `upcomingSetCard` — the V1RestoreSection upcoming-set
+  panel.
+- `dropSetSection` — the drop-set chip + bar section.
+- `loggedSetsSection` — the logged-sets list.
+- `bottomActions` — the bottom action bar (LOAD/UNLOAD,
+  ADD/EDIT, FINISH).
+- `pageBadge` / `buildBadge` — the chrome layer overlays
+  themselves (lowest priority).
+
+**Resolution plan.** Add `.debugRegion("name")` calls
+incrementally as the user identifies regions they want labeled.
+Each addition is a 1-line change, doesn't require an ADR, and
+ships in whatever feature build is open at the time. KI-12
+closes when the 7 high-priority regions above are all
+instrumented on `LiveCaptureViewV2` and `LoggingHomeView`.

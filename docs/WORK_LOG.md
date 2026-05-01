@@ -3890,3 +3890,102 @@ the next ship cycle starts.
 **Out of scope (this entry).** Bookkeeping only. No code changes.
 No version bump. No push (the b71 commit chain was already pushed
 during the original cycle).
+
+---
+
+## 2026-05-01 02:0X UTC — b72 debug grid overlay (V4-D22)
+
+**Why.** The b70/V4-D18 9-anchor marker overlay (C-TL / M-T /
+F-CTR / …) was not precise enough for design feedback. The user
+asked for a real spreadsheet-style graph-paper grid with column
+letters + row numbers and progressive density via the existing
+build-badge tap.
+
+**Karpathy "request back" verbatim** (captured 2026-04-30 ~01:35
+UTC, full prompt in `docs/handoff/B72_DEBUG_GRID_PROMPT.md`):
+"Replace it with a real spreadsheet-style graph-paper grid with
+column letters and row numbers, and make the existing tap toggle
+progressively increase density over 4 levels."
+
+**User confirmed design choices** (2026-04-30 ~02:00 UTC):
+- Base spacing: **32 pt** (over 24 pt / 40 pt). Yields ~12 cols
+  A-L on 390 pt-wide devices, ~26 rows on 844 pt body.
+- State 3 quarter-step labels: **margin-only** (over full
+  interior / every-other interior). Body stays readable.
+
+**What changed.**
+
+- `VoltraLive/Views/DebugGridOverlay.swift` rewritten in place:
+  new `enum DebugGridDensity` (`.off / .base / .half / .quarter
+  / .max`), Canvas-based gridline renderer (single draw call,
+  no per-line views), Text-based margin-strip labels (column
+  letters wrapping `A..Z, AA..AB..`, row numbers `1..N`),
+  `anchorPreference`-based region overlay for State 4.
+  AppStorage key kept as `"debugGridMode"` so persisted user
+  preference survives the upgrade; legacy raw values migrate
+  via `DebugGridDensity.from(_:)` ("off" stays off, anything
+  else → `.base`). The legacy `enum DebugGridMode` is RETAINED
+  in the same file behind a `// SUPERSEDED` marker for
+  rollback.
+- `VoltraLive/Views/BuildBadgeOverlay.swift`: tap handler
+  cycles `DebugGridDensity.next()` instead of
+  `DebugGridMode.next()`. Header docblock updated. Layout /
+  colors / position unchanged.
+- `VoltraLive/Views/PageBadgeOverlay.swift`: header docblock
+  updated to note V4-D22. No code change — `.debugGridOverlay()`
+  remains the LAST modifier in the chain so the grid renders
+  ABOVE both badge overlays in z-order.
+
+**State cycle (what the user sees on tap-through).**
+
+| Tap | State | What renders |
+|---|---|---|
+| 0 | `.off` | nothing |
+| 1 | `.base` | 32 pt grid, mint @30 % opacity, top + leading margin labels A,B,C,…/1,2,3,… at 8 pt @0.85 |
+| 2 | `.half` | + 16 pt half-step lines @20 %, half labels (`A.5`, `10.5`) interior on margin strips at reduced weight |
+| 3 | `.quarter` | + 8 pt quarter-step lines @14 %, quarter labels (`A.25`, `A.75`, `10.25`, `10.75`) MARGIN-ONLY |
+| 4 | `.max` | (state 3) + region outlines @40 % `VoltraColor.accent` with the screen's published region names (none in this commit — see KI-12) |
+
+**Constraints honored.**
+
+- `.allowsHitTesting(false)` on every overlay layer — overlay
+  never blocks UI underneath.
+- Margin strips sit inside `safeAreaInsets` so labels don't
+  slide under iOS status bar / home indicator.
+- Sacred files untouched. No version bump. No push. CI
+  `build.yml` on push remains the authoritative compile check.
+- Same toggle surface (build badge), same gesture, same
+  AppStorage key. No new affordances added.
+
+**Files changed.**
+
+- `VoltraLive/Views/DebugGridOverlay.swift` (rewrite)
+- `VoltraLive/Views/BuildBadgeOverlay.swift` (tap handler)
+- `VoltraLive/Views/PageBadgeOverlay.swift` (comment only)
+- `docs/handoff/02_CURRENT_STATE.md` (overlay bullet + file map)
+- `docs/handoff/03_CURRENT_FEATURE_SPEC.md` (Debug grid section
+  rewritten)
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` (V4-D22 ADR)
+- `docs/handoff/06_KNOWN_ISSUES.md` (KI-12 added)
+- `docs/WORK_LOG.md` (this entry)
+
+**07_FILE_MAP.md note.** The b72 prompt mentions
+`docs/handoff/07_FILE_MAP.md` but no such file exists in the
+repo. The file-map row in `docs/handoff/02_CURRENT_STATE.md`
+serves as the de-facto file map and has been updated to reflect
+the b72 → b72 cycle line. Creating a separate `07_FILE_MAP.md`
+would duplicate that table; raising as a non-blocker for
+future cleanup.
+
+**Out of scope (this commit).** No version bump. No push. No
+TestFlight ship. No region instrumentation on individual
+screens (deferred per KI-12). No removal of legacy
+`DebugGridMode` enum (retained for rollback per b72 prompt's
+"do not remove the existing overlay before the new one renders
+correctly" rule; deletion target is post-b73 if no rollback
+fires).
+
+**Pending.** Visual sanity check on simulator (CI `build.yml`
+on push will be the first compile gate; user has not approved
+push of the bookkeeping commit `8bdd88b` yet, so this commit
+also stays local).

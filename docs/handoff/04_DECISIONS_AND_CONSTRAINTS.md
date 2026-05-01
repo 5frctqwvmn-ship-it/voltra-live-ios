@@ -1259,3 +1259,124 @@ on push remains the authoritative compile check.
 **Out of scope (this ADR).** No V1 deletion (deferred). No Settings
 toggle for the kill switch (deferred). No parity verification (Step
 6 next). No version bump.
+
+## V4-D22 — Replace 9-anchor debug overlay with progressive-density grid (b72)
+
+**Decision.** The b70/V4-D18 debug overlay (9 hardcoded anchor
+markers — `C-TL`, `C-TR`, `C-BL`, `C-BR`, `M-T`, `M-R`, `M-B`,
+`M-L`, `F-CTR`) is replaced with a 5-state progressive-density
+spreadsheet-style grid. Same toggle surface (build-badge tap),
+same AppStorage key (`"debugGridMode"`), new behavior. The legacy
+`DebugGridMode` enum is retained behind a `// SUPERSEDED` marker
+in `DebugGridOverlay.swift` so rollback is a one-line change in
+`BuildBadgeOverlay.swift`'s tap handler.
+
+**User ask (verbatim, 2026-04-30 ~01:35 UTC).** "The current
+debug overlay is not a grid. It is a 9-point anchor marker set
+placed at hardcoded positions. That is not what I want. Replace
+it with a real spreadsheet-style graph-paper grid with column
+letters and row numbers, and make the existing tap toggle
+progressively increase density over 4 levels." Full prompt
+captured verbatim in `docs/handoff/B72_DEBUG_GRID_PROMPT.md`.
+
+**Why.** Anchor markers gave the user 9 reference points across
+an entire screen — coarse enough that "between M-R and C-BR,
+about a third of the way down" was still ambiguous. A real grid
+with column letters + row numbers lets the user say "C10, header
+section" and the agent knows exactly where that is. The semantic
+region overlay at `.max` density closes the loop by labeling the
+same regions the agent already names in code (`tileGrid`,
+`forceChartCard`, `upcomingSetCard`, etc.).
+
+**Density cycle (5 states).**
+
+| State | Name | Spacing | Lines | Labels |
+|---|---|---|---|---|
+| 0 | `.off` | — | none | none |
+| 1 | `.base` | 32 pt | 0.6 pt @30 % opacity | `A,B,…,Z,AA,AB,…` top + `1,2,3,…` leading, 8 pt @0.85 |
+| 2 | `.half` | + 16 pt | 0.4 pt @20 % | + `A.5`, `10.5` margin labels @0.55, 7 pt |
+| 3 | `.quarter` | + 8 pt | 0.3 pt @14 % | + `A.25`, `A.75`, `10.25`, `10.75` **margin-only**, 6 pt @0.45 |
+| 4 | `.max` | (same as state 3) | (same) | + region outlines: 1 pt @40 % `VoltraColor.accent` rectangles labeled with `Self.regionName` |
+
+Tap cycles forward: `0 → 1 → 2 → 3 → 4 → 0`. Same build-badge tap
+gesture as b70; no new affordances added.
+
+**Key parameter choices (locked).**
+
+- **Base spacing 32 pt.** On a 390 pt-wide device this yields
+  ~12 columns A–L and ~26 rows on an 844 pt body. The user
+  picked 32 pt over 24 pt (too dense at quarter, 6 pt-spacing
+  collapses below SF Mono 9 pt legibility threshold) and 40 pt
+  (too coarse for tile-grid pixel-level feedback).
+- **State 3 quarter labels are margin-only.** Interior quarter
+  labels at 8 pt cell spacing on the dark `VoltraColor.bg`
+  background would fight the UI underneath and defeat the
+  purpose of the overlay. Margin-only mirrors how a real
+  spreadsheet labels its rulers and keeps the body readable.
+- **Margin strip 14 pt** (top + leading). Sized to clear iOS
+  status-bar glyphs and home-indicator while keeping labels
+  tight to the edge. Strips sit inside the safe area so labels
+  never disappear under chrome.
+
+**Implementation.**
+
+- New file: nothing. Existing `VoltraLive/Views/DebugGridOverlay.swift`
+  rewritten in place. The legacy `enum DebugGridMode` is retained
+  at the bottom of the file behind a `// SUPERSEDED` marker so
+  rollback is a one-line change in
+  `BuildBadgeOverlay.swift`'s tap handler (cycle the legacy enum
+  instead of `DebugGridDensity`).
+- Renderer: SwiftUI `Canvas` for gridlines (single draw call,
+  no per-line views) + `ZStack`/`Text` overlay layers for the
+  margin labels and (at `.max`) the region overlay. Cap on label
+  count: ~12 cols × ~26 rows base, ~4 × at quarter density when
+  margin-only labels stay confined to the strips.
+- Region overlay (`.max`): screens publish named regions via a
+  new `.debugRegion("name")` modifier, implemented with
+  `anchorPreference` so it does not change layout and does not
+  intercept hits. Region rectangles resolved at the overlay
+  level via `proxy[anchor]`. Screens that have not been
+  instrumented render the grid only at `.max` with no regions
+  (graceful degradation; tracked as KI-12).
+- Migration: `DebugGridDensity.from(_:)` reads the persisted
+  `"debugGridMode"` AppStorage key. Legacy `"off"` stays off,
+  legacy `"corners"`/`"midlines"`/`"full"` map to `.base` so a
+  user with persisted state discovers the new behavior on next
+  tap without losing their on/off preference.
+
+**Hit testing + z-order.**
+
+- `.allowsHitTesting(false)` on every overlay layer — overlay
+  never blocks touches to the UI underneath.
+- The grid is the LAST modifier in `PageBadgeOverlay`'s chain,
+  so it renders ABOVE the page badge AND the bottom-trailing
+  build badge in z-order. Margin labels remain legible over both
+  badges.
+
+**Files changed (this commit).**
+
+- `VoltraLive/Views/DebugGridOverlay.swift` (full rewrite +
+  legacy enum kept under `// SUPERSEDED`).
+- `VoltraLive/Views/BuildBadgeOverlay.swift` (tap cycles new
+  enum; comment updated).
+- `VoltraLive/Views/PageBadgeOverlay.swift` (header comment
+  updated; no behavior change).
+- `docs/handoff/02_CURRENT_STATE.md` (file-map row + bullet
+  refreshed).
+- `docs/handoff/03_CURRENT_FEATURE_SPEC.md` (Debug grid section
+  rewritten).
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` (this ADR).
+- `docs/handoff/06_KNOWN_ISSUES.md` (KI-12 added: partial
+  region instrumentation).
+- `docs/WORK_LOG.md` (entry appended).
+
+No sacred-file changes. No version bump. No push. CI `build.yml`
+on push remains the authoritative compile check; this commit is
+held local until the user explicitly approves push.
+
+**Out of scope (this ADR).** No version bump. No push. No
+TestFlight ship. No additional region instrumentation in this
+commit — partial coverage is acceptable for the first ship of
+the new overlay; the user can tap through 0 → 1 → 2 → 3 fully
+on every page-badged screen, and `.max` regions appear only on
+screens that opt in. KI-12 tracks the follow-up.

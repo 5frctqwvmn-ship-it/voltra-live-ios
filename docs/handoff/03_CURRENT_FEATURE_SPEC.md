@@ -321,27 +321,84 @@ b70 binary mounted `.pageBadge("ContentView")` on the root
 container; it was removed in the b70 hotfix — see V4-D19 in
 `04_DECISIONS_AND_CONSTRAINTS.md`.
 
-### Debug grid overlay
+### Debug grid overlay (b72 / V4-D22)
 
-A four-state grid shipped behind `@AppStorage("debugGridMode")`:
+A five-state progressive-density spreadsheet-style grid behind
+`@AppStorage("debugGridMode")`. Replaces the b70/V4-D18
+four-state 9-anchor marker overlay (C-TL / M-T / F-CTR / …)
+because anchor markers were not precise enough for design
+feedback. Lives in `VoltraLive/Views/DebugGridOverlay.swift`.
+
+Density cases (`enum DebugGridDensity`):
 
 - `.off` (default) — invisible; no overlay rendered.
-- `.corners` — four labels at the corners of the safe area:
-  `C-TL`, `C-TR`, `C-BL`, `C-BR`.
-- `.midlines` — four labels at edge midpoints: `M-T`, `M-R`,
-  `M-B`, `M-L`.
-- `.full` — corners + midlines + a center label `F-CTR`.
+- `.base` — 32pt graph-paper grid. Vertical + horizontal lines
+  every 32pt at ~30 % opacity. Spreadsheet-style column letters
+  `A, B, C, …, Z, AA, AB, …` across the top margin strip; row
+  numbers `1, 2, 3, …` down the leading margin strip. Margin
+  strips sit inside the safe area so labels never disappear
+  under the iOS status bar / home indicator.
+- `.half` — adds a gridline halfway between each base line
+  (16pt density), thinner / lower opacity. Half labels (`A.5`,
+  `10.5`) appear interior on the margin strips at reduced weight.
+- `.quarter` — adds gridlines at every quarter (8pt density),
+  even more subordinate. **Quarter labels are MARGIN-ONLY** —
+  `.25` and `.75` labels appear in the top + leading strips, NOT
+  inside the screen body, so the body stays readable. (Per
+  V4-D22.)
+- `.max` — everything in `.quarter` PLUS a region-outline layer.
+  Translucent rectangles with their Swift identifier name are
+  drawn around major UI sections of the current screen. Region
+  outlines render at ~40 % opacity in `VoltraColor.accent`.
+  Region label sits at the top-leading inside corner of the
+  region in 8pt monospaced. Screens publish their regions via
+  `.debugRegion("name")`; screens that haven't been instrumented
+  render the grid only at `.max` with no regions (graceful
+  degradation).
 
-All labels: 9pt monospaced, mint tint, opacity 0.85. Mounted
-automatically by the page-badge modifier so any screen with a
-page badge participates.
+**Spacing locked at 32pt.** On a 390pt-wide device this yields
+~12 columns (A–L) and ~26 rows on an 844pt-tall body — the
+balance the user picked between graph-paper feel and label
+legibility at quarter-step density.
+
+All labels are monospaced (`8pt` base / `7pt` half / `6pt`
+quarter), mint (`VoltraColor.textFaint`) at 0.85 / 0.55 / 0.45
+opacity respectively. Mounted automatically by the page-badge
+modifier so any screen with a page badge participates. The grid
+is the LAST modifier in `PageBadgeOverlay`'s chain so it renders
+ABOVE both the page badge and the build badge in z-order; margin
+labels remain legible over those badges.
 
 ### Toggle gesture
 
-Tapping the bottom-trailing build badge cycles the mode:
-`.off` → `.corners` → `.midlines` → `.full` → `.off`. State is
-persisted in `@AppStorage("debugGridMode")`. No other UI surface
-exposes the toggle.
+Tapping the bottom-trailing build badge cycles the density:
+`.off` → `.base` → `.half` → `.quarter` → `.max` → `.off`. State
+is persisted in `@AppStorage("debugGridMode")`. Persisted legacy
+`DebugGridMode` raw values (`corners` / `midlines` / `full`)
+migrate to `.base` on next read via `DebugGridDensity.from(_:)`.
+No other UI surface exposes the toggle.
+
+### Region instrumentation (State 4 / `.max`)
+
+State 4 region overlay is opt-in per screen. Screens publish
+named regions to the State 4 layer via the `.debugRegion("name")`
+view modifier:
+
+```swift
+HStack { /* … */ }
+    .debugRegion("headerPillRow")
+```
+
+Names must match the Swift view/section identifier used in code
+(e.g. `tileGrid`, `forceChartCard`, `upcomingSetCard`,
+`dropSetSection`, `loggedSetsSection`, `bottomActions`,
+`headerPillRow`). Where there is no obvious name, use the
+nearest enclosing view. Implementation uses `anchorPreference`
+so it does not change layout and does not intercept hits.
+
+Instrumentation is partial as of b72 — see `06_KNOWN_ISSUES.md`
+entry KI-12 for the current screen coverage list and the planned
+follow-up work.
 
 ### Demo Mode toggle (DebugView)
 

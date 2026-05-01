@@ -132,9 +132,13 @@ explicit user approval per the standing constraint.
   + telemetryPulsePill + connectionPill chrome.
 - Page-name badge with **stable numeric IDs** via `PageRegistry` (b66
   + b70/V4-D18). Render format: `"NN · ScreenName"`.
-- **Debug grid overlay** (b70/V4-D18) — four-state grid (off / corners
-  / midlines / full) toggled by tapping the build-version chip;
-  persisted via `@AppStorage("debugGridMode")`.
+- **Debug grid overlay** (b70/V4-D18 → b72/V4-D22) — five-state
+  progressive-density spreadsheet-style grid (off / base 32pt /
+  half 16pt / quarter 8pt / max + region outlines) toggled by
+  tapping the build-version chip; persisted via
+  `@AppStorage("debugGridMode")`. Replaces the b70 9-anchor
+  marker overlay; legacy `DebugGridMode` enum retained behind a
+  `// SUPERSEDED` marker for rollback.
 
 ## Live capture mode handling matrix
 
@@ -224,7 +228,7 @@ source-of-truth), NOT the incoming `source` parameter.
 | Pair sheet coordinator (b67) | `VoltraLive/Coordinators/PairingCoordinator.swift` |
 | Unit-status header (b67) | `VoltraLive/Views/VoltraUnitHeader.swift` |
 | Page registry (b70) | `VoltraLive/Views/PageRegistry.swift` |
-| Debug grid overlay (b70) | `VoltraLive/Views/DebugGridOverlay.swift` |
+| Debug grid overlay (b70 → b72) | `VoltraLive/Views/DebugGridOverlay.swift` |
 | Page badge (b66, edited b70) | `VoltraLive/Views/PageBadgeOverlay.swift` |
 | Build badge (edited b70 for tap) | `VoltraLive/Views/BuildBadgeOverlay.swift` |
 | Design system spec | `design-system/` on branch `design-studio` |

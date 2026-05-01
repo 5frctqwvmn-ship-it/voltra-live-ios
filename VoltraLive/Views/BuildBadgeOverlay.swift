@@ -22,6 +22,17 @@
 //   • The chip is the only UI surface that toggles the grid — keeps the
 //     gesture in a place the user already looks for during chrome
 //     inspection, no new affordances added.
+//
+// b72 V4.5 update (V4-D22):
+//   • The tap now cycles `DebugGridDensity` (off → base → half → quarter
+//     → max → off) instead of the legacy four-state anchor overlay. Same
+//     AppStorage key (`"debugGridMode"`) so a user with a persisted
+//     legacy value (e.g. "corners") gracefully migrates to `.base` on
+//     next tap via `DebugGridDensity.from(_:)`.
+//   • The legacy `DebugGridMode` enum is kept in `DebugGridOverlay.swift`
+//     behind a `// SUPERSEDED` marker for rollback — restoring the old
+//     behavior is a one-line change here (cycle `DebugGridMode.next()`
+//     instead of `DebugGridDensity.next()`).
 
 import SwiftUI
 
@@ -45,9 +56,11 @@ struct BuildBadgeOverlay: ViewModifier {
 
 private struct BuildBadgeChip: View {
 
-    /// b70 / V4-D18: persisted grid mode. Tapping the chip cycles this
-    /// through the four `DebugGridMode` cases.
-    @AppStorage("debugGridMode") private var modeRaw: String = DebugGridMode.off.rawValue
+    /// b72 / V4-D22: persisted grid density. Tapping the chip cycles this
+    /// through the five `DebugGridDensity` cases. AppStorage key kept as
+    /// `"debugGridMode"` for migration continuity from the legacy
+    /// b70 / V4-D18 four-state enum (see `DebugGridDensity.from(_:)`).
+    @AppStorage("debugGridMode") private var modeRaw: String = DebugGridDensity.off.rawValue
 
     var body: some View {
         Text(versionString)
@@ -69,7 +82,7 @@ private struct BuildBadgeChip: View {
             // padding) is tappable, not just the rendered glyph rect.
             .contentShape(Capsule())
             .onTapGesture {
-                let current = DebugGridMode(rawValue: modeRaw) ?? .off
+                let current = DebugGridDensity.from(modeRaw)
                 modeRaw = current.next().rawValue
             }
     }
