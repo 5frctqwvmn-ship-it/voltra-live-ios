@@ -4232,10 +4232,17 @@ diff" preference.
   Python-rendered diagram for the math, and against TestFlight
   for the actual SwiftUI render.
 
-**CI verification (filled in post-push).** _pending_ — release
-run ID, conclusion, all 5 gates (protocol unit tests, build &
-archive signed, verify signed IPA, verify entitlements
-[b49 hardened], upload to TestFlight via altool), delivery UUID.
+**CI verification.** Release run
+[25201372318](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25201372318)
+on commit `68b4a0e` = `success`. All 5 gates green:
+protocol unit tests, build & archive (signed), verify signed
+IPA, verify embedded entitlements (HealthKit, iCloud)
+[b49 hardened], upload to TestFlight via altool. Steps 19-20
+(dry-run artifact + tag-only release publish) skipped — expected
+for non-dry-run, non-tag dispatch. altool reported
+`UPLOAD SUCCEEDED with no errors` in 28 s. Delivery UUID
+`6b12a064-b20a-4152-82c5-d578edb0c9d9`. v0.4.46 / build 73 is
+live on TestFlight.
 
 **Risks.**
 

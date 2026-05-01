@@ -1,6 +1,6 @@
 # 02 — Current State
 
-_Last updated: 2026-05-01 (b73 cycle, IN FLIGHT — debug grid scroll-anchor fix on top of the b72 ship. Single-commit feature build per the one-feature-per-build convention.)_
+_Last updated: 2026-05-01 (b73 SHIPPED — debug grid scroll-anchor fix. Single-commit feature build per the one-feature-per-build convention. Awaiting Apple processing on TestFlight.)_
 
 > **Maintenance rule:** this file is overwritten on every ship. The
 > append-only history lives in `docs/WORK_LOG.md`. If you're updating
@@ -12,13 +12,18 @@ _Last updated: 2026-05-01 (b73 cycle, IN FLIGHT — debug grid scroll-anchor fix
 
 ## Latest shipped build
 
-**v0.4.45 / build 72** — label "b72 debug grid overlay (progressive
-density, 5 states)" — shipped 2026-05-01 02:41 UTC. 5-gate altool
-verify passed,
-[run 25199600713](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25199600713)
-duration ~5m. HEAD at ship: `bea7243`. Awaiting Apple processing.
+**v0.4.46 / build 73** — label "Grid scroll fix" — shipped
+2026-05-01 03:56 UTC. 5-gate altool verify passed,
+[run 25201372318](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25201372318)
+duration ~5m. HEAD at ship: `68b4a0e`. Delivery UUID
+`6b12a064-b20a-4152-82c5-d578edb0c9d9`. altool reported
+`UPLOAD SUCCEEDED with no errors`. Awaiting Apple processing.
 
 ## Active cycle
+
+No active cycle. Awaiting next user prompt.
+
+## Last cycle (b73, just shipped) — debug grid SCROLL-ANCHOR fix
 
 **b73 / v0.4.46 / build 73** — debug grid SCROLL-ANCHOR fix.
 Single-feature ship per the one-feature-per-build convention. The
@@ -56,6 +61,10 @@ Files touched (single commit):
 
 ## Recent shipped (history)
 
+- **b72 / v0.4.45 / build 72** — shipped 2026-05-01 02:41 UTC, run
+  [25199600713](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25199600713),
+  HEAD `bea7243`. Replaced 9-anchor debug overlay with
+  progressive-density grid (V4-D22, 5 states 0–4, base 32 pt).
 - **b71 / v0.4.44 / build 71** — shipped 2026-04-30 23:43 UTC, run
   [25194880211](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25194880211),
   HEAD `26af534`. V2 canonical live capture, V1 chain UI ported, force
