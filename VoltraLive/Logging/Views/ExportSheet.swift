@@ -53,8 +53,8 @@ struct ExportSheet: View {
                             .textSelection(.enabled)
                     }
                     .padding(18)
-                    // b73 V4-D23: pipe content metrics for the debug grid.
-                    .debugGridContent()
+                    // b74 V4-D24: attach content-space debug grid layer (scrolls with content).
+                    .debugGridContentLayer()
                 }
             }
             .navigationTitle("Session saved")

@@ -284,7 +284,7 @@ source-of-truth), NOT the incoming `source` parameter.
 | Pair sheet coordinator (b67) | `VoltraLive/Coordinators/PairingCoordinator.swift` |
 | Unit-status header (b67) | `VoltraLive/Views/VoltraUnitHeader.swift` |
 | Page registry (b70) | `VoltraLive/Views/PageRegistry.swift` |
-| Debug grid overlay (b70 → b72 → b73) | `VoltraLive/Views/DebugGridOverlay.swift` (b73 split adds `.debugGridContent()` modifier; renderer translates row labels by `contentMinY`) |
+| Debug grid overlay (b70 → b72 → b73 → b74) | `VoltraLive/Views/DebugGridOverlay.swift` (b74 splits into a viewport-pinned `.debugGridOverlay()` for vertical lines + column letters + region overlay, and a content-space `.debugGridContentLayer()` attached via `.background(...)` on each ScrollView's inner content stack for horizontal lines + row labels). |
 | Page badge (b66, edited b70) | `VoltraLive/Views/PageBadgeOverlay.swift` |
 | Build badge (edited b70 for tap) | `VoltraLive/Views/BuildBadgeOverlay.swift` |
 | Design system spec | `design-system/` on branch `design-studio` |
