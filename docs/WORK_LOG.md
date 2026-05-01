@@ -4401,3 +4401,13 @@ open). Legacy `DebugGridMode` enum still retained behind
 TestFlight build (b73 still shipping; b74 is PR-only). When
 the user confirms on device, this entry should be revised
 from UNVERIFIED to VERIFIED with a screenshot link.
+
+---
+
+## 2026-05-01 04:54 UTC — b74 v0.4.47 build 74 — release ship of PR #5
+
+- **Files changed:** `project.yml`, `VoltraLive/Info.plist`, `docs/WORK_LOG.md`
+- **What changed:** Merged PR #5 (b74 V4-D24 debug grid TRUE content-space layer) into `feat/ui-v4-2-claude` (merge commit 027a84c). Bumped MARKETING_VERSION/CFBundleShortVersionString 0.4.46 -> 0.4.47 and CURRENT_PROJECT_VERSION/CFBundleVersion 73 -> 74. Set `VOLTRAFeatureLabel` to "Grid scroll fix v2" (project.yml + Info.plist).
+- **Verification:** Will be `release.yml` dryRun=false on `feat/ui-v4-2-claude` — TestFlight ship + altool 5-gate verification.
+- **Risks:** PR #5 is tagged UNVERIFIED — shipping to TestFlight so the user can verify on device. No forward fix attempted.
+- **Next step:** Monitor CI run, capture Delivery UUID, post TestFlight status. If CI fails with a compile error, stop and surface the log per user release instruction.
