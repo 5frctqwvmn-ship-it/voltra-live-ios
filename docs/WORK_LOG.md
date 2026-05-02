@@ -4806,3 +4806,88 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   updates (`07_FILE_MAP.md` PLACEHOLDER → EXISTS,
   `03_CURRENT_FEATURE_SPEC.md` pointer, `09_NEXT_AGENT_PROMPT.md`
   append).
+
+## 2026-05-02 18:30 UTC — B74-F11 (3/3): Session Recorder instrumentation + loud guards
+
+- **Files changed (Swift, additive only):**
+  - `VoltraLive/BLE/VoltraBLEManager.swift` — 14 recorder emit
+    sites across BLE chokepoints (`ble.discovery`, `ble.connect`,
+    `ble.disconnect`, `ble.write.tx`, `ble.write.ack`,
+    `ble.notify.rx`, `ble.error`). NO behavior change.
+  - `VoltraLive/BLE/VoltraWriter.swift` — 2 sites: writer-level
+    `ble.write.tx` with high-level `label` + `cmd` metadata,
+    `ble.error` on payload-build failure.
+  - `VoltraLive/BLE/Dual/MultiDeviceManager.swift` — 5 emit-site
+    groups: slot-tagged `ble.connect`/`disconnect`,
+    `state.modeChange` for disconnectBoth, `ble.error` +
+    `state.modeChange` on combined drop,
+    `async.taskStart`/`.taskEnd`/`.taskError` for the reconnect
+    loop.
+  - `VoltraLive/Health/HealthKitStore.swift` — 6 read-only emit
+    groups: `state.flagChange` for auth attempt + result,
+    `lifecycle.healthkit.start`/`.stop`, per-sample HR/kcal events
+    with `HKSource.name` + `bundleIdentifier` (passed via
+    `redactor.unsafeRaw` since these are developer-controlled
+    identifiers, not user PII).
+  - `VoltraLive/VoltraLiveApp.swift` — scenePhase observer extended
+    with `lifecycle.appBackground` / `lifecycle.appForeground`
+    events alongside the existing persist call.
+  - `VoltraLive/Logging/Views/LoggingHomeView.swift` — wrapped Demo
+    Mode button tap and `startCustom(_:)` in
+    `SessionRecorder.shared.action(...)`; converted 2 user-visible
+    silent guards (`demo.handlerMissing`, `startCustom.emptyLabel`).
+  - `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — wrapped
+    `tapDropTile()` and `toggleHardwareLoad()` in `action()`;
+    converted 4 user-visible silent guards (`dropStart.noWeight`,
+    `dropStep.notActive`, `demo.alreadyArmedOrConnected`,
+    `demo.handlerMissing`).
+  - `VoltraLive/Logging/Views/LiveCaptureView.swift` (V1) — wrapped
+    `sendLoad()` and `sendUnload()` in `action()`; converted 3
+    user-visible silent guards (V1 mirrors of `dropStart.noWeight`,
+    `demo.alreadyArmedOrConnected`, `demo.handlerMissing`).
+- **Files changed (docs, per AGENTS.md mandatory enforcement):**
+  - `docs/handoff/07_FILE_MAP.md` — flipped 9 source + 4 test
+    PLACEHOLDER → EXISTS, expanded mounts + screen-tag +
+    instrumentation sections.
+  - `docs/handoff/03_CURRENT_FEATURE_SPEC.md` — added §10 Session
+    Recorder pointer.
+  - `docs/handoff/09_NEXT_AGENT_PROMPT.md` — appended
+    "post-b76, B74-F11 implementation merged" status section.
+  - `docs/handoff/00_START_HERE.md` — Commit 3 marked DONE.
+  - `docs/handoff/CONVERSATION_LOG.md` — Commit 3 entry (V1
+    parallel wrapping decision; ActionScope inner-body indentation
+    note).
+  - `docs/handoff/CONTEXT_LEDGER.md` — entry 2 (Commit 3 checkpoint
+    per the 10-turn protocol).
+  - `docs/WORK_LOG.md` — this entry.
+- **What changed:** Added the recorder instrumentation layer. Every
+  BLE chokepoint and every HealthKit sample arrival now emits a
+  recorder event when recording is active. Major user actions
+  (Demo Mode, startCustom, drop tile, weight tap, LOAD/UNLOAD)
+  mint a fresh `actionId` via `SessionRecorder.shared.action(...)`
+  so downstream events auto-inherit it for cause→effect chains.
+  9 user-visible silent guards now leave `guard.trip` traces with
+  the original condition preserved verbatim.
+- **Verification:** Cannot run `xcodebuild` (Windows host).
+  `git status --short` reviewed before staging; `.claude/` not
+  staged; no `git add -A`. No `Info.plist`, `project.yml`,
+  entitlements, workflow, sacred-protocol, WatchConnectivity, or
+  version-bump files touched.
+- **Risks:**
+  - Layered `ble.write.tx` events from `VoltraWriter.send` (intent)
+    + `VoltraBLEManager.writeControlFrame` (bytes) are intentional
+    pairs; reviewers reading the export should expect both.
+  - Per-frame `ble.notify.rx` emit fires at the assembly rate
+    (~10–50 Hz during a live set). With a 10k-cap buffer, ~3
+    minutes of live BLE activity will start dropping the oldest
+    events. By design (FIFO; current-session bias) but worth
+    flagging.
+  - ActionScope inner-body indentation in
+    `LiveCaptureViewV2.tapDropTile()` and `toggleHardwareLoad()`
+    intentionally NOT re-indented — the wrapper sits at the same
+    indent level as the original body to keep the diff small.
+    Swift tolerates this; reviewers may find it stylistically odd.
+- **Next step:** Push branch and open PR against
+  `feat/ui-v4-2-claude` with the spec-required PR description
+  (clause→file map, `.recorderScreen` tag list, guard-conversion
+  list, "Could not verify" section). Do not merge. Do not release.

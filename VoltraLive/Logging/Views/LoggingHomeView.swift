@@ -170,12 +170,28 @@ struct LoggingHomeView: View {
                                     || mdm.right.connectionState.isConnected
                                 let demoSource: DemoEntrySource = anyDeviceConnected ? .postPair : .prePair
                                 DemoModeButton(source: demoSource) {
-                                    guard let handler = DemoTelemetryBridge.shared.handler else { return }
-                                    demo.note(.buttonTap(
-                                        label: "Demo Mode (\(demoSource.rawValue))",
-                                        screen: "LoggingHome"
-                                    ))
-                                    demo.enter(source: demoSource, onTelemetry: handler)
+                                    // B74-F11: ActionScope so the demo
+                                    // entry chain (recorder events from
+                                    // DemoController + downstream) shares
+                                    // an actionId.
+                                    SessionRecorder.shared.action(
+                                        "ui.tap.demoMode",
+                                        screen: "LoggingHomeView"
+                                    ) {
+                                        guard let handler = DemoTelemetryBridge.shared.handler else {
+                                            SessionRecorder.shared.guardTrip(
+                                                name: "demo.handlerMissing",
+                                                reason: "DemoTelemetryBridge.shared.handler == nil — handler not wired",
+                                                state: ["screen": .string("LoggingHomeView"),
+                                                        "source": .string(demoSource.rawValue)])
+                                            return
+                                        }
+                                        demo.note(.buttonTap(
+                                            label: "Demo Mode (\(demoSource.rawValue))",
+                                            screen: "LoggingHome"
+                                        ))
+                                        demo.enter(source: demoSource, onTelemetry: handler)
+                                    }
                                 }
                                 Spacer()
                             }
@@ -509,17 +525,31 @@ struct LoggingHomeView: View {
     }
 
     private func startCustom(_ rawLabel: String) {
-        let label = rawLabel.trimmingCharacters(in: .whitespaces)
-        guard !label.isEmpty else { return }
-        // Build 31: use the picked group as the session's dayType. The
-        // free-form name is stored as customLabel so the home tile can
-        // display "Push" under the Chest group, etc. If the user kept the
-        // group as Custom, behavior matches build 30 exactly.
-        // Build 42: route through beginStart so the dual-Voltra picker
-        // also gates custom workouts when both Voltras are paired.
-        beginStart(dayType: pickedGroup, customLabel: label)
-        showingCustomInline = false
-        customFieldFocused = false
+        // B74-F11: ActionScope so the start-session chain inherits an
+        // actionId. The recorder also gets a ui.tap.startCustom event
+        // automatically from the action() helper.
+        SessionRecorder.shared.action(
+            "ui.tap.startCustom",
+            screen: "LoggingHomeView"
+        ) {
+            let label = rawLabel.trimmingCharacters(in: .whitespaces)
+            guard !label.isEmpty else {
+                SessionRecorder.shared.guardTrip(
+                    name: "startCustom.emptyLabel",
+                    reason: "trimmed label was empty",
+                    state: ["rawLength": .int(Int64(rawLabel.count))])
+                return
+            }
+            // Build 31: use the picked group as the session's dayType. The
+            // free-form name is stored as customLabel so the home tile can
+            // display "Push" under the Chest group, etc. If the user kept the
+            // group as Custom, behavior matches build 30 exactly.
+            // Build 42: route through beginStart so the dual-Voltra picker
+            // also gates custom workouts when both Voltras are paired.
+            beginStart(dayType: pickedGroup, customLabel: label)
+            showingCustomInline = false
+            customFieldFocused = false
+        }
     }
 
     /// b49: UNIFIED FLOW. The workout-mode picker sheet that gated workout

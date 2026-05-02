@@ -77,10 +77,26 @@ final class VoltraBLEManager: NSObject, ObservableObject {
     func startScan() {
         guard central.state == .poweredOn else {
             addLog("Bluetooth not ready (state=\(central.state.rawValue))", level: .warn)
+            // B74-F11: emit ble.error so the recorder shows the user-visible
+            // "scan didn't happen" with the actual central state.
+            SessionRecorder.shared.record(
+                category: .ble, name: "ble.error",
+                error: RecorderErrorRecord(
+                    domain: "BLE",
+                    code: Int(central.state.rawValue),
+                    message: "scan skipped — central state \(central.state.rawValue)",
+                    isUserVisible: false),
+                ble: BLESubrecord(kind: .error, peripheralId: nil, side: nil,
+                                  characteristic: nil, hex: nil, length: nil, rssi: nil))
             return
         }
         connectionState = .scanning
         addLog("Scanning for VOLTRA devices…")
+        // B74-F11: discovery start.
+        SessionRecorder.shared.record(
+            category: .ble, name: "ble.discovery",
+            ble: BLESubrecord(kind: .discovery, peripheralId: nil, side: nil,
+                              characteristic: nil, hex: nil, length: nil, rssi: nil))
         // Scan with service UUID filter first; CBCentralManager handles namePrefix in scanOptions
         central.scanForPeripherals(withServices: [VoltraUUID.service], options: nil)
     }
@@ -149,10 +165,29 @@ final class VoltraBLEManager: NSObject, ObservableObject {
     func writeControlFrame(_ data: Data) {
         guard let p = peripheral, p.state == .connected, let char = transportChar else {
             addLog("Control write skipped — not connected (\(data.count)B)", level: .warn)
+            // B74-F11: surface the user-visible "write didn't happen" through
+            // the recorder's BLE category, not just the local log buffer.
+            SessionRecorder.shared.record(
+                category: .ble, name: "ble.error",
+                error: RecorderErrorRecord(
+                    domain: "BLE", code: 0,
+                    message: "writeControlFrame skipped — not connected",
+                    isUserVisible: false),
+                ble: BLESubrecord(kind: .error, peripheralId: nil, side: nil,
+                                  characteristic: "transport", hex: nil,
+                                  length: data.count, rssi: nil))
             return
         }
         p.writeValue(data, for: char, type: .withResponse)
         addLog("Wrote control frame (\(data.count)B): \(data.hexString.prefix(24))…")
+        // B74-F11: write.tx with first 16 bytes (32 hex chars) for header
+        // inspection without bloating the buffer.
+        SessionRecorder.shared.record(
+            category: .ble, name: "ble.write.tx",
+            ble: BLESubrecord(kind: .writeTx, peripheralId: nil, side: nil,
+                              characteristic: "transport",
+                              hex: String(data.hexString.prefix(32)),
+                              length: data.count, rssi: nil))
     }
 
     // MARK: Bootstrap
@@ -172,6 +207,16 @@ final class VoltraBLEManager: NSObject, ObservableObject {
                 await MainActor.run {
                     p.writeValue(data, for: char, type: .withResponse)
                     self.addLog("Bootstrap [\(i+1)/\(BOOTSTRAP_WRITES.count)] sent (\(data.hexString.prefix(12))…)")
+                    // B74-F11: per-bootstrap write.tx so the recorder shows
+                    // the 9-frame handshake sequence in order.
+                    SessionRecorder.shared.record(
+                        category: .ble, name: "ble.write.tx",
+                        metadata: ["bootstrap": .int(Int64(i + 1)),
+                                   "total": .int(Int64(BOOTSTRAP_WRITES.count))],
+                        ble: BLESubrecord(kind: .writeTx, peripheralId: nil, side: nil,
+                                          characteristic: "transport",
+                                          hex: String(data.hexString.prefix(32)),
+                                          length: data.count, rssi: nil))
                 }
                 try? await Task.sleep(nanoseconds: 60_000_000) // 60ms
             }
@@ -197,8 +242,27 @@ final class VoltraBLEManager: NSObject, ObservableObject {
     private func handleNotification(data: Data) {
         let frames = assembler.accept(data)
         for frame in frames {
+            // B74-F11: emit per assembled frame so the recorder shows the
+            // raw notify stream alongside parsed telemetry.
+            SessionRecorder.shared.record(
+                category: .ble, name: "ble.notify.rx",
+                ble: BLESubrecord(kind: .notifyRx, peripheralId: nil, side: nil,
+                                  characteristic: nil,
+                                  hex: String(frame.hexString.prefix(32)),
+                                  length: frame.count, rssi: nil))
             guard let pkt = parsePacket(frame) else {
                 addLog("Unparseable frame: \(frame.hexString.prefix(40))…", level: .warn)
+                // B74-F11: surface the parser-failure case in the recorder too.
+                SessionRecorder.shared.record(
+                    category: .ble, name: "ble.error",
+                    error: RecorderErrorRecord(
+                        domain: "BLE", code: 0,
+                        message: "unparseable frame",
+                        isUserVisible: false),
+                    ble: BLESubrecord(kind: .error, peripheralId: nil, side: nil,
+                                      characteristic: nil,
+                                      hex: String(frame.hexString.prefix(32)),
+                                      length: frame.count, rssi: nil))
                 continue
             }
             if let telem = extractTelemetry(pkt) {
@@ -272,6 +336,14 @@ extension VoltraBLEManager: CBCentralManagerDelegate {
         Task { @MainActor in
             let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "VOLTRA"
             self.addLog("Found: \(name) (RSSI \(RSSI))")
+            // B74-F11: discovery hit with redacted peripheral id + RSSI.
+            SessionRecorder.shared.record(
+                category: .ble, name: "ble.discovery",
+                ble: BLESubrecord(
+                    kind: .discovery,
+                    peripheralId: SessionRecorder.shared.redactor.redactedPeripheralId(name: name),
+                    side: nil, characteristic: nil, hex: nil, length: nil,
+                    rssi: RSSI.intValue))
             // Auto-connect to first match
             self.connect(to: peripheral)
         }
@@ -280,6 +352,14 @@ extension VoltraBLEManager: CBCentralManagerDelegate {
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         Task { @MainActor in
             self.addLog("Connected to \(peripheral.name ?? "VOLTRA"). Discovering services…")
+            // B74-F11: connection-up event, peripheral name redacted.
+            let pname = peripheral.name ?? "VOLTRA"
+            SessionRecorder.shared.record(
+                category: .ble, name: "ble.connect",
+                ble: BLESubrecord(
+                    kind: .connect,
+                    peripheralId: SessionRecorder.shared.redactor.redactedPeripheralId(name: pname),
+                    side: nil, characteristic: nil, hex: nil, length: nil, rssi: nil))
             self.deviceName = peripheral.name
             peripheral.delegate = self
             peripheral.discoverServices([VoltraUUID.service])
@@ -290,6 +370,17 @@ extension VoltraBLEManager: CBCentralManagerDelegate {
                                     didFailToConnect peripheral: CBPeripheral,
                                     error: Error?) {
         Task { @MainActor in
+            // B74-F11: emit ble.error with the underlying CB error message.
+            SessionRecorder.shared.record(
+                category: .ble, name: "ble.error",
+                error: RecorderErrorRecord(
+                    domain: "BLE", code: 0,
+                    message: error?.localizedDescription ?? "Failed to connect",
+                    isUserVisible: false),
+                ble: BLESubrecord(
+                    kind: .error,
+                    peripheralId: SessionRecorder.shared.redactor.redactedPeripheralId(name: peripheral.name ?? "?"),
+                    side: nil, characteristic: nil, hex: nil, length: nil, rssi: nil))
             self.handleDisconnect(reason: error?.localizedDescription ?? "Failed to connect")
         }
     }
@@ -298,6 +389,18 @@ extension VoltraBLEManager: CBCentralManagerDelegate {
                                     didDisconnectPeripheral peripheral: CBPeripheral,
                                     error: Error?) {
         Task { @MainActor in
+            // B74-F11: disconnect, with err record only if iOS gave us one.
+            SessionRecorder.shared.record(
+                category: .ble, name: "ble.disconnect",
+                error: error.map {
+                    RecorderErrorRecord(domain: "BLE", code: 0,
+                                        message: $0.localizedDescription,
+                                        isUserVisible: false)
+                },
+                ble: BLESubrecord(
+                    kind: .disconnect,
+                    peripheralId: SessionRecorder.shared.redactor.redactedPeripheralId(name: peripheral.name ?? "?"),
+                    side: nil, characteristic: nil, hex: nil, length: nil, rssi: nil))
             self.handleDisconnect(reason: error?.localizedDescription)
         }
     }
@@ -371,6 +474,16 @@ extension VoltraBLEManager: CBPeripheralDelegate {
         if let error = error {
             Task { @MainActor in
                 self.addLog("Notify subscribe error for \(characteristic.uuid): \(error.localizedDescription)", level: .warn)
+                // B74-F11: surface the notify-subscribe failure.
+                SessionRecorder.shared.record(
+                    category: .ble, name: "ble.error",
+                    error: RecorderErrorRecord(
+                        domain: "BLE", code: 0,
+                        message: error.localizedDescription,
+                        isUserVisible: false),
+                    ble: BLESubrecord(kind: .error, peripheralId: nil, side: nil,
+                                      characteristic: characteristic.uuid.uuidString,
+                                      hex: nil, length: nil, rssi: nil))
             }
         }
     }
@@ -390,7 +503,26 @@ extension VoltraBLEManager: CBPeripheralDelegate {
         if let error = error {
             Task { @MainActor in
                 self.addLog("Bootstrap write error: \(error.localizedDescription)", level: .warn)
+                // B74-F11: write failure (per-frame, after iOS hands the
+                // result back from the radio).
+                SessionRecorder.shared.record(
+                    category: .ble, name: "ble.error",
+                    error: RecorderErrorRecord(
+                        domain: "BLE", code: 0,
+                        message: error.localizedDescription,
+                        isUserVisible: false),
+                    ble: BLESubrecord(kind: .error, peripheralId: nil, side: nil,
+                                      characteristic: characteristic.uuid.uuidString,
+                                      hex: nil, length: nil, rssi: nil))
             }
+        } else {
+            // B74-F11: success ack for every confirmed write. Recorder is
+            // thread-safe so no MainActor hop needed.
+            SessionRecorder.shared.record(
+                category: .ble, name: "ble.write.ack",
+                ble: BLESubrecord(kind: .writeAck, peripheralId: nil, side: nil,
+                                  characteristic: characteristic.uuid.uuidString,
+                                  hex: nil, length: nil, rssi: nil))
         }
     }
 }

@@ -319,9 +319,24 @@ struct VoltraLiveApp: App {
                 // B74-F11: persist the recorder buffer to disk on
                 // background / inactive transitions so the last session
                 // survives the app being killed.
+                //
+                // Commit 3 extension: also emit lifecycle.appBackground /
+                // lifecycle.appForeground so the recorder timeline shows
+                // the scene-phase transitions alongside the persist call.
                 .onChange(of: scenePhase) { _, newPhase in
-                    if newPhase == .background || newPhase == .inactive {
+                    switch newPhase {
+                    case .background, .inactive:
+                        recorder.record(
+                            category: .lifecycle,
+                            name: "lifecycle.appBackground",
+                            metadata: ["phase": .string(String(describing: newPhase))])
                         recorder.persist()
+                    case .active:
+                        recorder.record(
+                            category: .lifecycle,
+                            name: "lifecycle.appForeground")
+                    @unknown default:
+                        break
                     }
                 }
                 // B74-F11: root-level recorder dot in the bottom-trailing

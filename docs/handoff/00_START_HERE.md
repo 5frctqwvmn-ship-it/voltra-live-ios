@@ -38,10 +38,10 @@ have done this.**
 
 - **Branch:** `feat/b77-session-recorder`
 - **Base:** `origin/feat/ui-v4-2-claude` (PR target)
-- **Current head:** Commit 2 just landed (root overlay + viewer +
-  share + 13 `.recorderScreen` tags + triple-tap unlock on build
-  badge + scenePhase persist hook). See `git log --oneline` for the
-  exact SHA.
+- **Current head:** Commit 3 just landed (instrumentation + loud
+  guards + docs flip). All three Session Recorder commits are in;
+  branch ready for PR against `feat/ui-v4-2-claude`. See
+  `git log --oneline` for exact SHAs.
 - **Goal:** Implement B74-F11 Session Recorder per
   `docs/handoff/SESSION_RECORDER_SPEC.md`.
 - **Working tree:** clean except `.claude/` is untracked. **NEVER stage
@@ -78,7 +78,7 @@ have done this.**
   acceptable per spec.
 - Edit ~13 top-level screens to add `.recorderScreen("ScreenName")`.
 
-### Commit 3 — Instrumentation + loud guards + docs (NEXT)
+### Commit 3 — Instrumentation + loud guards + docs ✅ DONE
 
 - Additive BLE sinks in `VoltraBLEManager.swift`, `VoltraWriter.swift`,
   `MultiDeviceManager.swift` — **NO behavior change**.

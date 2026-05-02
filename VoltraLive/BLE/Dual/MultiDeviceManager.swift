@@ -396,6 +396,18 @@ final class MultiDeviceManager: ObservableObject {
 
     /// Connect ONE side. Used by the tap-to-assign picker.
     func connect(slot: DeviceSlot, discovered: VoltraDiscoveryScanner.Discovered) {
+        // B74-F11: emit slot-tagged connect intent. The per-manager
+        // ble.connect (from VoltraBLEManager.didConnect) fires later when
+        // iOS confirms; this captures the user-initiated "connect L"
+        // moment with side context the manager lacks.
+        SessionRecorder.shared.record(
+            category: .ble, name: "ble.connect",
+            metadata: ["source": .string("mdm.connect")],
+            ble: BLESubrecord(
+                kind: .connect,
+                peripheralId: SessionRecorder.shared.redactor.redactedPeripheralId(name: discovered.peripheral.name ?? "?"),
+                side: slot == .left ? "left" : "right",
+                characteristic: nil, hex: nil, length: nil, rssi: nil))
         switch slot {
         case .left:
             leftIdentifier = discovered.id
@@ -410,6 +422,14 @@ final class MultiDeviceManager: ObservableObject {
 
     /// Manual disconnect. Cancels any reconnect tasks for that slot.
     func disconnect(slot: DeviceSlot) {
+        // B74-F11: user-initiated disconnect, slot-tagged.
+        SessionRecorder.shared.record(
+            category: .ble, name: "ble.disconnect",
+            metadata: ["source": .string("mdm.disconnect")],
+            ble: BLESubrecord(
+                kind: .disconnect, peripheralId: nil,
+                side: slot == .left ? "left" : "right",
+                characteristic: nil, hex: nil, length: nil, rssi: nil))
         reconnectTasks[slot]?.cancel()
         reconnectTasks[slot] = nil
         switch slot {
@@ -424,6 +444,10 @@ final class MultiDeviceManager: ObservableObject {
 
     /// Disconnect both. Used when leaving the dual flow.
     func disconnectBoth() {
+        // B74-F11: one mode-change event marking the dual-flow exit.
+        SessionRecorder.shared.record(
+            category: .state, name: "state.modeChange",
+            metadata: ["mdm": .string("disconnectBoth")])
         for s in DeviceSlot.allCases { disconnect(slot: s) }
         state = .idle
     }
@@ -582,6 +606,25 @@ final class MultiDeviceManager: ObservableObject {
 
     private func handleCombinedDrop(dropped: DeviceSlot) {
         let survivor = dropped.other
+        // B74-F11: surface the combined-mode drop as a BLE error AND a
+        // state-transition event \u2014 they describe the same incident from
+        // two angles (the disconnect itself, and the recovery state we
+        // entered).
+        SessionRecorder.shared.record(
+            category: .ble, name: "ble.error",
+            error: RecorderErrorRecord(
+                domain: "BLE", code: 0,
+                message: "combined-mode drop on \(dropped.label)",
+                isUserVisible: true),
+            ble: BLESubrecord(
+                kind: .error, peripheralId: nil,
+                side: dropped == .left ? "left" : "right",
+                characteristic: nil, hex: nil, length: nil, rssi: nil))
+        SessionRecorder.shared.record(
+            category: .state, name: "state.modeChange",
+            metadata: ["mdm": .string("combinedDrop"),
+                       "dropped": .string(dropped == .left ? "left" : "right"),
+                       "survivor": .string(survivor == .left ? "left" : "right")])
         // Best-effort UNLOAD on the survivor. If the survivor is itself not
         // connected (rare race), VoltraBLEManager.writeControlFrame logs a
         // warn and does nothing \u2014 still safe.
@@ -596,15 +639,30 @@ final class MultiDeviceManager: ObservableObject {
     private func scheduleReconnect(slot: DeviceSlot) {
         reconnectTasks[slot]?.cancel()
         guard let id = (slot == .left ? leftIdentifier : rightIdentifier) else { return }
+        // B74-F11: capture side once for use in async events below.
+        let sideStr = slot == .left ? "left" : "right"
 
         reconnectTasks[slot] = Task { [weak self] in
             guard let self else { return }
+            // B74-F11: async lifecycle \u2014 start.
+            SessionRecorder.shared.record(
+                category: .async, name: "async.taskStart",
+                metadata: ["task": .string("mdm.reconnect"),
+                           "side": .string(sideStr)])
             let deadline = Date().addingTimeInterval(self.reconnectTimeoutSeconds)
             // Backoff: 0.5s, 1s, 2s, 4s, then stick at 4s until deadline.
             var delayMs: UInt64 = 500
             while !Task.isCancelled, Date() < deadline {
                 let manager: VoltraBLEManager = (slot == .left ? self.left : self.right)
-                if manager.connectionState.isConnected { return }
+                if manager.connectionState.isConnected {
+                    // B74-F11: async lifecycle \u2014 success.
+                    SessionRecorder.shared.record(
+                        category: .async, name: "async.taskEnd",
+                        metadata: ["task": .string("mdm.reconnect"),
+                                   "side": .string(sideStr),
+                                   "outcome": .string("reconnected")])
+                    return
+                }
                 // Try via retrievePeripherals (fast path), else fall back to
                 // a brief scan window. retrievePeripherals returns the
                 // CBPeripheral if the system still has it cached \u2014 typical
@@ -629,6 +687,15 @@ final class MultiDeviceManager: ObservableObject {
                         dropped: slot,
                         message: "\(slot.label) device could not reconnect. Reconnect manually or switch to Independent mode."
                     )
+                    // B74-F11: async lifecycle \u2014 timeout failure.
+                    SessionRecorder.shared.record(
+                        category: .async, name: "async.taskError",
+                        error: RecorderErrorRecord(
+                            domain: "MDM", code: 0,
+                            message: "reconnect timeout (\(Int(self.reconnectTimeoutSeconds))s)",
+                            isUserVisible: true),
+                        metadata: ["task": .string("mdm.reconnect"),
+                                   "side": .string(sideStr)])
                 }
             }
         }

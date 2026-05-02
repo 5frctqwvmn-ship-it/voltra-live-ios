@@ -287,3 +287,63 @@ on device.
 "UI Mount"; `SessionRecorderToggle.swift`,
 `SessionRecorderViewer.swift`, `VoltraLiveApp.swift`,
 `Views/BuildBadgeOverlay.swift`.
+
+---
+
+## 2026-05-02 — B74-F11 Commit 3 (instrumentation + loud guards)
+
+**Decisions:**
+
+- **Layered BLE write events.** `VoltraWriter.send` emits
+  `ble.write.tx` with the high-level intent label
+  (e.g. `"base=120"`); `VoltraBLEManager.writeControlFrame` emits
+  another `ble.write.tx` with the actual bytes. Reviewers reading
+  the export should expect both per writer-driven write — that's
+  intentional layering (intent vs. transmission), not a duplicate.
+
+- **`HKSource.name` and `bundleIdentifier` use `unsafeRaw`
+  passthrough.** Per the spec these are the only redactor
+  passthrough call sites for HK data. Rationale: those are
+  developer-controlled identifiers (e.g. `"Apple Watch"`,
+  `"com.apple.health"`), not user PII. All other HK sample
+  metadata is typed (`.int`/`.double`) which doesn't flow through
+  the redactor.
+
+- **Loud-guard sweep limited to user-visible paths.** Converted 9
+  guards across `LoggingHomeView`, `LiveCaptureViewV2`,
+  `LiveCaptureView`. Left silent: programmer-facing delta-clamp
+  invariant (`adjustDropStep` line 1641), `.onAppear`/`.onChange`
+  observer guards, `attach(ble:)` writer-init invariant, and the
+  two `VoltraWriter` cooperative-cancellation/flush guards. Per
+  spec wording "user-visible paths only."
+
+- **ActionScope wrap diff style.** Function bodies wrapped via
+  `SessionRecorder.shared.action(...)` helper but the inner body
+  is NOT re-indented. The wrapper sits at the same indent level as
+  the original body. Swift tolerates the misindentation; the diff
+  stays surgical (would otherwise touch every line of every
+  wrapped function).
+
+- **V1 (`LiveCaptureView`) wrapped for parity.** `sendLoad` and
+  `sendUnload` got the same `action()` wrap as V2 even though V1
+  is a rollback artifact reachable only via the kill switch.
+  Cheap (2 small functions); benefit is uniform recorder coverage
+  if a user ever flips back to V1.
+
+- **`VoltraLiveApp` scenePhase observer extended (pause gate #6
+  approved).** Existing `recorder.persist()` call retained;
+  added `lifecycle.appBackground`/`lifecycle.appForeground` events
+  alongside it via a `switch` on `newPhase`.
+
+- **10k buffer overflow during long live sessions is by design.**
+  At ~10–50 Hz `ble.notify.rx` rate, ~3 minutes of live BLE
+  activity will start dropping the oldest events. FIFO + current-
+  session bias is correct for debugging. Documented in WORK_LOG
+  risks.
+
+**Cross-refs:** `SESSION_RECORDER_SPEC.md` "Instrumentation Scope"
++ "Hard Stops" + "Verification Contract"; `VoltraBLEManager.swift`,
+`VoltraWriter.swift`, `Dual/MultiDeviceManager.swift`,
+`HealthKitStore.swift`, `VoltraLiveApp.swift`, `LoggingHomeView.swift`,
+`LiveCaptureViewV2.swift`, `LiveCaptureView.swift`,
+`07_FILE_MAP.md`, `03_CURRENT_FEATURE_SPEC.md` §10.

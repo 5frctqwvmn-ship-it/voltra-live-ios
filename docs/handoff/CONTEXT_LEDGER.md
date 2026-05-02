@@ -82,3 +82,58 @@ Authoritative sources remain:
   no `git add -A`), commit Commit 2 with bot identity, then proceed to
   Commit 3 (instrumentation + loud guards).
 - **Context health:** good
+
+## 2026-05-02 18:30 UTC — entry 2 — B74-F11 Commit 3 ready to land
+
+- **Branch / head:** `feat/b77-session-recorder` @ `2ee81be` (about
+  to add Commit 3).
+- **Active goal:** B74-F11 Session Recorder Commit 3 — additive BLE
+  + HK instrumentation, loud-guard sweep, ActionScope wrapping for
+  user actions, all required doc updates.
+- **Decisions since last summary:**
+  - Pause gates 1–6 (BLE manager, writer, MDM, HK, guard sweep,
+    VoltraLiveApp lifecycle extension) all individually approved.
+  - Approved 9 user-visible loud-guard conversions; left 6 internal
+    invariants (programmer-facing delta clamp, onAppear /
+    onChange observers, attach/writer-init invariant, two
+    VoltraWriter cooperative-cancellation guards) silent per spec
+    wording.
+  - For ActionScope wrapping, chose the smaller-diff approach:
+    wrap function bodies via `SessionRecorder.shared.action(...)`
+    helper but DO NOT re-indent the inner body. Swift tolerates the
+    misindentation; the diff stays surgical.
+  - V1 (`LiveCaptureView`) `sendLoad`/`sendUnload` were wrapped for
+    parity with V2 even though V1 is the rollback artifact —
+    cheap, small functions.
+  - Layered `ble.write.tx` events from VoltraWriter (intent) +
+    VoltraBLEManager (bytes) are by design; both stay.
+- **Files changed or planned:**
+  - EDIT (Swift, additive): `VoltraBLEManager.swift` (14 emits),
+    `VoltraWriter.swift` (2 emits),
+    `Dual/MultiDeviceManager.swift` (5 groups),
+    `Health/HealthKitStore.swift` (6 groups),
+    `VoltraLiveApp.swift` (lifecycle events on scenePhase),
+    `LoggingHomeView.swift` (action wrap × 2 + 2 loud guards),
+    `LiveCaptureViewV2.swift` (action wrap × 2 + 4 loud guards),
+    `LiveCaptureView.swift` (action wrap × 2 + 3 loud guards).
+  - DOCS: `07_FILE_MAP.md` (PLACEHOLDER → EXISTS),
+    `03_CURRENT_FEATURE_SPEC.md` (§10 added),
+    `09_NEXT_AGENT_PROMPT.md` (status appended),
+    `00_START_HERE.md` (Commit 3 done line),
+    `CONVERSATION_LOG.md` (Commit 3 entry),
+    this file, `WORK_LOG.md`.
+- **Commands run / awaiting approval:**
+  - User pre-approved staging + commit + push + PR open. PR uses
+    spec-required description.
+- **Blockers / risks:**
+  - Cannot run `xcodebuild` on Windows; compile + tests deferred to
+    CI.
+  - 10k buffer overflow at high BLE rates is by design but will
+    surprise users debugging long sessions.
+  - Triple-tap disambiguation delay on the build-badge chip needs
+    on-device QA verification.
+- **Next exact action:** Stage 14 source/doc files (no `.claude/`,
+  no `git add -A`), commit Commit 3 with bot identity, push branch,
+  open PR against `feat/ui-v4-2-claude` with spec-required
+  description.
+- **Context health:** good
