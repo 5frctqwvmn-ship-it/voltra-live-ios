@@ -134,6 +134,113 @@ API key role: **App Manager**.
 7. **Honor the unsigned build path.** `CODE_SIGNING_REQUIRED: NO` is intentional — it lets `build.yml` produce dev IPAs without a Team ID. Don't remove these settings.
 8. **`WatchTelemetryMessage` is duplicated** between `VoltraLive/Bridge/PhoneWatchBridge.swift` and `VoltraWatch/WatchTelemetryStore.swift` (no shared framework). They MUST stay in sync. The enum cases use identical raw `String` values for JSON round-tripping.
 
+## Voltra Brain & Agent Organization (Karpathy Method)
+
+### Filesystem-as-Memory
+
+- Your memory is the filesystem. If a decision, blocker, or
+  architectural detail is not written to a markdown file in
+  `docs/handoff/`, it does not exist.
+- Treat the LLM as the CPU and the repo's markdown files as your RAM.
+- Never hold durable knowledge only in chat context.
+- Two-plane architecture:
+  - **Perplexity "Voltra Brain"** = Orchestrator / Control Plane (no
+    repo access).
+  - **Claude Code** = Execution Plane (no visibility into Perplexity
+    chat).
+  - **User** = bridge between the two planes.
+
+### Context Health Check (mandatory, every response)
+
+Every agent response that performs or plans repo work must end with
+**exactly one** of:
+
+- `Context is good.`
+- `Context is degrading.`
+- `Context is dangerously low.`
+
+Definitions:
+
+- **Good:** enough active context to continue safely; < 6 turns since
+  last summary.
+- **Degrading:** context is getting long or fragmented; 6–9 turns
+  since last summary. Warn user.
+- **Dangerously low:** ≥ 10 turns since last summary, or agent is
+  losing track of prior decisions. Stop feature work immediately and
+  write a context checkpoint before continuing.
+
+### 10-Turn Auto-Summary Protocol
+
+After every 10 user↔agent back-and-forths, the agent must
+automatically:
+
+1. Pause current work.
+2. Generate a compact rolling summary.
+3. Append it to `docs/handoff/CONTEXT_LEDGER.md`.
+4. Stage and commit the update to Git before writing any more code.
+
+The summary must include:
+
+- Timestamp
+- Current branch and head SHA
+- Active goal
+- Decisions made since last summary
+- Files changed or planned
+- Commands run or awaiting approval
+- Blockers / risks
+- Next exact action
+- Context health assessment
+
+If context becomes "dangerously low" before turn 10, trigger the
+summary early.
+
+For the Perplexity control-plane: Voltra Brain will produce a
+paste-ready summary block after every 10 turns. The user pastes it to
+Claude Code, which appends it to `CONTEXT_LEDGER.md`.
+
+### Handoff-doc enforcement (mandatory, every code commit)
+
+Every commit that changes code MUST include, in the same commit:
+
+- `docs/WORK_LOG.md` — append an entry (always, no exceptions).
+- `docs/handoff/00_START_HERE.md` — update if branch, head SHA,
+  completed state, or next step changed.
+- `docs/handoff/CONVERSATION_LOG.md` — append if a new decision,
+  blocker, workaround, or deviation from plan occurred.
+- `docs/handoff/CONTEXT_LEDGER.md` — append if 10-turn checkpoint
+  reached or context health degrading / dangerous.
+
+Do not commit code without updating these docs. If asked for a
+code-only commit, append a `WORK_LOG` entry explaining why docs were
+deferred.
+
+### Karpathy Select Rule
+
+When starting a task, read only what's needed in this order:
+
+1. `AGENTS.md`
+2. `docs/handoff/00_START_HERE.md`
+3. Current feature spec (e.g., `SESSION_RECORDER_SPEC.md`)
+4. `docs/handoff/CONVERSATION_LOG.md` (tail only)
+5. `docs/handoff/CONTEXT_LEDGER.md` (latest 3 entries)
+6. `docs/WORK_LOG.md` (tail only)
+
+Do **NOT** read full transcripts or all handoff docs unless explicitly
+asked. **Select, don't dump.**
+
+### Karpathy Leash Constraints
+
+Every substantive instruction from Voltra Brain to Claude Code must
+include:
+
+1. **Clear instruction** — what to do, step by step.
+2. **Constraints** — explicit "do not" list.
+3. **Scope** — which files / branches are in / out of bounds.
+4. **Stopping criteria** — when to stop and report back.
+
+Claude Code must refuse to proceed if any of the four is missing and
+ask the user to supply it.
+
 ## Cost-awareness convention (user preference, persistent)
 
 The user wants visibility into how token-heavy each action is. Apply both rules below on every task:

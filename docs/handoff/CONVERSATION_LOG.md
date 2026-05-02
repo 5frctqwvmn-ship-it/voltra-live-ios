@@ -140,6 +140,12 @@ user pasted Perplexity's recommended prompts into this Claude Code
 session. Below is the decision trail from that advisory chat,
 preserved so future sessions have full context.
 
+> **Full verbatim transcript:** see
+> [`PERPLEXITY_TRANSCRIPT_2026-05-02.md`](PERPLEXITY_TRANSCRIPT_2026-05-02.md)
+> for the complete turn-by-turn record. The summary below is the
+> distilled decision trail; the transcript file is the authoritative
+> "why" for anything ambiguous here.
+
 **Worktree blocker:**
 
 - Claude Code was launched in worktree
@@ -220,3 +226,27 @@ preserved so future sessions have full context.
   safety rule.
 - SwiftUI triple-tap plus single-tap coexistence needs QA verification
   on device.
+
+---
+
+## 2026-05-02 — Context protocol and Karpathy method added
+
+**Decision:** add automatic context health checks
+(`good` / `degrading` / `dangerously low`), 10-turn rolling summaries
+to `CONTEXT_LEDGER.md`, and Karpathy filesystem-as-memory + select +
+compress + isolate rules to `AGENTS.md`.
+
+**Why:** the prior backfill (creating the full Perplexity transcript
+in one shot) was expensive and brittle. A rolling 10-turn checkpoint
+prevents the next session from needing the same recovery dance.
+
+**How to apply:** every agent response that does repo work ends with
+a one-line context-health verdict. Every 10 turns (or sooner if
+degrading / dangerous), append a structured summary to
+`CONTEXT_LEDGER.md` and commit it before writing more code. Read
+order in `00_START_HERE.md` updated to put `CONTEXT_LEDGER.md` (latest
+3 entries only) before the Perplexity transcript.
+
+**Cross-refs:** `AGENTS.md` "Voltra Brain & Agent Organization
+(Karpathy Method)"; `00_START_HERE.md` "Context protocol";
+`CONTEXT_LEDGER.md` (new file, empty until first checkpoint).

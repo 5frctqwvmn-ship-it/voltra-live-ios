@@ -4690,3 +4690,64 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   (`ShareLink` for `.txt` + `.json`) + `.recorderScreen` tags on
   ~13 top-level screens. Edits to `VoltraLiveApp.swift` and
   `BuildBadgeOverlay.swift` per the route map.
+
+## 2026-05-02 17:30 UTC — Add full Perplexity control-plane transcript
+
+- **Files changed:** `docs/handoff/PERPLEXITY_TRANSCRIPT_2026-05-02.md`
+  (new), `docs/handoff/00_START_HERE.md` (link added to read order +
+  index), `docs/handoff/CONVERSATION_LOG.md` (pointer added at top of
+  Perplexity section).
+- **What changed:** Added the complete verbatim Perplexity AI advisory
+  chat transcript that directed the B74-F11 implementation session.
+  19 turns captured in full, including paste-to-Claude prompts,
+  approval decisions, screenshots interpreted, and the final
+  meta-iteration where the user pushed for transcript-grade fidelity
+  rather than a decision summary. `00_START_HERE.md` now lists this
+  file at position #4 in the read order so a fresh agent picks it up
+  before the spec. `CONVERSATION_LOG.md`'s Perplexity-session section
+  now links to the transcript as the authoritative "why" reference.
+  No code behavior changed.
+- **Verification:** `git status --short` reviewed before staging; only
+  the four intended doc files staged. `.claude/` left untracked.
+- **Risks:** Transcript is human-curated from one side of a two-party
+  chat — Perplexity's responses are paraphrased / structurally
+  reconstructed from what Perplexity output, since Claude cannot read
+  the Perplexity chat directly. Future Perplexity turns must be
+  appended by the user pasting them into Claude (Claude has no other
+  way to see them).
+- **Next step:** Proceed with B74-F11 Commit 2 (unchanged from the
+  previous WORK_LOG entry).
+
+## 2026-05-02 17:35 UTC — Add Karpathy context protocol (AGENTS.md + CONTEXT_LEDGER.md)
+
+- **Files changed:** `AGENTS.md` (new section "Voltra Brain & Agent
+  Organization (Karpathy Method)"),
+  `docs/handoff/CONTEXT_LEDGER.md` (new),
+  `docs/handoff/00_START_HERE.md` (added `CONTEXT_LEDGER.md` to read
+  order, added "Context protocol" section, added entry to handoff
+  index), `docs/handoff/CONVERSATION_LOG.md` (new entry),
+  `docs/handoff/PERPLEXITY_TRANSCRIPT_2026-05-02.md` (Turn 20
+  appended), `docs/WORK_LOG.md` (this entry).
+- **What changed:** Established automatic context management protocol
+  so we never need another massive transcript backfill. Three
+  additions, all in `AGENTS.md` so they apply to every future agent:
+  (1) every response that does repo work must end with one of
+  `Context is good.` / `Context is degrading.` /
+  `Context is dangerously low.`; (2) every 10 turns (or sooner if
+  health drops) the agent appends a structured summary to
+  `CONTEXT_LEDGER.md` and commits before writing more code;
+  (3) Karpathy filesystem-as-memory + select-don't-dump read order +
+  leash constraints (every Voltra Brain instruction must include
+  clear instruction, constraints, scope, stopping criteria).
+  No code behavior changed.
+- **Verification:** `git status --short` reviewed before staging; only
+  the six intended files staged. `.claude/` left untracked. No Swift
+  files touched.
+- **Risks:** Agents may not follow the protocol if they skip reading
+  `AGENTS.md`. Mitigation: `00_START_HERE.md` puts `AGENTS.md` first
+  in the read order and the new "Context protocol" section there
+  surfaces the rules a second time.
+- **Next step:** Proceed with B74-F11 Commit 2 — root overlay
+  (`SessionRecorderToggle`) + viewer (`SessionRecorderViewer`) + share
+  (`ShareLink` for `.txt` + `.json`) + `.recorderScreen` tags on
+  ~13 top-level screens.

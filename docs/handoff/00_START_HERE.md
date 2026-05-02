@@ -13,13 +13,23 @@
 3. `docs/handoff/CONVERSATION_LOG.md` — append-only log of decisions,
    blockers, and deviations from plan across sessions. Must be updated
    in the same commit as any code change going forward.
-4. `docs/handoff/SESSION_RECORDER_SPEC.md` — authoritative spec for the
+4. `docs/handoff/CONTEXT_LEDGER.md` — rolling 10-turn context
+   summaries. Read the **latest 3 entries**, not the whole file.
+5. `docs/handoff/PERPLEXITY_TRANSCRIPT_2026-05-02.md` — complete
+   verbatim transcript of the Perplexity AI advisory chat that
+   directed this implementation session. Read this for full "why"
+   context behind the decisions in `CONVERSATION_LOG.md`.
+6. `docs/handoff/SESSION_RECORDER_SPEC.md` — authoritative spec for the
    feature currently in flight (B74-F11).
-5. `docs/handoff/01_PROJECT_OVERVIEW.md` through
+7. `docs/handoff/01_PROJECT_OVERVIEW.md` through
    `docs/handoff/10_OPEN_QUESTIONS.md` — the rest of the handoff binder
    (what the app is, current state, roadmap, architecture, BLE protocol,
    HealthKit, dual-Voltra, superset, release/signing, open questions).
-6. `docs/WORK_LOG.md` — tail (last ~200 lines) for recent activity.
+8. `docs/WORK_LOG.md` — tail (last ~200 lines) for recent activity.
+
+Apply the **Karpathy Select Rule** in `AGENTS.md`: read only what's
+needed. Do not dump full transcripts or all handoff docs unless
+explicitly asked.
 
 **Then summarize state back to the user. Do not edit anything until you
 have done this.**
@@ -78,6 +88,22 @@ have done this.**
   `09_NEXT_AGENT_PROMPT.md`, `WORK_LOG.md`,
   `CONVERSATION_LOG.md` (append). `04_DECISIONS_AND_CONSTRAINTS.md`
   only if implementation diverges from V4-D25.
+
+## Context protocol
+
+Fresh agents must:
+
+- Report **context health** at the end of every response that performs
+  or plans repo work — exactly one of `Context is good.`,
+  `Context is degrading.`, or `Context is dangerously low.` See
+  `AGENTS.md` "Context Health Check" for thresholds.
+- Append a rolling summary to
+  `docs/handoff/CONTEXT_LEDGER.md` every 10 turns, or sooner if
+  context health drops to degrading / dangerously low.
+- Stage and commit the ledger update to Git before writing more code.
+
+This protocol is enforced by `AGENTS.md` "Voltra Brain & Agent
+Organization (Karpathy Method)".
 
 ## Commit cadence
 
@@ -189,6 +215,8 @@ they can correct your understanding. Don't just start executing.
 |---|---|
 | `00_START_HERE.md` | This file. Startup sequence, branch state, plan, policy. |
 | `CONVERSATION_LOG.md` | Append-only log of decisions, blockers, plan deviations. |
+| `CONTEXT_LEDGER.md` | Rolling 10-turn context summaries (Karpathy method). |
+| `PERPLEXITY_TRANSCRIPT_2026-05-02.md` | Verbatim Perplexity advisory chat transcript for the B74-F11 implementation session. |
 | `SESSION_RECORDER_SPEC.md` | Authoritative B74-F11 spec. |
 | `01_PROJECT_OVERVIEW.md` | What the app is, who it's for, hardware. |
 | `02_CURRENT_STATE.md` | What's shipped, build numbers, rolling cycle snapshot. |
