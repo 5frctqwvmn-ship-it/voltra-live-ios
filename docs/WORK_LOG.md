@@ -4891,3 +4891,62 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   `feat/ui-v4-2-claude` with the spec-required PR description
   (clause→file map, `.recorderScreen` tag list, guard-conversion
   list, "Could not verify" section). Do not merge. Do not release.
+
+## 2026-05-02 19:55 UTC — B74-F11 CI compile fix (failed run → green run)
+
+- **Files changed:** `docs/WORK_LOG.md` (this entry).
+- **Goal:** document the CI failure → fix → green CI outcome on
+  PR #10's branch `feat/b77-session-recorder` so the repo records
+  what happened (chat is ephemeral).
+- **What changed:** PR #10 was opened at head `492130a`. Branch CI
+  (`build.yml`) was manually dispatched
+  ([run 25260163621](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25260163621))
+  and FAILED at the "Build (unsigned, iphoneos SDK)" step in 47s
+  with 3 Swift compile errors:
+  - `MultiDeviceManager.swift:697` — `argument 'metadata' must
+    precede argument 'error'` in the `async.taskError` emit inside
+    `scheduleReconnect` (parameter-order swap on
+    `SessionRecorder.shared.record(...)`).
+  - `SessionRecorder.swift:76` — `invalid redeclaration of
+    'start()'` because Commit 1 declared both
+    `@Published var start: Date?` and `@MainActor func start()`
+    (Swift refuses property + method sharing the same base name).
+  - `SessionRecorder.swift:73` — cascading `cannot call value of
+    non-function type 'Date?'` from the same name collision.
+
+  Fix landed at `77e2b5a B74-F11: fix session recorder CI compile
+  errors` (2 files, +16 / −10):
+  - `MultiDeviceManager.swift`: swapped `metadata:` and `error:`
+    argument order on the `async.taskError` emit.
+  - `SessionRecorder.swift`: renamed `start: Date?` →
+    `startedAt: Date?` and `end: Date?` → `endedAt: Date?`;
+    updated 4 internal references (`start()` setter,
+    `stop()` setter, two `await MainActor.run` blocks in
+    `currentExport()` and `persist()`). External impact: zero —
+    the viewer doesn't reference these properties and tests pass
+    dates directly to `RecorderExporter` rather than through the
+    singleton.
+
+  Re-dispatched
+  ([run 25260420548](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25260420548)):
+  green in 1m17s. Unsigned IPA artifact produced.
+
+  PR #10 follow-up comment posted:
+  [#issuecomment-4364664979](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/pull/10#issuecomment-4364664979).
+- **Verification result:** `build.yml` manual `workflow_dispatch`
+  on `feat/b77-session-recorder` succeeded — full app Swift compile
+  + unsigned IPA package + artifact upload. **`xcodebuild test`
+  did NOT run** (build.yml does not invoke the test action); the 4
+  new recorder unit-test files compile (since the test target
+  builds as a dependency) but their assertions remain unverified.
+- **Risks:** Unit-test assertions and on-device QA passes A–G
+  remain unverified. The Commit 1 `start`/`end` → `startedAt`/`endedAt`
+  rename is undocumented in the PR #10 description body but is
+  captured in the follow-up PR comment and in this entry.
+- **Next step:** Decide whether to (a) run `release.yml dry_run`
+  against this branch to exercise `xcodebuild test` + signed-archive
+  flow before TestFlight, or (b) proceed with on-device QA
+  passes A–G first, or (c) merge the PR after a code review and
+  defer all device verification to the post-merge ship cycle.
+  All three are valid; current branch state supports any of them.
+  PR #10 remains OPEN and UNMERGED.
