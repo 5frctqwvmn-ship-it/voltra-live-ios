@@ -4654,3 +4654,39 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   and run QA passes A–G with the user, recording results in
   `QA_LOG.md`. Any **Not** result becomes a KI-N entry in
   `06_KNOWN_ISSUES.md` or a follow-up fix PR.
+
+## 2026-05-02 17:00 UTC — Durable handoff checkpoint after B74-F11 Commit 1
+
+- **Files changed:** `docs/handoff/00_START_HERE.md` (overwrite),
+  `docs/handoff/CONVERSATION_LOG.md` (new), `docs/WORK_LOG.md` (this
+  entry).
+- **What changed:** Captured the full session context for B74-F11
+  Session Recorder implementation in repo so a fresh Voltra Brain chat
+  can resume by reading files only. Documented: worktree blocker
+  resolution (created `feat/b77-session-recorder` from
+  `origin/feat/ui-v4-2-claude` inside the existing worktree instead of
+  switching branches in the main checkout); approved 3-commit plan
+  (core engine done at `76becdf`, then root overlay + viewer + share +
+  screen tags, then instrumentation + loud guards + docs); hard stops
+  (no Info.plist / project.yml / entitlements / workflow / release /
+  TestFlight / version bump / `git add -A` / `.claude/` staging /
+  rebase / force-push / BLE-runtime / WatchConnectivity-runtime /
+  network / analytics / per-screen toggle / new silent guard);
+  approval policy (auto / pause / reject buckets); Windows host
+  limitation (no `xcodebuild`); PR description requirements (spec
+  clause → file mapping, touched-file list, `.recorderScreen` tags,
+  loud-guard conversions, "Could not verify" section); commit cadence
+  (push every ~10 turns); risks; Commit 1 state at `76becdf` (11
+  files, 1098 insertions). No code behavior changed in this entry.
+- **Verification:** `git status --short` reviewed before staging; only
+  the three intended doc files staged. `.claude/` left untracked. No
+  source files touched.
+- **Risks:** Docs drift from code if not updated in the same commit.
+  `CONVERSATION_LOG.md` will go stale if future commits skip the
+  append step — `00_START_HERE.md` documents this requirement
+  explicitly so fresh agents enforce it.
+- **Next step:** Proceed with B74-F11 Commit 2 — root overlay
+  (`SessionRecorderToggle`) + viewer (`SessionRecorderViewer`) + share
+  (`ShareLink` for `.txt` + `.json`) + `.recorderScreen` tags on
+  ~13 top-level screens. Edits to `VoltraLiveApp.swift` and
+  `BuildBadgeOverlay.swift` per the route map.
