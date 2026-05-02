@@ -1699,3 +1699,182 @@ stays open). Legacy `DebugGridMode` enum still retained behind
 `// SUPERSEDED`. CI `build.yml` on push remains the
 authoritative compile check; this PR is held for a green CI run
 on the b74 branch before merge into `feat/ui-v4-2-claude`.
+
+---
+
+## V4-D25 — Session Recorder architecture (B74-F11, spec)
+
+**Date.** 2026-05-02.
+
+**Status.** Spec only. No implementation in this commit. Active
+once the implementation PR lands; superseded only by another ADR
+that re-architects the recorder.
+
+**Cycle.** Docs-only PR on `docs/session-recorder-spec`, branched
+from `feat/ui-v4-2-claude`. No version bump, no TestFlight ship.
+Implementation deferred to a separate PR per the agent-roles
+contract.
+
+**Q.** How should we add a structured, AI-readable, local-only
+session recorder that captures cause → effect chains across UI,
+nav, state, async, BLE, HealthKit, and guards — without
+introducing a server, leaking PII, or changing any runtime
+behavior?
+
+**Decision.** Adopt the architecture in
+`docs/handoff/SESSION_RECORDER_SPEC.md`. The non-obvious
+load-bearing choices:
+
+1. **One root-level overlay, never per-screen.** A 24×24 pt dot
+   at `.overlay(alignment: .bottomTrailing)` on the
+   `VoltraLiveApp` root. Screens tag themselves via
+   `.recorderScreen("ScreenName")`. Per-screen toggle buttons
+   are explicitly forbidden — they would fragment activation,
+   miss surfaces, and bloat the diff per screen touched.
+
+2. **Triple-tap on the build-badge chip is the activation
+   gesture.** Persisted in `UserDefaults` as
+   `VOLTRARecorderUnlocked`. The recorder is hidden until
+   unlocked. This keeps shipped builds visually identical for
+   end users while letting the developer self-arm without a
+   debug menu or environment-variable flag.
+
+3. **Single shared `ObservableObject`, injected via
+   `.environmentObject`.** One `SessionRecorder` instance owns
+   `isRecording`, `sessionId`, `start`/`end`, the FIFO ring
+   buffer, and the `ActionScope` task-local. No per-feature
+   recorder, no global singleton outside SwiftUI's environment.
+
+4. **10,000-event FIFO ring buffer, thread-safe via serial
+   queue or `actor`.** Bounded memory, no unbounded growth,
+   safe to write from any thread. Older events drop, newest
+   events kept — debugging a problem cares about the recent
+   past, not the deep past.
+
+5. **`ActionScope` is a task-local `UUID`.** User-initiated
+   UI actions mint a new `actionId` and run downstream work
+   inside the scope. All events emitted inside the scope
+   auto-inherit `actionId` without manual threading. This is
+   what makes the cause → effect chain readable without
+   plumbing the id through every call site.
+
+6. **Persistence is opportunistic and bounded.** On app
+   background / kill, persist the current session JSON to
+   `Application Support/SessionRecorder/last_session.json`.
+   Load last session on init. **No** other disk writes. **No**
+   network. Ever. Crashing mid-session is acceptable as long as
+   the next launch can read what was captured before the
+   crash.
+
+7. **Redaction runs on every metadata write.** PII surfaces
+   (BLE peripheral name, exercise name, custom day name,
+   user-entered free text) are mapped to UUIDs or
+   `<redacted:len=N>` placeholders. Hex, numeric values, screen
+   names, and dotted event names pass through raw. Callers may
+   opt in to raw only with an explicit `unsafeRaw` API. The
+   default is privacy-preserving; the dangerous path is named
+   so it shows up in code review.
+
+8. **Two-format export, single share action.** `.txt`
+   AI-readable report (header + timeline grouped by `actionId`
+   + errors/guards + BLE transcript) and `.json` full
+   structured export (`{ schemaVersion, appVersion, build,
+   session, events }`). `ShareLink` attaches both. The `.txt`
+   is what gets pasted into a conversation; the `.json` is
+   what survives schema changes downstream.
+
+9. **Guards become loud, not silent.** Existing
+   `guard … else { return }` on user-visible paths get swept
+   and replaced with `rec.guardTrip(name:, reason:, state:)`
+   then `return`. New silent guards are forbidden. The
+   recorder is the receipts file for "the app didn't do
+   anything" debugging — a class of bug that is otherwise
+   invisible.
+
+10. **Hard runtime invariants.** No `Info.plist` /
+    `project.yml` / entitlements / release-workflow changes.
+    No BLE or `WatchConnectivity` runtime behavior changes.
+    No server calls, no analytics, no external logging. This
+    is a debugging surface, not a product feature; if any of
+    these invariants gets violated, the recorder is doing
+    something it should not.
+
+**Why.**
+
+- *Single overlay vs. per-screen buttons:* the recorder must
+  be ubiquitous. Per-screen buttons miss new surfaces by
+  default; one root overlay covers every screen the moment
+  it's added.
+- *Triple-tap on build badge:* the user already trusts the
+  build-badge chip as the canonical "what version am I
+  running" surface. Triple-tap is undiscoverable for end users
+  but trivial for the developer.
+- *`ActionScope` task-local over manual id threading:* the
+  point of this recorder is to make cause → effect readable
+  for an LLM without a human pre-summarising. Manual id
+  threading would require touching every call site, every
+  time. Task-local propagation is one-shot wiring per UI
+  action and zero per call site.
+- *Local-only, no network:* the user has been firm that this
+  is a debugging surface. Any network surface is a privacy
+  liability and a deploy liability — it would need a
+  privacy review, plist entries, and server cost.
+- *Bounded buffer + opportunistic persistence:* the recorder
+  must not be the thing that crashes the app. Bounded memory
+  + serialised writes + a single disk-write surface keeps the
+  blast radius tiny.
+
+**Rejected.**
+
+- **OSLog-only.** Not AI-readable, not structured for
+  cause → effect grouping, not bundled for share. Useful as a
+  parallel surface, not as a replacement.
+- **Per-feature recorder objects** (e.g. `BLERecorder`,
+  `UIRecorder`). Splits the timeline, fragments redaction
+  policy, and forces the consumer to reassemble the order.
+  One shared recorder + categorical event names is simpler.
+- **Server-side telemetry.** Out of scope per the user's
+  hard stop. Adds a privacy review surface, plist entries,
+  and runtime cost the recorder is supposed to avoid.
+- **Per-screen toggle buttons.** Bloats every screen's diff,
+  fragments activation state, fails open on new surfaces.
+- **Unbounded buffer.** Memory unbounded over a long session
+  is a crash risk; an old-event-deep buffer is also less
+  useful for debugging "what just happened".
+
+**Files (placeholders, this commit; created in implementation
+PR).**
+
+- `VoltraLive/Recorder/SessionRecorder.swift`
+- `VoltraLive/Recorder/RecorderEvent.swift`
+- `VoltraLive/Recorder/RecorderBuffer.swift`
+- `VoltraLive/Recorder/RecorderRedactor.swift`
+- `VoltraLive/Recorder/RecorderExporter.swift`
+- `VoltraLive/Recorder/ActionScope.swift`
+- `VoltraLive/Recorder/SessionRecorderToggle.swift` (root overlay)
+- `VoltraLive/Recorder/SessionRecorderViewer.swift` (long-press sheet)
+- `VoltraLive/Recorder/View+RecorderScreen.swift` (`.recorderScreen(_:)`)
+
+**Tests (implementation PR).**
+
+- `VoltraLiveTests/RecorderBufferTests.swift`
+- `VoltraLiveTests/RecorderRedactorTests.swift`
+- `VoltraLiveTests/RecorderExporterTests.swift`
+- `VoltraLiveTests/ActionScopeTests.swift`
+
+**Files changed (this commit).**
+
+- `docs/handoff/SESSION_RECORDER_SPEC.md` (new — full spec).
+- `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` (this ADR).
+- `docs/handoff/B74_BUG_QUEUE.md` (B74-F11 status row + entry).
+- `docs/handoff/07_FILE_MAP.md` (new — placeholder entries).
+- `docs/WORK_LOG.md` (entry appended).
+
+**Verification path.** Path C (docs-only). No CI gate.
+Implementation PR will land Path A (UNVERIFIED → VERIFIED) once
+on-device QA passes A–G are recorded in `QA_LOG.md`.
+
+**Out of scope.** No Swift code in this commit. No
+`Info.plist` / `project.yml` / entitlements / release-workflow
+changes. No BLE / WatchConnectivity / HealthKit runtime
+behavior changes. No version bump. No TestFlight ship.
