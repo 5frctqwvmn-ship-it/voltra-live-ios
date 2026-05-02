@@ -690,12 +690,12 @@ final class MultiDeviceManager: ObservableObject {
                     // B74-F11: async lifecycle \u2014 timeout failure.
                     SessionRecorder.shared.record(
                         category: .async, name: "async.taskError",
+                        metadata: ["task": .string("mdm.reconnect"),
+                                   "side": .string(sideStr)],
                         error: RecorderErrorRecord(
                             domain: "MDM", code: 0,
                             message: "reconnect timeout (\(Int(self.reconnectTimeoutSeconds))s)",
-                            isUserVisible: true),
-                        metadata: ["task": .string("mdm.reconnect"),
-                                   "side": .string(sideStr)])
+                            isUserVisible: true))
                 }
             }
         }

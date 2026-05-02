@@ -34,8 +34,14 @@ final class SessionRecorder: ObservableObject {
 
     @Published private(set) var isRecording: Bool = false
     @Published private(set) var sessionId: UUID = UUID()
-    @Published private(set) var start: Date? = nil
-    @Published private(set) var end: Date? = nil
+    /// Timestamp the current session started recording, or nil if never
+    /// started. Renamed from `start` to avoid a Swift name collision with
+    /// the `start()` method (Apple's compiler refuses property + method
+    /// sharing the same base name even when signatures differ).
+    @Published private(set) var startedAt: Date? = nil
+    /// Timestamp the current session stopped, or nil if still recording /
+    /// never started. Renamed from `end` for symmetry with `startedAt`.
+    @Published private(set) var endedAt: Date? = nil
 
     // MARK: Storage + redaction
 
@@ -86,8 +92,8 @@ final class SessionRecorder: ObservableObject {
         stateLock.unlock()
 
         sessionId = newId
-        start = newStart
-        end = nil
+        startedAt = newStart
+        endedAt = nil
         isRecording = true
 
         Task { await buffer.clear() }
@@ -100,7 +106,7 @@ final class SessionRecorder: ObservableObject {
         guard isRecording else { return }
         record(category: .lifecycle, name: "lifecycle.sessionEnd")
         record(category: .recorder, name: "recorder.disarmed")
-        end = Date()
+        endedAt = Date()
         isRecording = false
         stateLock.lock()
         mirrorIsRecording = false
@@ -188,7 +194,7 @@ final class SessionRecorder: ObservableObject {
         let events = await buffer.snapshot()
         // Capture published state on MainActor for a coherent header.
         let (sid, sStart, sEnd): (UUID, Date?, Date?) = await MainActor.run {
-            (self.sessionId, self.start, self.end)
+            (self.sessionId, self.startedAt, self.endedAt)
         }
         let json = try RecorderExporter.jsonData(
             sessionId: sid, start: sStart, end: sEnd,
@@ -209,7 +215,7 @@ final class SessionRecorder: ObservableObject {
             guard let self else { return }
             let events = await self.buffer.snapshot()
             let (sid, sStart, sEnd): (UUID, Date?, Date?) = await MainActor.run {
-                (self.sessionId, self.start, self.end)
+                (self.sessionId, self.startedAt, self.endedAt)
             }
             do {
                 let data = try RecorderExporter.jsonData(
