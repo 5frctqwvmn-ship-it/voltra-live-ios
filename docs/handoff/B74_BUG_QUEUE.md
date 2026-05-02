@@ -23,6 +23,7 @@
 | B74-F6 | Twin-mode L/R isolate tap does not actually isolate; LOAD fires both  | OPEN                | —              |
 | B74-F7 | Misc Merge UI polish (bucket for items found while fixing F3/F5)      | OPEN                | —              |
 | B74-F8 | Replace dual-dot HR pill with single neutral Health signal indicator  | IN PROGRESS         | feat/b74-f8-watch-presence-indicator |
+| B74-F11 | Session Recorder — local-only AI-readable session capture           | OPEN (spec-only)    | docs/session-recorder-spec |
 
 ---
 
@@ -236,6 +237,79 @@ shows the system HK consent sheet; (c) after auth + a live HR
 sample, dot uses the normal header text color (not accent
 green); (d) when no sample arrives for >10 s the dot returns to
 faint without requiring app re-foreground.
+
+---
+
+---
+
+## B74-F11 — Session Recorder (local-only AI-readable session capture)
+
+**Status:** OPEN (spec-only). Spec PR lives on branch
+`docs/session-recorder-spec` against `feat/ui-v4-2-claude`.
+Docs-only; no Swift, no version bump, no TestFlight ship.
+Implementation lands in a separate PR per the agent-roles
+contract.
+
+**Reported:** May 2 2026.
+
+**Spec.** Full spec at
+[`docs/handoff/SESSION_RECORDER_SPEC.md`](SESSION_RECORDER_SPEC.md).
+Architecture rationale at
+[`docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md`](04_DECISIONS_AND_CONSTRAINTS.md)
+ADR V4-D25.
+
+**One-paragraph summary.** Local-only, AI-readable session
+recorder for debugging. Hidden until the user triple-taps the
+build-badge chip; persisted in `UserDefaults` as
+`VOLTRARecorderUnlocked`. When unlocked, a 24×24 pt dot
+appears at the bottom-trailing safe area on every screen via
+**one root-level overlay** (no per-screen buttons). Tap = start /
+stop, long-press = open viewer sheet. One shared
+`SessionRecorder` `ObservableObject` injected via
+`.environmentObject` owns a 10,000-event FIFO ring buffer, a
+`sessionId`, and an `ActionScope` task-local `actionId` so
+cause → effect chains are readable without manual id threading.
+Persistence: on app background / kill, write current session
+JSON to `Application Support/SessionRecorder/last_session.json`
+and reload on init. **No** other disk writes, **no** network,
+**no** analytics. Redaction maps PII surfaces (BLE peripheral
+name, exercise name, free text) to UUIDs or `<redacted:len=N>`.
+Export produces `.txt` + `.json` together via `ShareLink`.
+Hard runtime invariants: no `Info.plist` / `project.yml` /
+entitlements / release-workflow changes; no BLE /
+WatchConnectivity runtime behavior changes; no per-screen
+toggle buttons; no new silent guards.
+
+**Why F11 sits next to the other B74 items.** The B74 cycle is
+already producing user-visible regressions across BLE pairing
+(F1, F5, F6), mode semantics (F2, F3), and UI layout (F4, F7,
+F8). The recorder is the receipts file for that class of bug:
+"the app didn't do anything when I tapped X" is invisible
+without it. Landing the spec here keeps the implementation
+PR's diff lean and surfaces the architectural decisions for
+review before any code is written.
+
+**Verification contract.** Mechanically verified by Swift
+compile + unit tests for `RecorderBuffer` (wrap, thread-safety),
+`RecorderRedactor` (PII rules), `RecorderExporter` (text + JSON
+round-trip), and `ActionScope` (propagation). TestFlight QA
+appends Working / Not / Other to
+[`docs/handoff/QA_LOG.md`](QA_LOG.md) for passes A–G:
+ubiquity, lifecycle, semantic log readability, `actionId`
+correlation, loud guards, share, HealthKit truthfulness. Any
+**Not** result is filed in
+[`docs/handoff/06_KNOWN_ISSUES.md`](06_KNOWN_ISSUES.md) or
+fixed in a follow-up PR.
+
+**Definition of done.** Spec PR merged + implementation PR
+merged + one TestFlight build shipped with feature label
+`"Session Recorder"` + `QA_LOG.md` contains A–G results + every
+**Not** result either KI-tracked or fixed in a follow-up PR.
+
+**Out of scope (spec PR — this branch).** No Swift code. No
+`Info.plist` / `project.yml` / entitlements / release-workflow
+changes. No BLE / WatchConnectivity / HealthKit runtime
+behavior changes. No version bump. No TestFlight ship.
 
 ---
 

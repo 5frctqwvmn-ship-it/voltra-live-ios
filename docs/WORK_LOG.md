@@ -4585,3 +4585,72 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   text color, >10 s stale flip, L/R/⋏ pills unchanged, Xcode
   compile via release workflow). After user QA, append to
   `docs/handoff/QA_LOG.md` per b58 sticky requirement.
+
+## 2026-05-02 15:42 UTC — B74-F11: Session Recorder spec PR (docs-only)
+
+- **Files changed:** `docs/handoff/SESSION_RECORDER_SPEC.md` (new),
+  `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` (V4-D25 appended),
+  `docs/handoff/B74_BUG_QUEUE.md` (B74-F11 status row + entry),
+  `docs/handoff/07_FILE_MAP.md` (new — first sections; satisfies the
+  Karpathy `07_FILE_MAP` wiki role flagged "(not yet authored)" in
+  `00_START_HERE.md`), `docs/WORK_LOG.md` (this entry).
+- **What changed:** Opened B74-F11 — Session Recorder — as a
+  spec-only PR on branch `docs/session-recorder-spec` against
+  `feat/ui-v4-2-claude`. Spec calls for a local-only,
+  AI-readable session recorder activated by triple-tap on the
+  build-badge chip and surfaced as a single 24×24 pt root-level
+  overlay dot on every screen. Architecture: one shared
+  `SessionRecorder` `ObservableObject` injected via
+  `.environmentObject` owning a 10,000-event FIFO ring buffer,
+  `ActionScope` task-local `actionId` for cause → effect chains,
+  thread-safe via serial queue or `actor`, opportunistic
+  persistence to `Application Support/SessionRecorder/last_session.json`
+  on background / kill, **no** other disk writes, **no** network,
+  **no** analytics. Redaction maps PII surfaces (BLE peripheral
+  name, exercise name, free text) to UUIDs / `<redacted:len=N>`;
+  raw passthrough requires explicit `unsafeRaw` opt-in. Export is
+  `.txt` + `.json` together via `ShareLink`. Hard runtime
+  invariants: no `Info.plist` / `project.yml` / entitlements /
+  release-workflow changes, no BLE / WatchConnectivity runtime
+  behavior changes, no per-screen toggle buttons, no new silent
+  guards (existing user-visible-path guards become loud via
+  `rec.guardTrip(...)` in the implementation PR). Verification
+  contract: Swift compile + unit tests for `RecorderBuffer`,
+  `RecorderRedactor`, `RecorderExporter`, `ActionScope`, and
+  TestFlight QA passes A–G recorded in `QA_LOG.md`. ADR V4-D25
+  appended to `04_DECISIONS_AND_CONSTRAINTS.md` with full
+  alternatives-considered rationale (OSLog-only, per-feature
+  recorders, server telemetry, per-screen buttons, unbounded
+  buffer — all rejected, with reasons). `B74_BUG_QUEUE.md` gains
+  a B74-F11 row (status `OPEN (spec-only)`) and a full entry
+  section. `07_FILE_MAP.md` is created fresh with placeholder
+  rows for every recorder file the implementation PR will land
+  (`SessionRecorder.swift`, `RecorderEvent.swift`,
+  `RecorderBuffer.swift`, `RecorderRedactor.swift`,
+  `RecorderExporter.swift`, `ActionScope.swift`,
+  `SessionRecorderToggle.swift`, `SessionRecorderViewer.swift`,
+  `View+RecorderScreen.swift`, plus tests).
+- **Verification:** Docs-only — no Swift, no `xcodebuild`, no CI
+  gate. Working-tree review confirms five files touched and the
+  spec / ADR / queue / map cross-references resolve. Branch
+  pushed as `docs/session-recorder-spec`; PR opened against
+  `feat/ui-v4-2-claude`; not merged.
+- **Risks:** (a) `11_AGENT_ROLES.md` is referenced by the
+  existing B74_BUG_QUEUE.md text but does not exist on
+  `feat/ui-v4-2-claude` (it lives only on `main` post-merge of
+  PR #4). Pre-existing inconsistency; out of scope for this
+  spec PR. (b) The B74-F11 entry in the queue and the V4-D25
+  ADR will need to be updated when the implementation PR lands
+  — both contain "spec only" and "PLACEHOLDER" markers that
+  must flip to "implemented" / "EXISTS" in the same commit as
+  the implementation. (c) Nothing in this commit changes
+  runtime behavior; if any reviewer thinks they see a Swift
+  diff, the PR has been mis-scoped and should be rejected.
+- **Next step:** Implementation PR on a separate branch (per
+  the agent-roles split-role contract — Claude is release-only
+  while GPT-5 owns implementation) lands the recorder code
+  with unit tests. After Xcode compile + test pass, ship a
+  TestFlight build with feature label `"Session Recorder"`
+  and run QA passes A–G with the user, recording results in
+  `QA_LOG.md`. Any **Not** result becomes a KI-N entry in
+  `06_KNOWN_ISSUES.md` or a follow-up fix PR.
