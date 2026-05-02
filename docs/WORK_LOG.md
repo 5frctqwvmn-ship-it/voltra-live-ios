@@ -4751,3 +4751,58 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   (`SessionRecorderToggle`) + viewer (`SessionRecorderViewer`) + share
   (`ShareLink` for `.txt` + `.json`) + `.recorderScreen` tags on
   ~13 top-level screens.
+
+## 2026-05-02 17:55 UTC — B74-F11 (2/3): Root overlay + viewer + share + screen tags
+
+- **Files changed:**
+  - NEW Swift: `VoltraLive/Recorder/SessionRecorderToggle.swift`,
+    `VoltraLive/Recorder/SessionRecorderViewer.swift`.
+  - EDIT Swift: `VoltraLive/VoltraLiveApp.swift` (env-object
+    injection + bottom-trailing overlay + scenePhase persist hook),
+    `VoltraLive/Views/BuildBadgeOverlay.swift` (triple-tap unlock
+    declared before existing single-tap so disambiguation prefers it),
+    `VoltraLive/Recorder/RecorderEvent.swift` (added `CaseIterable`
+    to `RecorderCategory` for viewer filter chips).
+  - EDIT (13 screens, 1 line each — `.recorderScreen("Name")`):
+    `LoggingHomeView`, `LiveCaptureView`, `LiveCaptureViewV2`,
+    `LiveCaptureContainer`, `ConnectView`, `DebugView`,
+    `DashboardView`, `ExerciseDetailView`, `ExerciseStartView`,
+    `ExercisePickerView`, `SetLogView`, `ExportSheet`,
+    `UnifiedConnectSheet`.
+  - DOCS: `docs/handoff/00_START_HERE.md` (state update),
+    `docs/handoff/CONVERSATION_LOG.md` (Commit 2 entry),
+    `docs/handoff/CONTEXT_LEDGER.md` (entry 1), this entry.
+- **What changed:** Added the recorder UI surface. `SessionRecorder`
+  is now injected at the app root via `.environmentObject`; a
+  24x24 pt dot lives in a single root-level
+  `.overlay(alignment: .bottomTrailing)`, hidden until the user
+  triple-taps the build-badge chip
+  (`UserDefaults["VOLTRARecorderUnlocked"] = true`). Tap toggles
+  recording; long-press opens `SessionRecorderViewer` (event timeline
+  with category filter chips + `ShareLink` exporting both `.txt` and
+  `.json` payloads). Recording state shows a 1 Hz red pulse via
+  `TimelineView(.animation)`; idle is faint `VoltraColor.textFaint`.
+  scenePhase observer calls `recorder.persist()` on background /
+  inactive. `.recorderScreen("Name")` on 13 top-level screens emits
+  `nav.screenAppear` / `nav.screenDisappear`.
+- **Verification:** Cannot run `xcodebuild` (Windows host).
+  `git status --short` reviewed before staging; `.claude/` not staged;
+  no `git add -A`. No `Info.plist`, `project.yml`, entitlements,
+  workflow, BLE, HealthKit, sacred-protocol, or version-bump files
+  touched.
+- **Risks:**
+  - SwiftUI single-tap on the build badge now has a ~250 ms delay
+    introduced by triple-tap disambiguation. Spec accepts this; needs
+    QA verification on device.
+  - The recorder dot's 36 pt bottom padding assumes the build badge
+    chip stays roughly its current size (~14 pt + 6 pt padding). If
+    that chrome changes, revisit padding.
+  - `ShareLink` writes temp files on viewer open; the user may share
+    a stale snapshot if they leave the viewer open and trigger more
+    events. Reload button regenerates.
+- **Next step:** B74-F11 Commit 3 — instrumentation + loud guards
+  (additive BLE sinks, HK read-only, ActionScope wrapping for major
+  UI actions, user-visible silent-guard sweep) + remaining doc
+  updates (`07_FILE_MAP.md` PLACEHOLDER → EXISTS,
+  `03_CURRENT_FEATURE_SPEC.md` pointer, `09_NEXT_AGENT_PROMPT.md`
+  append).

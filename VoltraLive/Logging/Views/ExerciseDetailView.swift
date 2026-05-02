@@ -135,6 +135,8 @@ struct ExerciseDetailView: View {
         // b66 V4.2: page-name badge — bottom-leading, faint mint,
         // Swift type name verbatim. Always visible in TestFlight.
         .pageBadge("ExerciseDetailView")
+        // B74-F11: recorder screen tag.
+        .recorderScreen("ExerciseDetailView")
         .navigationDestination(isPresented: $navigateToCapture) {
             // b53: route through the V1/V2 container instead of pinning
             // V1. Container reads @AppStorage("liveCaptureUIVersion")

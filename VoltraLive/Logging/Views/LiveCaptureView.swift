@@ -294,6 +294,8 @@ struct LiveCaptureView: View {
         }
         // b66 V4.2: page-name badge.
         .pageBadge("LiveCaptureView")
+        // B74-F11: recorder screen tag.
+        .recorderScreen("LiveCaptureView")
         }
 
     /// b47: when entering (or already in) Combined mode, round the standing

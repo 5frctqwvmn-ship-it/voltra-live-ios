@@ -11,7 +11,7 @@ import Foundation
 
 /// Top-level category for a recorded event. Names are dotted within each
 /// category; see the spec's "Name Grammar" section.
-enum RecorderCategory: String, Codable, Sendable {
+enum RecorderCategory: String, Codable, Sendable, CaseIterable {
     case ui
     case nav
     case state

@@ -352,6 +352,8 @@ struct LiveCaptureViewV2: View {
         // b66 V4.2: page-name badge — bottom-leading, faint mint,
         // Swift type name verbatim. Always visible in TestFlight.
         .pageBadge("LiveCaptureViewV2")
+        // B74-F11: recorder screen tag.
+        .recorderScreen("LiveCaptureViewV2")
     }
 
     // MARK: - Toolbar

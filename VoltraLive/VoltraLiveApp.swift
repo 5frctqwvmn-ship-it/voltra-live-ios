@@ -23,6 +23,17 @@ struct VoltraLiveApp: App {
     /// Owned at the app root so its identity survives view re-renders.
     @StateObject private var pairing = PairingCoordinator()
 
+    /// B74-F11: shared SessionRecorder singleton, injected at the app
+    /// root via `.environmentObject(recorder)`. Owns the 10k FIFO event
+    /// buffer and the recorder UI's `isRecording` binding.
+    @StateObject private var recorder = SessionRecorder.shared
+
+    /// B74-F11: observe scene transitions so we can persist the
+    /// recorder buffer to `Application Support/SessionRecorder/last_session.json`
+    /// when the app backgrounds or becomes inactive (best-effort; the OS
+    /// may kill us before the write completes).
+    @Environment(\.scenePhase) private var scenePhase
+
     let modelContainer: ModelContainer = {
         // v0.1 dashboard models + v0.2 logging models in one container so
         // cross-queries (e.g. "last leg-day session") work.
@@ -110,6 +121,10 @@ struct VoltraLiveApp: App {
                 .environmentObject(healthStore)
                 .environmentObject(multi)
                 .environmentObject(pairing)
+                // B74-F11: SessionRecorder injection. Placed before
+                // .demoModeOverlay() so the modifier and every descendant
+                // can resolve @EnvironmentObject SessionRecorder.
+                .environmentObject(recorder)
                 // v0.4.6.3: .demoModeOverlay() is a ViewModifier that itself
                 // reads @EnvironmentObject DemoController. Modifiers cannot
                 // see env objects injected ABOVE them in the chain — only
@@ -300,6 +315,21 @@ struct VoltraLiveApp: App {
                     // First-launch: seed Exercise/WorkoutSession rows from
                     // the bundled history.md.
                     HistoryImporter.runIfNeeded(context: ctx)
+                }
+                // B74-F11: persist the recorder buffer to disk on
+                // background / inactive transitions so the last session
+                // survives the app being killed.
+                .onChange(of: scenePhase) { _, newPhase in
+                    if newPhase == .background || newPhase == .inactive {
+                        recorder.persist()
+                    }
+                }
+                // B74-F11: root-level recorder dot in the bottom-trailing
+                // safe area. Hidden until the user triple-taps the
+                // build-badge chip (UserDefaults["VOLTRARecorderUnlocked"]).
+                // Sits above the build badge via the toggle's own padding.
+                .overlay(alignment: .bottomTrailing) {
+                    SessionRecorderToggle()
                 }
         }
         .modelContainer(modelContainer)

@@ -250,3 +250,40 @@ order in `00_START_HERE.md` updated to put `CONTEXT_LEDGER.md` (latest
 **Cross-refs:** `AGENTS.md` "Voltra Brain & Agent Organization
 (Karpathy Method)"; `00_START_HERE.md` "Context protocol";
 `CONTEXT_LEDGER.md` (new file, empty until first checkpoint).
+
+---
+
+## 2026-05-02 — B74-F11 Commit 2 (root overlay + viewer + share + screen tags)
+
+**Decision (small Commit 1 file edit):** added `CaseIterable`
+conformance to `RecorderCategory` in
+`VoltraLive/Recorder/RecorderEvent.swift` so the viewer's filter
+chips can iterate categories. The change is single-line, additive,
+and backwards-compatible with the Codable representation.
+
+**Why:** the viewer needs to enumerate categories to render its
+filter row; without `CaseIterable` we'd hand-list them, and any
+future category added to the enum would silently fail to surface a
+chip.
+
+**How to apply:** future enums consumed by SwiftUI iteration should
+declare `CaseIterable` from the start.
+
+**Decision (toggle placement):** the recorder dot uses
+`.padding(.bottom, 36)` so it sits above the existing build-badge
+chip in the same bottom-trailing safe area. Both overlays share that
+corner; the dot is the outer overlay (declared on the WindowGroup
+ContentView chain after `.onChange(of: scenePhase)`) and the chip is
+the inner one (applied on `ContentView` via `.buildBadgeOverlay()`).
+
+**Decision (build-badge gesture order):** triple-tap declared
+**before** the existing single-tap on the chip so SwiftUI's
+gesture-disambiguation prefers the higher count. Single-tap still
+cycles the debug grid as before, with a ~250 ms delay introduced by
+the disambiguation window. Spec accepts this; needs QA verification
+on device.
+
+**Cross-refs:** `SESSION_RECORDER_SPEC.md` "Activation" + "Toggle" +
+"UI Mount"; `SessionRecorderToggle.swift`,
+`SessionRecorderViewer.swift`, `VoltraLiveApp.swift`,
+`Views/BuildBadgeOverlay.swift`.

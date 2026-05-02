@@ -233,6 +233,7 @@ struct LoggingHomeView: View {
             // b66 V4.2: page-name badge — bottom-leading, faint mint,
             // Swift type name verbatim. Always visible in TestFlight.
             .pageBadge("LoggingHomeView")
+            .recorderScreen("LoggingHomeView")
             // b67 V4.3 (Bug 07): pair sheet is owned by PairingCoordinator.
             // We bind the sheet presentation here at the home root so the
             // canonical UnifiedConnectSheet appears regardless of which
