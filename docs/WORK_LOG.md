@@ -5004,3 +5004,59 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   version + build bump in `project.yml` + `Info.plist`, a `v*` tag
   push, and a non-dry-run `release.yml` invocation — all out of
   scope for the current PR).
+
+## 2026-05-03 01:38 UTC — b77 ship: v0.4.50 / build 77 — Session Recorder (B74-F11)
+
+- **Files changed:** `project.yml`, `VoltraLive/Info.plist`,
+  `docs/handoff/00_START_HERE.md`,
+  `docs/handoff/01_PROJECT_OVERVIEW.md`,
+  `docs/handoff/02_CURRENT_STATE.md`,
+  `docs/handoff/03_ROADMAP.md`,
+  `docs/handoff/09_NEXT_AGENT_PROMPT.md`,
+  `docs/WORK_LOG.md` (this entry).
+- **Goal:** Ship B74-F11 Session Recorder as build 77. Single ship
+  commit + tag `v0.4.50-build77` to trigger `release.yml` for
+  TestFlight upload + GitHub release.
+- **What changed:**
+  - `project.yml`: `MARKETING_VERSION` 0.4.49 → 0.4.50,
+    `CURRENT_PROJECT_VERSION` 76 → 77 (both in target settings AND
+    in `info.properties` block); `VOLTRAFeatureLabel`
+    "Health signal indicator" → "Session Recorder".
+  - `VoltraLive/Info.plist`: `CFBundleShortVersionString` 0.4.49 →
+    0.4.50, `CFBundleVersion` 76 → 77, `VOLTRAFeatureLabel`
+    "Health signal indicator" → "Session Recorder".
+  - Doc updates per AGENTS.md "Mandatory ship discipline":
+    `00_START_HERE.md` (active branch state + Last shipped line),
+    `01_PROJECT_OVERVIEW.md` (current shipping build line),
+    `02_CURRENT_STATE.md` (Last updated, Latest shipped build,
+    Active cycle, Recent shipped history head row),
+    `03_ROADMAP.md` (Last updated, b77 row at top of Done table),
+    `09_NEXT_AGENT_PROMPT.md` (post-b77 status section).
+- **Verification (pre-tag):** B74-F11 implementation chain merged
+  via PR #10 (`88a4eaf`). Pre-ship CI on PR head:
+  - `build.yml` workflow_dispatch run 25260420548 — `success` in
+    1m17s.
+  - `release.yml dry_run=true` workflow_dispatch run 25261426415 —
+    `success` in 5m21s on code-equivalent head `6ab55b8` (final PR
+    head `fa8e89a` only added a docs-log metadata commit on top, so
+    compile/test/signing signal carries forward to the merged state).
+    `xcodebuild test -only-testing:VoltraLiveTests` passed including
+    all 4 new recorder unit-test files. Signed archive + export
+    green.
+- **Verification (post-tag):** PENDING — tag push triggers
+  `release.yml` non-dry-run path (TestFlight upload + GitHub
+  release). 5-gate altool verify required per `09_RELEASE_AND_SIGNING.md`:
+  (1) run conclusion `success`, (2) raw altool log pulled,
+  (3) altool wall-clock ≥ 20 s, (4) positive marker present,
+  (5) zero ERROR / Failed / numeric-error lines.
+- **Risks:** On-device QA passes A–G per `SESSION_RECORDER_SPEC.md`
+  "Verification Contract" remain required after TestFlight
+  surface — recorder UI rendering, real CoreBluetooth callbacks,
+  real HealthKit sample arrivals, ShareLink, SwiftUI triple-tap
+  timing, scenePhase lifecycle, and Application Support
+  `last_session.json` write only verifiable on a real device.
+  Results land in `docs/handoff/QA_LOG.md`.
+- **Next step:** After tag CI completes + 5-gate verify passes,
+  run post-build QA checklist (passes A–G) and append results to
+  `QA_LOG.md`. Any "Not" result → `KI-N` in `06_KNOWN_ISSUES.md`
+  or follow-up fix PR.

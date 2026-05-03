@@ -218,59 +218,37 @@ Closed in b58: KI-F3, KI-F4.
    `03_CURRENT_FEATURE_SPEC.md` and
    `04_DECISIONS_AND_CONSTRAINTS.md` if anything decided.
 
-## Where things stand (post-b76, B74-F11 implementation merged)
+## Where things stand (post-b77, B74-F11 SHIPPED)
 
-**Branch:** `feat/b77-session-recorder` against
-`origin/feat/ui-v4-2-claude` (PR target).
+**Branch:** `feat/ui-v4-2-claude` (integration). No feature
+in flight.
 
-**B74-F11 (Session Recorder) is fully implemented across three
-commits:**
+**Last shipped: v0.4.50 / build 77 — "Session Recorder" — B74-F11.**
+PR #10 merged via `88a4eaf`. Tag `v0.4.50-build77` triggered
+`release.yml` on the b77 ship commit. The full Session Recorder
+implementation chain — `76becdf` (Commit 1, core engine) →
+`2ee81be` (Commit 2, root overlay + viewer + share + screen tags) →
+`492130a` (Commit 3, instrumentation + loud guards) → `77e2b5a`
+(CI compile fix) — is part of `feat/ui-v4-2-claude`.
 
-1. **Commit 1 (`76becdf`)** — Core engine. New
-   `VoltraLive/Recorder/` directory with `RecorderEvent`,
-   `RecorderBuffer` (10k FIFO actor), `RecorderRedactor`,
-   `ActionScope` (`@TaskLocal`), `RecorderExporter` (`.txt` + `.json`
-   builders, `schemaVersion=1`), `SessionRecorder` (singleton
-   `ObservableObject`, persists to
-   `Application Support/SessionRecorder/last_session.json`),
-   `View+RecorderScreen`. 4 unit-test files in `VoltraLiveTests/`.
-2. **Commit 2 (`2ee81be`)** — Root overlay + viewer + share + screen
-   tags. `SessionRecorderToggle` (24×24 dot, hidden until
-   `VOLTRARecorderUnlocked`), `SessionRecorderViewer` (filter chips +
-   `ShareLink` for both `.txt` and `.json`),
-   `VoltraLiveApp.swift` env-object + root overlay + scenePhase
-   persist hook, `BuildBadgeOverlay.swift` triple-tap unlock
-   (additive — single-tap grid cycle preserved), `.recorderScreen`
-   tags on 13 top-level screens.
-3. **Commit 3 (this commit)** — Instrumentation + loud guards +
-   docs. Additive recorder sinks in `VoltraBLEManager.swift` (14
-   sites), `VoltraWriter.swift` (2 sites),
-   `MultiDeviceManager.swift` (5 emit-site groups),
-   `HealthKitStore.swift` (6 sites — read-only). 9 user-visible
-   silent guards converted to `recorder.guardTrip(...); return`.
-   `VoltraLiveApp.swift` scenePhase observer extended with
-   `lifecycle.appBackground` / `lifecycle.appForeground`.
-   ActionScope wrapping for 6 user-action functions:
-   `LoggingHomeView` Demo button + `startCustom`; `LiveCaptureViewV2`
-   `tapDropTile` + `toggleHardwareLoad`; `LiveCaptureView` `sendLoad`
-   + `sendUnload`.
+**Pre-ship verification (PR #10 head, dry_run on `feat/b77-session-recorder`):**
+- `build.yml` workflow_dispatch run 25260420548: `success` in
+  1m17s. Compile + unsigned IPA artifact.
+- `release.yml dry_run=true` workflow_dispatch run 25261426415:
+  `success` in 5m21s on code-equivalent head `6ab55b8` (the final
+  PR head `fa8e89a` only added a docs-log metadata commit on top
+  of `6ab55b8`, so the dry-run signal carries forward).
+  `xcodebuild test -only-testing:VoltraLiveTests` passed including
+  the 4 new recorder unit-test files (`RecorderBufferTests`,
+  `RecorderRedactorTests`, `RecorderExporterTests`,
+  `ActionScopeTests`). Signed archive + IPA export green.
 
-**Hard stops honored:** no `Info.plist`, `project.yml`, entitlements,
-`.github/workflows/*`, release / TestFlight, version bump,
-sacred-protocol, `WatchConnectivity`, server / network, analytics,
-or per-screen-toggle changes.
-
-**Could not verify on Windows:** `xcodebuild` compile + unit-test run,
-iOS simulator UI exercise, real CoreBluetooth delegate callbacks,
-real HealthKit sample arrivals, `ShareLink` system sheet, SwiftUI
-gesture timing on the build-badge triple-tap. All deferred to CI
-`build.yml` on PR open and QA passes A–G per
-`SESSION_RECORDER_SPEC.md`.
-
-**Next-agent action: ship after merge.** When this branch merges to
-`feat/ui-v4-2-claude`, the next ship cycle should bump the version
-in `project.yml` + `Info.plist` to a new build with feature label
-`"Session Recorder"`, then run the 5-gate altool verify per
-`09_RELEASE_AND_SIGNING.md`. After TestFlight surface, run QA passes
-A–G per the spec's verification contract and append results to
-`QA_LOG.md`.
+**Next-agent action: post-ship QA.** After tag CI completes
+successfully and the 5-gate altool verify passes, run the post-build
+QA checklist (passes A–G per `SESSION_RECORDER_SPEC.md`
+"Verification Contract"): Ubiquity, Lifecycle, Semantic log,
+ActionId correlation, Loud guards, Share, HealthKit truthfulness.
+Results land in `docs/handoff/QA_LOG.md` (one section per build).
+Any "Not working as intended" result becomes a `KI-N` entry in
+`docs/handoff/06_KNOWN_ISSUES.md` or a follow-up fix PR per the
+spec's Definition of Done.
