@@ -5754,3 +5754,26 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   confirm tile changes to 15 lb. Expected logs:
   `device.state.change source=deviceUnsolicited to=15` +
   `ui.deviceBaseWeightApplied to=15`.
+
+## 2026-05-03 22:20 UTC — KI-20 bridge event-based patch
+
+- **Goal.** Make device-originated base-weight bridge fire for every
+  device event, even if lb value repeats (same-weight confirmation).
+- **Files changed.**
+  - `VoltraLive/BLE/VoltraBLEManager.swift` — added
+    `@Published private(set) var deviceOriginatedBaseWeightUpdateID: Int = 0`;
+    added `deviceOriginatedBaseWeightUpdateID &+= 1` alongside
+    `deviceOriginatedBaseWeightUpdate = confirmed`.
+  - `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — replaced
+    `focusedDeviceOriginatedBaseWeightUpdateValue: Int?` computed key
+    with `focusedDeviceOriginatedBaseWeightUpdateID: Int`; replaced
+    `.onChange(of: focusedDeviceOriginatedBaseWeightUpdateValue)` with
+    `.onChange(of: focusedDeviceOriginatedBaseWeightUpdateID)`.
+  - `docs/handoff/04_ARCHITECTURE.md` — updated bridge path to reference
+    event ID observer.
+- **What changed.** Observer key is now a monotonic Int that increments
+  on every device event. SwiftUI always sees a new value, so the onChange
+  fires regardless of whether lb repeated.
+- **Sacred files.** Unchanged.
+- **Verification.** Static review only.
+- **Next step.** Push, ship TestFlight, run A1 retest.

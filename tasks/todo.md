@@ -49,5 +49,5 @@ Files changed: `VoltraBLEManager.swift`, `LiveCaptureViewV2.swift`,
 `docs/handoff/CONVERSATION_LOG.md`, `docs/WORK_LOG.md`,
 `tasks/todo.md`, `tasks/lessons.md`.
 
-KI-20 status: fix implemented — pending hardware retest.
-Next: ship to TestFlight, run A1 test (20→15 lb), confirm tile updates.
+KI-20 status: fix implemented + event-based patch applied — pending hardware retest.
+Next: push, ship to TestFlight, run A1 test (20→15 lb), confirm tile updates.

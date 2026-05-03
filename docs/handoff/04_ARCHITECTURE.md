@@ -252,8 +252,9 @@ DeviceStateReducer.apply → DeviceState.baseWeightLb (updated)
 VoltraBLEManager.deviceOriginatedBaseWeightUpdate (@Published)
     │
     ▼
-LiveCaptureViewV2.focusedDeviceOriginatedBaseWeightUpdateValue
-(SwiftUI .onChange observer OR .onAppear reconciliation)
+LiveCaptureViewV2.focusedDeviceOriginatedBaseWeightUpdateID
+(SwiftUI .onChange on monotonic event ID — fires on every event,
+even repeated lb values — OR .onAppear reconciliation)
     │
     ▼
 LiveCaptureViewV2.applyDeviceOriginatedBase(_:)

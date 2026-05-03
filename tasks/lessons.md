@@ -84,3 +84,5 @@ alongside any `.onChange` observer on device state.
 that needs to bridge device-originated changes into the UI. Same
 pattern: dedicated `@Published` on the BLE manager, set only for
 `.deviceUnsolicited`, observed + onAppear-reconciled in the view.
+Use a monotonic event ID (`&+=`) as the onChange key — not the lb
+value — so repeated same-weight device events still fire reconciliation.

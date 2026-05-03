@@ -74,6 +74,11 @@ final class VoltraBLEManager: NSObject, ObservableObject {
     /// would otherwise miss the transition.
     @Published private(set) var deviceOriginatedBaseWeightUpdate: ConfirmedValue<Int>? = nil
 
+    /// Monotonic event token for deviceOriginatedBaseWeightUpdate.
+    /// LiveCaptureViewV2 observes this instead of the lb value so repeated
+    /// same-weight device events still trigger reconciliation.
+    @Published private(set) var deviceOriginatedBaseWeightUpdateID: Int = 0
+
     // MARK: Private CBCentral state
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -301,6 +306,7 @@ final class VoltraBLEManager: NSObject, ObservableObject {
                        change.source == .deviceUnsolicited,
                        let confirmed = deviceState.baseWeightLb {
                         deviceOriginatedBaseWeightUpdate = confirmed
+                        deviceOriginatedBaseWeightUpdateID &+= 1
                     }
                 }
             }

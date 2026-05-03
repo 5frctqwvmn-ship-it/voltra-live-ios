@@ -363,7 +363,7 @@ struct LiveCaptureViewV2: View {
         // source guard inside applyDeviceOriginatedBase is a belt-and-
         // suspenders backup. The direct @Published ensures SwiftUI fires
         // this onChange reliably regardless of foreground/background state.
-        .onChange(of: focusedDeviceOriginatedBaseWeightUpdateValue) { _, _ in
+        .onChange(of: focusedDeviceOriginatedBaseWeightUpdateID) { _, _ in
             applyDeviceOriginatedBase(focusedBle.deviceOriginatedBaseWeightUpdate)
         }
         // b66 V4.2: page-name badge — bottom-leading, faint mint,
@@ -1450,8 +1450,8 @@ struct LiveCaptureViewV2: View {
     /// ensures SwiftUI fires onChange even when the view re-attaches after
     /// a foreground/background transition and the underlying value hasn't
     /// changed since the last observation.
-    private var focusedDeviceOriginatedBaseWeightUpdateValue: Int? {
-        focusedBle.deviceOriginatedBaseWeightUpdate?.value
+    private var focusedDeviceOriginatedBaseWeightUpdateID: Int {
+        focusedBle.deviceOriginatedBaseWeightUpdateID
     }
 
     /// Only mirror machine-originated changes into local planned weight.
