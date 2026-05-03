@@ -5637,3 +5637,55 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   URL + ASC processing status to the user. KI-20 stays at
   "shipped — pending hardware verification" until MJ confirms
   on the physical VOLTRA.
+
+## 2026-05-03 21:25 UTC — Universal agent workflow rules landed
+
+- **Goal:** Make the user-supplied workflow rules
+  (Plan-first / Subagent strategy / Self-Improvement Loop /
+  Verification / Elegance / Autonomous Bug Fixing / Core
+  Principles) durable across every agent and every Computer
+  session in this repo. User answered the gating questions:
+  AGENTS.md pointer + new dedicated long-form doc, create the
+  `tasks/` files the spec references, push immediately.
+- **Files changed (this commit):**
+  - `AGENTS.md` — appended new section "Universal agent
+    workflow (added 2026-05-03 — sticky for all agents)"
+    under §"Karpathy Leash Constraints"; expanded Karpathy
+    Select Rule reading order to include
+    `docs/handoff/AGENT_WORKFLOW.md`, `tasks/lessons.md`,
+    `tasks/todo.md`.
+  - `docs/handoff/AGENT_WORKFLOW.md` — NEW. Long-form spec
+    transcribed from the user's image, restructured as a repo
+    doc with a precedence-ordering section that composes
+    cleanly with the existing Karpathy rules and handoff-doc
+    enforcement.
+  - `tasks/todo.md` — NEW. Active task plan template with
+    Plan / Review structure; current state set to "no active
+    task" since the in-flight item (TestFlight ship) just
+    closed at v0.4.52-build79.
+  - `tasks/lessons.md` — NEW. Append-only self-improvement
+    log with format spec and a genesis entry.
+- **What changed.** Documentation only. No source edits, no
+  build-system edits, no version bump.
+- **Sacred-files invariant.** ✓ Not touched: `VoltraProtocol.swift`,
+  `TelemetryExtractor.swift`, `PacketParser.swift`,
+  `FrameAssembler.swift`, `.github/workflows/build.yml`,
+  `project.yml`, `_tmp/archive`.
+- **Verification.**
+  - Repo source-of-truth rule satisfied: every rule in the
+    image now lives in a committed file, not in chat.
+  - Path-existence rule satisfied: `tasks/todo.md` and
+    `tasks/lessons.md` exist before any rule references them.
+  - Karpathy Select Rule updated so future agents read these
+    files at session start (steps 2–4).
+  - Composes cleanly with existing AGENTS.md sections — see
+    `AGENT_WORKFLOW.md` "How this composes" precedence list.
+- **Risks.** Two doc surfaces (AGENTS.md non-negotiables +
+  AGENT_WORKFLOW.md long-form) must stay in sync on future
+  edits. Mitigated by the pointer line at top of
+  AGENT_WORKFLOW.md and the explicit "stack on" wording in
+  AGENTS.md.
+- **Next step.** Commit + push to `feat/ui-v4-2-claude` per
+  user instruction "Apply now and push." No CI required (doc
+  only). KI-20 still at "shipped — pending hardware
+  verification" — independent of this change.

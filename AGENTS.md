@@ -219,11 +219,14 @@ deferred.
 When starting a task, read only what's needed in this order:
 
 1. `AGENTS.md`
-2. `docs/handoff/00_START_HERE.md`
-3. Current feature spec (e.g., `SESSION_RECORDER_SPEC.md`)
-4. `docs/handoff/CONVERSATION_LOG.md` (tail only)
-5. `docs/handoff/CONTEXT_LEDGER.md` (latest 3 entries)
-6. `docs/WORK_LOG.md` (tail only)
+2. `docs/handoff/AGENT_WORKFLOW.md` (universal workflow rules)
+3. `tasks/lessons.md` (most recent ~10 entries — self-improvement loop)
+4. `tasks/todo.md` (current task plan, if any)
+5. `docs/handoff/00_START_HERE.md`
+6. Current feature spec (e.g., `SESSION_RECORDER_SPEC.md`)
+7. `docs/handoff/CONVERSATION_LOG.md` (tail only)
+8. `docs/handoff/CONTEXT_LEDGER.md` (latest 3 entries)
+9. `docs/WORK_LOG.md` (tail only)
 
 Do **NOT** read full transcripts or all handoff docs unless explicitly
 asked. **Select, don't dump.**
@@ -240,6 +243,46 @@ include:
 
 Claude Code must refuse to proceed if any of the four is missing and
 ask the user to supply it.
+
+## Universal agent workflow (added 2026-05-03 — sticky for all agents)
+
+Full spec: **`docs/handoff/AGENT_WORKFLOW.md`** — every agent
+must read it at session start alongside this file (Karpathy
+Select Rule, step 1).
+
+Non-negotiables, repeated here so they cannot be missed:
+
+1. **Plan first.** For any non-trivial task (3+ steps or any
+   architectural decision), write the plan to `tasks/todo.md`
+   as a markdown checklist BEFORE writing code. Get user
+   approval on the plan. Tick items as you work. Add a
+   `## Review` block when done.
+2. **Verification before done.** Never mark a task complete
+   without proving it works — tests run, logs checked, diff
+   against `main` reviewed when relevant. "Would a staff
+   engineer approve this?" is the bar.
+3. **Self-improvement loop.** After ANY user correction,
+   append a structured entry to `tasks/lessons.md` (mistake →
+   trigger → correction → rule for next time). Skim recent
+   entries at session start.
+4. **Subagent strategy.** Offload research, exploration, and
+   parallel analysis to subagents to keep the main context
+   clean. One task per subagent.
+5. **Demand elegance (balanced).** For non-trivial changes,
+   pause and ask "is there a more elegant way?" before
+   committing. Skip for simple obvious fixes — do not
+   over-engineer.
+6. **Autonomous bug fixing.** Bug reports get fixed, not
+   discussed. Point at the failing log/test, then resolve it.
+   Go fix failing CI without being told how.
+7. **Core principles.** Simplicity first, no laziness (find
+   root causes, not temporary patches), minimal impact (only
+   touch what's necessary).
+
+These rules **stack on** the existing Karpathy workflow rules
+(§"Workflow rules for agents") and handoff-doc enforcement —
+they do not replace them. When in doubt, sacred-files rules
+win, then this section, then `AGENT_WORKFLOW.md`.
 
 ## Cost-awareness convention (user preference, persistent)
 
