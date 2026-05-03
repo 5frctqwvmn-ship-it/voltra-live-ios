@@ -94,13 +94,25 @@ docs the user can surface. Tracked as KI-23.
 
 ### OQ-T2 — Byte positions for ecc, conc, chains in stream frames
 
-Status: **unknown — needs frame-fixture-pinning experiment.**
+Status: **non-hardware resolution path identified (2026-05-03)** —
+still needs implementation, but inference may not be required.
 
 The existing pipeline emits ecc / conc / chains values that drift
 build-to-build, suggesting the byte offsets we read from are not
-stable or not the true source. Need to record N pinned BLE frames
-with known mode (ECC-only, CON-only, CHAIN on/off) and diff to find
-the authoritative byte positions. Tracked as KI-21.
+stable or not the true source. **Update from BLE audit
+(2026-05-03):** the Android reference implementation
+([`VoltraOfficialReadOnlyBootstrap.kt`](../../docs/handoff/artifacts/ble_characteristic_audit_2026-05-03.md)
+bootstrap packet 10) requests these values authoritatively via
+`CMD_PARAM_READ` for `PARAM_BP_CHAINS_WEIGHT`,
+`PARAM_BP_ECCENTRIC_WEIGHT`, and `PARAM_FITNESS_INVERSE_CHAIN` on
+the C3 transport characteristic. iOS currently does **not** issue
+this read (iOS has 9 bootstrap writes; Android has 10). The v2
+collector should issue this read either at bootstrap (additively
+appending a 10th packet, **not** modifying the sacred constant) or
+lazily on connect, and use the parameter response as source of
+truth for ecc / conc / chains. Stream-frame byte-position pinning
+becomes a fallback / cross-check rather than the primary mechanism.
+Tracked as KI-21.
 
 ### OQ-T3 — Meaning of `2b000100` vs `2b010100` in `553a0470` frames
 
@@ -114,15 +126,47 @@ hypothesis and round-trip the raw bytes. Tracked as KI-24.
 
 ### OQ-T4 — Is there a dedicated notify/indicate status characteristic we are not subscribed to?
 
-Status: **needs full BLE characteristic audit.**
+Status: **partially resolved (2026-05-03 paper audit)** — still
+open on the substantive question pending an on-device scan.
 
-Current code subscribes to a small set of characteristics. We do not
-have a documented audit of every advertised service / characteristic
-on the VOLTRA peripheral, nor which carry notify vs indicate vs
-read-only data. A device-state characteristic may exist that would
-make several hypotheses (OQ-T1, OQ-T3, OQ-T5) deterministic instead
-of inferred. **This is Step 1 of the Telemetry v2 cycle.** Tracked
-as KI-26.
+**What is now known.** Cross-referencing this repo's
+`VoltraProtocol.swift` against two independent public reference
+implementations by the same reverse-engineering author — the
+Android controller (`Beyond-Power-Voltra-Android`,
+`core/protocol/.../VoltraUuidRegistry.kt`) and the Home Assistant
+integration (`Beyond-Power-HomeAssistant`,
+`custom_components/voltra/const.py`) — all three clients enumerate
+the **same 4 characteristic UUIDs** on the VOLTRA service
+(`e4dada34-…c7e4`) and subscribe to **the same 3 of the 4**
+(C1 cmdChar, C2 notifyChar, C3 transport). The fourth (C4
+`justWrite`) is `WRITE_NO_RESPONSE` only in all three sources and
+is not a notify/indicate target. **No reference implementation
+documents any unsubscribed notify or indicate channel on the VOLTRA
+service.** Full table and per-row sources in
+`docs/handoff/artifacts/ble_characteristic_audit_2026-05-03.md`.
+Audit results section is appended to
+`docs/handoff/05_BLE_AND_PROTOCOL.md`.
+
+**What remains open.** The paper audit cannot rule out:
+  - additional services advertised by the VOLTRA peripheral beyond
+    `e4dada34-…c7e4` (DIS `0x180A`, Battery `0x180F`, vendor
+    diagnostic) — all three reference clients filter discovery to
+    the VOLTRA service only and would not have noticed.
+  - additional characteristics on the VOLTRA service beyond the 4
+    documented UUIDs — iOS uses
+    `discoverCharacteristics([4-UUID list], for: service)`
+    (`VoltraBLEManager.swift` line 424) so a 5th characteristic, if
+    it exists, is invisible to the iOS app and to its logs.
+  - the actual `CBCharacteristicProperties` bitmask iOS sees on a
+    paired VOLTRA — not yet logged.
+
+**Recommended close.** An on-device nRF Connect / LightBlue scan
+exported to `docs/handoff/artifacts/ble_scan_<date>.{json,txt}`
+would close the substantive question. A non-sacred debug log of
+`char.uuid` + `char.properties.rawValue` in `VoltraBLEManager.swift`
+(post-discovery callback) would close the properties-bitmask
+uncertainty without a scanner. Neither was done in this docs-only
+commit per release-only mode. Tracked as KI-26.
 
 ### OQ-T5 — Is force / tension decodable from current frames?
 

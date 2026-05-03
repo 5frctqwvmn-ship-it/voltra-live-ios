@@ -153,3 +153,108 @@ existing pipeline is not edited to act on the audit's findings.
     resolves are also closed in the same commit.
   - `WORK_LOG.md` entry summarizing the audit run, hardware
     conditions, and resolved hypotheses.
+
+## BLE characteristic audit results — 2026-05-03
+
+> **Method caveat.** This audit was conducted **without a live
+> on-device BLE scan.** It is a paper audit cross-referencing this
+> repo's `VoltraProtocol.swift` against the public reference
+> implementations by the same reverse-engineering author (Android
+> controller and Home Assistant integration). Full source list,
+> per-row sources, and verbatim file paths are in
+> `docs/handoff/artifacts/ble_characteristic_audit_2026-05-03.md`.
+> The "What remains unknown" section there enumerates what only
+> hardware can answer.
+
+### Service / characteristic table
+
+VOLTRA service UUID `e4dada34-0867-8783-9f70-2ca29216c7e4`
+(unchanged from `VoltraProtocol.swift` line 12). All three reference
+clients (this iOS app, the Android controller, the HA integration)
+agree on the same 4 characteristic UUIDs and the same 3-of-4
+subscription pattern.
+
+| # | Characteristic UUID | Role | Properties | Subscribed in iOS? | Notes |
+|---|---|---|---|---|---|
+| C1 | `55ca1e52-7354-25de-6afc-b7df1e8816ac` | `cmdChar` / VOLTRA_COMMAND | Write + Notify | yes | Command writes + response notifications |
+| C2 | `ca94658c-0525-5046-e78b-5391b65f47ad` | `notifyChar` / VOLTRA_NOTIFY | Notify | yes | High-rate telemetry stream (0xAA frames) |
+| C3 | `a010891d-f50f-44f0-901f-9a2421a9e050` | `transport` / VOLTRA_TRANSPORT | Read + Write + Notify | yes (when notify property present) | Bootstrap writes + parameter reads/responses |
+| C4 | `19de84ed-0a69-482c-a8a6-c75cb5bb4389` | `justWrite` / VOLTRA_JUST_WRITE | Write Without Response | no (write-only) | No subscribe possible |
+
+iOS subscription path: `VoltraBLEManager.swift` lines 423–455.
+Android equivalent: `AndroidVoltraClient.kt` `VOLTRA_OFFICIAL_NOTIFY_ROLES`
+(set of `{ VOLTRA_COMMAND, VOLTRA_NOTIFY, VOLTRA_TRANSPORT }`).
+HA equivalent: `const.py` `NOTIFY_CHARACTERISTIC_UUIDS`
+(same three UUIDs).
+
+### Candidate unobserved notify / indicate channels
+
+**Zero candidates** identified by this paper audit. None of the three
+independent reference implementations document a 5th characteristic
+on the VOLTRA service. The only unsubscribed VOLTRA-service
+characteristic (C4 `justWrite`) is `WRITE_NO_RESPONSE` only and is
+not a notify/indicate target.
+
+The Android registry's `knownPm5Uuids` set (26 UUIDs prefixed
+`CE060…`) is for **Concept2 PM5 rower** cross-classification —
+unrelated to the VOLTRA service.
+
+**Limit of this method.** The iOS app uses
+`peripheral.discoverServices([VoltraUUID.service])` filtered to one
+service UUID and `peripheral.discoverCharacteristics([4-UUID list],
+…)` filtered to the four known UUIDs (`VoltraBLEManager.swift`
+lines 418, 424). All three reference clients have the same blind
+spot. **This audit cannot rule out additional services or
+characteristics that all three clients filter past.** Resolving that
+requires `discoverServices(nil)` + `discoverCharacteristics(nil, …)`
+in a hardware scratch session, or an iOS-side scanner export.
+
+### Implications for Telemetry v2 decoder
+
+  1. The additive decoder (per ADR V4-D26) must work from C1 / C2 /
+     C3 — the same three notify channels the existing pipeline
+     already consumes. There is no fourth channel to subscribe to
+     under current evidence.
+  2. **OQ-T2 has a non-hardware path.** The Android bootstrap packet
+     10 (`read mode feature state` —
+     `VoltraOfficialReadOnlyBootstrap.kt` lines 55–81) issues a
+     single `CMD_PARAM_READ` for 19 params including
+     `PARAM_BP_BASE_WEIGHT`, `PARAM_BP_CHAINS_WEIGHT`,
+     `PARAM_BP_ECCENTRIC_WEIGHT`, `PARAM_FITNESS_INVERSE_CHAIN`,
+     `PARAM_BP_SET_FITNESS_MODE`, `PARAM_FITNESS_WORKOUT_STATE`.
+     Authoritative ecc / conc / chains values are available via
+     parameter responses on C3 transport — they do not have to be
+     inferred from stream-frame byte offsets. iOS currently has
+     **9** bootstrap writes (`VoltraProtocol.swift` lines 24-40);
+     the Android reference has 10. The 10th is this read.
+  3. **OQ-T1 and OQ-T3 remain hypothesis.** Neither the Android
+     `VoltraUuidRegistry` nor the HA constants name the `0x03`
+     status byte or the `2b010100` phase flag. The Android
+     `VoltraNotificationParser.kt` (2005 lines) is the most-likely
+     public source for byte-level semantics and was **not
+     exhaustively read** in this audit pass — flag it for the
+     v2-decoder design step.
+
+### What remains unknown
+
+These cannot be answered from public reference code and require
+on-device evidence:
+
+  1. Additional services beyond `e4dada34-…c7e4` (DIS, Battery,
+     vendor-specific). All three reference clients filter to the
+     VOLTRA service only.
+  2. Additional characteristics on the VOLTRA service beyond C1–C4.
+     iOS filters to the 4 known UUIDs.
+  3. Live `CBCharacteristicProperties` bitmask per char on a paired
+     VOLTRA — closeable via a non-sacred debug log in
+     `VoltraBLEManager.swift`; not done in this commit.
+  4. Whether C1 / C2 / C3 advertise INDICATE specifically (vs
+     NOTIFY).
+  5. OQ-T1 `0x03` semantic, OQ-T3 `2b010100` semantic, OQ-T5 force
+     scale / zero-point.
+  6. Whether subscribed-but-quiet characteristics ever emit error
+     indications in conditions the three reference clients have not
+     triggered.
+
+The full unknowns list with proposed resolution paths is in
+`docs/handoff/artifacts/ble_characteristic_audit_2026-05-03.md`.

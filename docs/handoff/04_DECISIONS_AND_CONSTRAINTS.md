@@ -1945,3 +1945,95 @@ OQ-T5 and the BLE audit (KI-26) closes.
 
 No Swift, no `Info.plist`, no `project.yml`, no entitlements, no
 release-workflow, no version bump.
+
+## V4-D27 — Telemetry v2 proceeds on existing 3 notify channels + additive `CMD_PARAM_READ` for mode/weight state (post-b78 BLE audit)
+
+**Date:** 2026-05-03 (post-b78 paper audit).
+**Status:** SPEC. Follow-up to V4-D26.
+**Cycle:** Authoritative Device State + Telemetry Collector v2.
+
+**Context.** The 2026-05-03 BLE characteristic audit
+(`docs/handoff/05_BLE_AND_PROTOCOL.md`, "BLE characteristic audit
+results" section; full per-row sources in
+`docs/handoff/artifacts/ble_characteristic_audit_2026-05-03.md`)
+cross-referenced this repo against two independent public reference
+implementations (`dylanmaniatakes/Beyond-Power-Voltra-Android`,
+`dylanmaniatakes/Beyond-Power-HomeAssistant`). All three clients
+enumerate the **same 4 characteristic UUIDs** on the VOLTRA service
+and subscribe to **the same 3 of the 4** (C1 cmdChar, C2 notifyChar,
+C3 transport). No reference implementation documents an unsubscribed
+notify/indicate channel on the VOLTRA service. Caveat: the audit was
+**paper-only**; no live nRF Connect / LightBlue scan was run, and an
+on-device scan could still find characteristics that all three
+reference clients filter past.
+
+**Decision.** Telemetry v2 will proceed on the existing three notify
+channels (C1 / C2 / C3). No new characteristic subscriptions are
+warranted by current evidence. To close OQ-T2 (ecc / conc / chains
+drift) without inferring stream-frame byte offsets, the v2
+collector will issue a **`CMD_PARAM_READ` request for the 19-param
+mode / weight state set** (matching the Android reference's 10th
+bootstrap packet,
+`Beyond-Power-Voltra-Android` `core/protocol/.../VoltraOfficialReadOnlyBootstrap.kt`
+lines 55–81: `PARAM_BP_BASE_WEIGHT`,
+`PARAM_RESISTANCE_BAND_MAX_FORCE`, `PARAM_RESISTANCE_BAND_ALGORITHM`,
+`PARAM_RESISTANCE_BAND_LEN`, `PARAM_RESISTANCE_BAND_LEN_BY_ROM`,
+`PARAM_EP_RESISTANCE_BAND_INVERSE`, `PARAM_FITNESS_ASSIST_MODE`,
+`PARAM_BP_CHAINS_WEIGHT`, `PARAM_BP_ECCENTRIC_WEIGHT`,
+`PARAM_FITNESS_INVERSE_CHAIN`, `PARAM_WEIGHT_TRAINING_EXTRA_MODE`,
+`PARAM_BP_SET_FITNESS_MODE`, `PARAM_FITNESS_WORKOUT_STATE`,
+`PARAM_ISOMETRIC_MAX_FORCE`, `PARAM_ISOMETRIC_MAX_DURATION`,
+`PARAM_BP_RUNTIME_POSITION_CM`, `PARAM_MC_DEFAULT_OFFLEN_CM`,
+`PARAM_QUICK_CABLE_ADJUSTMENT`) on the C3 transport characteristic.
+The response, decoded by the additive v2 collector, becomes the
+authoritative source for ecc / conc / chains / mode / base-weight
+state.
+
+**Constraints (hard).**
+
+  1. **No edit to sacred files.** The existing iOS bootstrap
+     constant `BOOTSTRAP_WRITES` in `VoltraProtocol.swift` is sacred
+     and stays at 9 entries. The `CMD_PARAM_READ` for the 19-param
+     set is issued by the **v2 collector module**, not by appending
+     to the sacred bootstrap array. Whether it fires at connect (in
+     the v2 module's own connect handler) or lazily on first
+     consumer subscription is an implementation detail for the v2
+     collector PR.
+  2. **Additive only** (per ADR V4-D26). The v2 collector subscribes
+     to the same 3 notify channels alongside the existing pipeline.
+     It does not unsubscribe, replace, or shadow the existing
+     pipeline. If both the existing pipeline (inferring from stream
+     frames) and the new collector (reading from `CMD_PARAM_READ`
+     responses) emit ecc / conc / chains, conflict resolution per
+     `03_CURRENT_FEATURE_SPEC.md` applies — neither side is
+     silenced.
+  3. **Hypothesis bytes still hypothesis.** OQ-T1 (`0x03` status
+     byte) and OQ-T3 (`2b010100` phase flag) were **not** resolved
+     by this audit. The Android `VoltraNotificationParser.kt` (2005
+     lines) is the most likely public source for byte-level
+     semantics and was not exhaustively read here — flag for the
+     shared-decoder design step.
+  4. **OQ-T4 stays open** until an on-device scan rules out
+     additional services / characteristics outside the
+     reference-client filter. No sacred-file edit is gated on this;
+     it just means the v2 collector ships with the
+     "no 5th channel" assumption documented and a follow-up scan
+     scheduled.
+
+**Verification path.** Path C (docs-only) for this ADR.
+Implementation PRs land Path A (UNVERIFIED → VERIFIED) per
+`09_RELEASE_AND_SIGNING.md` once the v2 collector module is
+designed, the `CMD_PARAM_READ` request shape is validated against a
+test fixture or a hardware capture, and the QA passes A–G are run.
+
+**Files touched in this ADR commit.** Docs only:
+
+  - `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` (this entry)
+  - `docs/handoff/05_BLE_AND_PROTOCOL.md` (audit results section)
+  - `docs/handoff/10_OPEN_QUESTIONS.md` (OQ-T2, OQ-T4 status updates)
+  - `docs/handoff/artifacts/ble_characteristic_audit_2026-05-03.md`
+    (full audit with per-row sources)
+  - `docs/WORK_LOG.md`
+
+No Swift, no `Info.plist`, no `project.yml`, no entitlements, no
+release-workflow edit, no version bump.

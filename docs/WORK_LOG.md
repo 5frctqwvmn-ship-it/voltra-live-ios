@@ -5271,3 +5271,134 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   decoder abstraction per ADR V4-D26 and the 10-step implementation
   order in `03_CURRENT_FEATURE_SPEC.md`. No Swift until the user
   explicitly gives the go.
+
+---
+
+## 2026-05-03 18:46 UTC — BLE characteristic audit (paper) for Telemetry v2
+
+- **Goal:** Step 1 of the Telemetry v2 cycle per
+  `09_NEXT_AGENT_PROMPT.md` — produce a documented map of every
+  service / characteristic on the VOLTRA peripheral, identify any
+  notify/indicate-capable channel the iOS app is not subscribed to,
+  and resolve / partially-resolve OQ-T4 in the same commit.
+- **Method:** **Paper audit only** (release-only mode + no hardware
+  in this environment). Cross-referenced this repo's
+  `VoltraProtocol.swift` (HEAD `6a3162b`) against two independent
+  public reference implementations by the same reverse-engineering
+  author:
+  - `dylanmaniatakes/Beyond-Power-Voltra-Android`
+    (`core/protocol/.../VoltraUuidRegistry.kt`,
+    `core/protocol/.../VoltraOfficialReadOnlyBootstrap.kt`,
+    `device/ble/.../AndroidVoltraClient.kt` — `main` branch as of
+    2026-05-03)
+  - `dylanmaniatakes/Beyond-Power-HomeAssistant`
+    (`custom_components/voltra/const.py`,
+    `custom_components/voltra/protocol.py` — `main` branch as of
+    2026-05-03)
+  No live nRF Connect / LightBlue scan was run. Method caveat is
+  documented prominently in every artifact.
+- **Files changed (docs only):**
+  - `docs/handoff/artifacts/ble_characteristic_audit_2026-05-03.md`
+    — new file. Full audit: source table, per-row characteristic
+    table (C1–C4 with role / properties / iOS-subscribe / sources),
+    cross-implementation subscription matrix, candidate-channels
+    section, implications for Telemetry v2, bootstrap-writes
+    discrepancy, exhaustive "what remains unknown" list, recommended
+    next actions.
+  - `docs/handoff/05_BLE_AND_PROTOCOL.md` — appended **"BLE
+    characteristic audit results — 2026-05-03"** section with
+    method caveat, char table, candidate channels (zero), Telemetry
+    v2 implications, what-remains-unknown summary. Section sits
+    immediately after the pre-existing audit-plan section from the
+    prior commit.
+  - `docs/handoff/10_OPEN_QUESTIONS.md` — updated OQ-T2 (status
+    advanced to "non-hardware resolution path identified" with
+    pointer to Android bootstrap packet 10's `CMD_PARAM_READ`) and
+    OQ-T4 (status advanced to "partially resolved" with the
+    no-fifth-channel finding from the paper audit, and a clear
+    enumeration of what only an on-device scan can close).
+  - `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` — appended ADR
+    **V4-D27** as a follow-up to V4-D26: Telemetry v2 proceeds on
+    the existing 3 notify channels (C1 cmdChar, C2 notifyChar,
+    C3 transport) plus an additive `CMD_PARAM_READ` for the 19-param
+    mode/weight state set on C3 transport, sourced via the v2
+    collector module (not by editing the sacred 9-entry
+    `BOOTSTRAP_WRITES` constant). OQ-T1 and OQ-T3 explicitly remain
+    hypothesis; OQ-T4 explicitly remains open pending on-device
+    scan.
+  - `docs/WORK_LOG.md` — this entry.
+- **What changed substantively:**
+  1. **OQ-T4 partially resolved.** All three independent reference
+     implementations (iOS, Android, HA) enumerate exactly the same
+     4 characteristic UUIDs on the VOLTRA service
+     (`e4dada34-…c7e4`) and subscribe to the same 3 of 4
+     (cmd / notify / transport). C4 `justWrite` is
+     `WRITE_NO_RESPONSE` only in all three sources. **No reference
+     implementation documents an unsubscribed notify or indicate
+     channel on the VOLTRA service.**
+  2. **OQ-T2 has a non-hardware path.** Android bootstrap packet 10
+     (`read mode feature state`,
+     `VoltraOfficialReadOnlyBootstrap.kt` lines 55–81) issues a
+     single `CMD_PARAM_READ` for 19 mode/weight params including
+     `PARAM_BP_BASE_WEIGHT`, `PARAM_BP_CHAINS_WEIGHT`,
+     `PARAM_BP_ECCENTRIC_WEIGHT`, `PARAM_FITNESS_INVERSE_CHAIN`.
+     Authoritative ecc / conc / chains values are available via
+     parameter response on C3 transport.
+  3. **Bootstrap-writes discrepancy logged.** iOS has 9 bootstrap
+     writes (`VoltraProtocol.swift` lines 24–40); Android has 10.
+     The 10th is the `CMD_PARAM_READ` above. **Not a bug in iOS** —
+     iOS's 9-entry array is sacred and stays untouched. The v2
+     collector will issue the read from its own module, not by
+     editing the sacred constant.
+  4. **No new ADR was added speculatively.** ADR V4-D27 was added
+     because the audit yielded a real, repo-grounded design
+     decision (proceed on existing channels + additive
+     `CMD_PARAM_READ`), exactly the case the prompt authorized.
+- **Verification:**
+  - `git status --short` and `git diff --stat` reviewed; only
+    `docs/` paths in diff.
+  - `git diff --name-only | grep '\.swift$'` returned empty → no
+    Swift files changed.
+  - Sacred files untouched: `VoltraProtocol.swift`,
+    `TelemetryExtractor.swift`, `PacketParser.swift`,
+    `FrameAssembler.swift`, `.github/workflows/build.yml`.
+  - `_tmp/archive/` untouched.
+  - No `Info.plist`, `project.yml`, entitlements, or version-bump
+    edits.
+- **Risks:**
+  - **Paper audit, not on-device.** Every entry in the char table
+    is sourced from public reference implementations that all share
+    the same blind spot — none use unfiltered service /
+    characteristic discovery on iOS. If the VOLTRA peripheral
+    advertises additional services (DIS `0x180A`, Battery `0x180F`,
+    or vendor-specific) or additional characteristics on the VOLTRA
+    service beyond the 4 known UUIDs, **this audit cannot see them**
+    and neither can the iOS app's logs (the iOS app uses
+    `discoverServices([VoltraUUID.service])` and
+    `discoverCharacteristics([4-UUID list], …)` —
+    `VoltraBLEManager.swift` lines 418, 424). OQ-T4 is therefore
+    only **partially** resolved.
+  - **OQ-T1 and OQ-T3 remain hypothesis.** The Android
+    `VoltraNotificationParser.kt` is 2005 lines and may or may not
+    contain a meaning for the `0x03` status byte and `2b010100`
+    phase flag — **not exhaustively read in this pass.** Flag for
+    the shared-decoder design step.
+  - **`CMD_PARAM_READ` request shape unverified on iOS.** The Android
+    reference uses a frame builder we have not yet ported. Building
+    the iOS request will need a fixture (or a hardware capture) to
+    confirm the on-the-wire byte sequence before the v2 collector
+    issues the read.
+- **Next step:** Step 2 of the Telemetry v2 cycle — design the
+  shared additive decoder abstraction per ADR V4-D26 / V4-D27 and
+  the 10-step implementation order in `03_CURRENT_FEATURE_SPEC.md`.
+  Recommended pre-work, all docs-only and before any Swift: read
+  `Beyond-Power-Voltra-Android`'s `VoltraNotificationParser.kt`
+  end-to-end and write up byte-level semantics it documents
+  (especially anything touching `553404ac` status frames or
+  `553a0470` stream frames) into a follow-up artifact under
+  `docs/handoff/artifacts/`. That may close OQ-T1 / OQ-T3 without
+  hardware. Optional parallel track: when the user has a moment,
+  run an iOS-side nRF Connect / LightBlue scan against a paired
+  VOLTRA and drop the export at
+  `docs/handoff/artifacts/ble_scan_<date>.{json,txt}` — that closes
+  the remaining unknowns in OQ-T4.
