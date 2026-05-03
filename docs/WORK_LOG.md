@@ -5146,3 +5146,128 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   review. After user merges + pushes tag `v0.4.51-build78`, run
   5-gate altool verify on the tag-triggered `release.yml` run.
   Then on-device QA passes A–G to `QA_LOG.md`.
+
+---
+
+## 2026-05-03 15:44 UTC — Docs-only alignment for Telemetry v2
+
+- **Goal:** Align stale handoff docs with the actual shipped state
+  (v0.4.51 / build 78, Delivery UUID
+  `3433cd79-fb4a-48db-9c70-b3e0289740e1`, run 25268455532) and
+  prepare the repo for the **Authoritative Device State + Telemetry
+  Collector v2** cycle. Docs-first, no Swift. Premise from prior
+  prompt that `02_CURRENT_STATE.md` was stale at b56 was inaccurate
+  (file was already at "b78 SHIPPING") but still needed
+  SHIPPING → SHIPPED advancement plus Telemetry v2 active-cycle
+  setup.
+- **Files changed (docs only):**
+  - `docs/handoff/02_CURRENT_STATE.md` — Last-updated banner;
+    Latest-shipped advanced from SHIPPING → SHIPPED with run
+    25268455532, merge SHA 32f9300, Delivery UUID
+    `3433cd79-fb4a-48db-9c70-b3e0289740e1`; new "Verification
+    status (post-b78)" subsection noting demo-mode and hardware-mode
+    recorder verification claims live in chat only and need QA_LOG
+    entries; Active cycle replaced with "Authoritative Device
+    State + Telemetry Collector v2 — docs-first, no Swift yet";
+    "Last cycle (b73)" header retitled to "Last cycle (b78)" with
+    b73 demoted.
+  - `docs/handoff/03_CURRENT_FEATURE_SPEC.md` — prepended full
+    Telemetry v2 spec (Goal, Scope, Principles, Problems,
+    Architecture, DeviceState/LoadState/DeviceUpdateSource models,
+    Event model, Decoder reqs with hypothesis flags on `0x03` and
+    `2b010100`, Source-of-truth, Conflict resolution, Load/unload
+    behavior, Weight/mode sync, Recorder improvements, Constants
+    (750 ms write timeout, 500 ms / 2000 ms stream gap, 5000-event
+    ring buffer), Export reqs (schemaVersion 1 → 2 additive), UX,
+    BLE audit requirement, Migration, Open hypotheses, Acceptance
+    criteria, 10-step implementation order, Non-goals, Decision
+    summary). V4 b58 LiveCapture spec preserved below new section
+    under "# Historical: V4 LiveCapture spec (b58)" demarcator.
+  - `docs/handoff/06_KNOWN_ISSUES.md` — appended KI-14 (handoff
+    staleness, closed in this commit) through KI-26 (BLE audit
+    needed). Specifically: KI-15 dup write.tx; KI-16 demo-mode
+    `ble.error` ordering; KI-17 1000-event cap; KI-18 no semantic
+    events; KI-19 no DeviceState mirror; KI-20 weight changes
+    don't update; KI-21 ecc/conc/chains drift; KI-22 load drop not
+    surfaced; KI-23 `0x03` hypothesis; KI-24 `553a0470` byte
+    unknown; KI-25 controls missing `ui.tap`; KI-26 BLE audit.
+    File grew to 736 lines.
+  - `docs/handoff/10_OPEN_QUESTIONS.md` — added 8 new Telemetry v2
+    open questions OQ-T1 … OQ-T8: meaning of `0x03` status byte;
+    byte positions for ecc / conc / chains; meaning of `2b000100`
+    vs `2b010100`; existence of an unsubscribed notify/indicate
+    status characteristic; force / tension decodability; ring-buffer
+    compression strategy preserving rep / force debug; whether
+    `load.state.change` should be its own event or a field of
+    `device.state.change`; exact UI copy for unloaded / fault /
+    unknown states.
+  - `docs/handoff/09_NEXT_AGENT_PROMPT.md` — full rewrite. Killed
+    stale b66 / b67 / b68 sections at the top. New version:
+    instructs next agent to read AGENTS.md + handoff 00–10 +
+    WORK_LOG + optional skim docs (QA_LOG, B74_BUG_QUEUE,
+    B52_DIAGNOSIS, 11_AGENT_ROLES, 09_RELEASE_AND_SIGNING,
+    03_ROADMAP, 06_HEALTHKIT, 07_DUAL_VOLTRA, 08_SUPERSET);
+    summarize repo state before code; docs-first, no Swift until
+    user says go; Step 1 = BLE characteristic audit, Step 2 =
+    shared decoder abstraction; sacred files listed; decoder must
+    be additive alongside existing `VoltraLive/Protocol/` pipeline;
+    wait for user go.
+  - `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` — appended ADR
+    **V4-D26 — Telemetry v2 decoder is additive, sacred files
+    unchanged**. Locks: additive module only; sacred files not
+    modified; hypothesis bytes round-trip raw and emit hypothesis
+    flag; schemaVersion 1 → 2 additive. Path C (docs-only)
+    verification for the ADR itself; implementation PRs land Path A
+    once on-device fixtures pin OQ-T1, OQ-T3, OQ-T5 and the BLE
+    audit closes.
+  - `docs/handoff/05_BLE_AND_PROTOCOL.md` — appended "BLE
+    characteristic audit (post-b78)" plan: discover all advertised
+    services / characteristics, diff against current subscriptions,
+    probe unsubscribed notify/indicate candidates with a build-time
+    debug toggle (no edits to sacred files), cross-reference
+    against `553404ac` / `553a0470` byte stream, write up audit
+    table here. Definition-of-done closes OQ-T4 and any of OQ-T1 /
+    OQ-T3 / OQ-T5 the audit deterministically resolves.
+  - `docs/handoff/04_ARCHITECTURE.md` — appended "Telemetry v2
+    decoder (additive, post-b78)" note pointing at the spec and
+    ADR V4-D26, restating the additive constraint and that sacred
+    files are unchanged.
+  - `docs/WORK_LOG.md` — this entry.
+- **What changed:** the repo now reflects the actual shipped state
+  (b78 SHIPPED with full ship metadata) and is set up for
+  Telemetry v2 in the order the next agent will execute: BLE audit
+  first, additive shared decoder second. All hypothesis bytes are
+  written down explicitly with their evidence level and the OQ-T
+  entry that gates promotion to a constant.
+- **Verification:** docs-only commit; `git status --short` shows
+  only `docs/` paths; `git diff --cached --name-only | grep -E
+  '\.swift$'` returns empty; `git diff` reviewed by file. No
+  `Info.plist`, `project.yml`, entitlements, or workflow changes.
+  `_tmp/archive/` not touched. Sacred files
+  (`VoltraLive/Protocol/VoltraProtocol.swift`,
+  `TelemetryExtractor.swift`, `PacketParser.swift`,
+  `FrameAssembler.swift`, `.github/workflows/build.yml`)
+  not touched.
+- **Risks:**
+  - Build / version truth in `02_CURRENT_STATE.md` ultimately
+    depends on the WORK_LOG ship narrative + TestFlight surface.
+    If the b78 entry is later corrected (e.g. delivery UUID
+    mismatch on Apple's side), this commit will need a follow-up
+    correction.
+  - All Telemetry v2 byte mappings remain hypotheses. `0x03` in
+    `553404ac` and `2b010100` in `553a0470` are documented as
+    single-observation guesses; the additive decoder must not
+    promote either to a constant before the corresponding OQ-T
+    entry is closed with hardware evidence.
+  - Hardware verification claims (1000-event live session,
+    base-weight changes, probable load cutout) and demo-mode
+    verification (33-event session, valid `.txt` / `.json`
+    exports) are now written into `02_CURRENT_STATE.md`
+    "Verification status (post-b78)" but **explicitly NOT signed
+    off as QA passes A–G** — those still require per-pass
+    `QA_LOG.md` entries.
+- **Next step:** BLE characteristic audit per the plan in
+  `05_BLE_AND_PROTOCOL.md`, then design the shared additive
+  decoder abstraction per ADR V4-D26 and the 10-step implementation
+  order in `03_CURRENT_FEATURE_SPEC.md`. No Swift until the user
+  explicitly gives the go.

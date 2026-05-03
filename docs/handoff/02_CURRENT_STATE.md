@@ -1,6 +1,6 @@
 # 02 — Current State
 
-_Last updated: 2026-05-03 (b78 SHIPPING — B74-F11 launch-crash fix. Re-injects SessionRecorder env-object on root overlay content. Tag `v0.4.51-build78` to be pushed after PR merges.)_
+_Last updated: 2026-05-03 (b78 SHIPPED to TestFlight; docs-only alignment commit on top — current focus is **Authoritative Device State + Telemetry Collector v2** spec prep, no Swift changes in this commit.)_
 
 > **Maintenance rule:** this file is overwritten on every ship. The
 > append-only history lives in `docs/WORK_LOG.md`. If you're updating
@@ -13,10 +13,19 @@ _Last updated: 2026-05-03 (b78 SHIPPING — B74-F11 launch-crash fix. Re-injects
 ## Latest shipped build
 
 **v0.4.51 / build 78** — label "Session Recorder (launch fix)" —
-tag `v0.4.51-build78` to be pushed at the b78 ship commit on
-`feat/ui-v4-2-claude`. Ships the B74-F11 launch-crash fix: b77
-shipped a SwiftUI `EnvironmentObject.error()` crash on launch
-because `SessionRecorderToggle`, mounted at the app root via
+shipped 2026-05-03 03:17 UTC. Tag `v0.4.51-build78` at merge
+commit `32f9300` on `feat/ui-v4-2-claude`. Tag-triggered
+[`release.yml` run 25268455532](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25268455532)
+green in 7m40s. 5-gate altool verify per `09_RELEASE_AND_SIGNING.md`:
+ALL PASS. altool wall-clock 28s, success markers
+`UPLOAD SUCCEEDED with no errors` and
+`No errors uploading archive at 'build/export/VoltraLive.ipa'`.
+**Delivery UUID `3433cd79-fb4a-48db-9c70-b3e0289740e1`**.
+Awaiting Apple processing.
+
+Ships the B74-F11 launch-crash fix: b77 shipped a SwiftUI
+`EnvironmentObject.error()` crash on launch because
+`SessionRecorderToggle`, mounted at the app root via
 `.overlay { ... }`, could not resolve its
 `@EnvironmentObject SessionRecorder` even though
 `.environmentObject(recorder)` was applied to the modifier chain
@@ -24,16 +33,39 @@ above. Root cause: `.overlay { content }` creates a composite where
 `content` is a SIBLING of the modified view — env-objects on the
 modifier chain do NOT propagate to the overlay's content. Fix:
 re-inject `recorder` directly on `SessionRecorderToggle()` inside
-the overlay closure in `VoltraLiveApp.swift`. New
-`VoltraLiveTests/RecorderLaunchSmokeTests.swift` pins the fix by
-mounting the same root-overlay shape via `UIHostingController` and
-forcing layout — removing the fix crashes the test process.
-Pre-ship verification: `build.yml` run 25267980973 green in 1m18s;
-`release.yml dry_run=true` run 25267981601 green in 4m52s including
-`xcodebuild test` exercising the new smoke tests. KI-13 entry
-opened in `06_KNOWN_ISSUES.md`. Pre-b78 shipped state: **v0.4.50 /
-build 77** ("Session Recorder", B74-F11) — pulled from TestFlight
-due to launch crash.
+the overlay closure in `VoltraLiveApp.swift` (~lines 346-348). New
+`VoltraLiveTests/RecorderLaunchSmokeTests.swift` (3 tests) pins the
+fix by mounting the same root-overlay shape via `UIHostingController`
+and forcing layout — removing the fix crashes the test process.
+Pre-tag verification: `build.yml` run 25267980973 green in 1m18s;
+`release.yml dry_run=true` runs 25267981601 (4m52s) and 25268181409
+(4m28s post-bump) green; `xcodebuild test` exercised the new smoke
+tests and they passed. See KI-13 (b78) entry in
+`06_KNOWN_ISSUES.md`. Pre-b78 shipped state: **v0.4.50 / build 77**
+("Session Recorder", B74-F11) — pulled from TestFlight due to
+launch crash.
+
+### Verification status (post-b78)
+
+- **5-gate altool verify (CI-side):** PASS — confirmed in chat
+  immediately after the tag-triggered run completed.
+- **Recorder QA passes A–G** per `SESSION_RECORDER_SPEC.md`
+  "Verification Contract" (Ubiquity, Lifecycle, Semantic log,
+  Correlation, Loud guards, Share, HealthKit truthfulness):
+  awaiting per-pass entries in `docs/handoff/QA_LOG.md`.
+- **Demo-mode recorder verification (claimed in chat, not yet
+  formalized to QA_LOG):** recorder produced valid `.txt` and
+  `.json` exports on a 33-event session covering lifecycle,
+  navigation, UI-tap, and BLE event categories.
+- **Hardware-mode recorder verification (claimed in chat, not
+  yet formalized to QA_LOG):** recorder captured a 1000-event
+  live VOLTRA session including a real BLE
+  `write.tx → write.ack → notify.rx` chain, base-weight changes
+  observed live, the live-stream events, and a probable
+  load-cutout transition. These observations are inputs to the
+  next feature (see Active cycle below); they are NOT a
+  signed-off pass against the Verification Contract until they
+  are written to `QA_LOG.md` per-pass.
 
 ### Pre-b78 (b77) — pulled, do not install
 
@@ -68,24 +100,59 @@ build 76** ("Health signal indicator", B74-F8).
 
 ## Active cycle
 
-b78 launch-crash hotfix in progress on `feat/ui-v4-2-claude`. The
-b78 ship adds two changes to `feat/ui-v4-2-claude`: (1) the
-launch-crash fix on `VoltraLiveApp.swift` (re-inject `recorder` on
-the root overlay content) plus a new
-`VoltraLiveTests/RecorderLaunchSmokeTests.swift` regression test;
-and (2) the standard version bump + same-commit doc updates
-(`00_START_HERE.md`, `01_PROJECT_OVERVIEW.md`, this file,
-`03_ROADMAP.md`, `09_NEXT_AGENT_PROMPT.md`,
-`06_KNOWN_ISSUES.md` KI-13 entry, `docs/WORK_LOG.md`). Pre-ship
-verification on the fix branch:
-[`build.yml` run 25267980973](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25267980973)
-green in 1m18s;
-[`release.yml dry_run=true` run 25267981601](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25267981601)
-green in 4m52s — `xcodebuild test` exercised the three new launch
-smoke tests and passed. Awaiting tag-triggered CI workflow
-conclusion + altool 5-gate verify on `v0.4.51-build78`.
+**Authoritative Device State + Telemetry Collector v2** —
+docs-first, no Swift yet. Branch: `feat/ui-v4-2-claude`.
 
-## Last cycle (b73, just shipped) — debug grid SCROLL-ANCHOR fix
+This cycle fixes two linked problems surfaced by the b78
+recorder shipping to a real hardware session:
+
+1. **Runtime state correctness.** The app does not reliably
+   know the machine's true live state. Machine-side base-weight
+   changes do not reliably update the app; eccentric /
+   concentric / chains can drift between hardware and the app's
+   in-memory model; load drop / unload / cutout mid-set is not
+   surfaced to app state.
+2. **Observability.** The Session Recorder shipped in b78
+   captures raw telemetry but does not yet produce semantic
+   decoded state changes, incident detection, compression of
+   high-frequency stream frames, complete cause→effect chains,
+   or session summaries that make incidents obvious on first
+   read.
+
+Full spec: `03_CURRENT_FEATURE_SPEC.md` ("Authoritative Device
+State + Telemetry Collector v2") — includes goal, architecture,
+core models, decoder requirements, conflict resolution,
+load/unload behavior, telemetry recorder improvements, BLE
+characteristic audit requirement, acceptance criteria, and
+recommended implementation order. Architectural constraint
+recorded in `04_DECISIONS_AND_CONSTRAINTS.md` ADR **V4-D26**:
+the new decoder is **additive** and sits alongside the existing
+Protocol/ pipeline; sacred protocol files
+(`VoltraProtocol.swift`, `TelemetryExtractor.swift`,
+`PacketParser.swift`, `FrameAssembler.swift`) are not modified.
+
+Step 1 of implementation: BLE characteristic audit. Step 2:
+shared frame-decoder abstraction. No Swift code is written
+until the user explicitly says go. **No code changes in this
+docs commit.**
+
+## Last cycle (b78, just shipped) — Session Recorder launch-crash fix
+
+**b78 / v0.4.51 / build 78** — single-line SwiftUI fix in
+`VoltraLiveApp.swift` re-injecting the `SessionRecorder`
+environment object directly on `SessionRecorderToggle()` inside
+the root `.overlay` closure, plus a new
+`VoltraLiveTests/RecorderLaunchSmokeTests.swift` regression test
+(3 tests) that mounts the same root-overlay shape via
+`UIHostingController` and forces layout. Tag
+`v0.4.51-build78` at merge SHA `32f9300`.
+Run [25268455532](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25268455532)
+green in 7m40s. Delivery UUID
+`3433cd79-fb4a-48db-9c70-b3e0289740e1`. Closes the b77
+launch-crash hotfix loop opened by KI-13 (b78) in
+`06_KNOWN_ISSUES.md`.
+
+## Cycle before that (b73) — debug grid SCROLL-ANCHOR fix
 
 **b73 / v0.4.46 / build 73** — debug grid SCROLL-ANCHOR fix.
 Single-feature ship per the one-feature-per-build convention. The

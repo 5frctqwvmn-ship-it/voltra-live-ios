@@ -73,6 +73,107 @@ entitlement keys but the app-side entitlements only declared
 app-side by declaring all three keys; CI verify hardened to assert
 them with exact-key match. See `06_HEALTHKIT.md` for the full writeup.
 
+## Telemetry v2 / Authoritative Device State (post-b78)
+
+These 8 questions block the Telemetry Collector v2 + Authoritative
+Device State cycle. Answers must come from a BLE characteristic audit
+plus controlled hardware experiments before the decoder can promote
+any hypothesis to a constant. See `03_CURRENT_FEATURE_SPEC.md`
+("Telemetry v2") and `06_KNOWN_ISSUES.md` (KI-23, KI-24, KI-26).
+
+### OQ-T1 — Meaning of `0x03` byte in `553404ac` status frames
+
+Status: **needs hardware experiment + spec confirmation.**
+
+Observed once during a 1000-event live session: a `553404ac` status
+frame transitioned `0x02 → 0x03` around what appeared to be a load
+cutout. Hypothesis: `0x03` = "load dropped / cutout". This is a single
+observation; do not treat as canonical until reproduced under
+controlled load-drop conditions and cross-checked against any vendor
+docs the user can surface. Tracked as KI-23.
+
+### OQ-T2 — Byte positions for ecc, conc, chains in stream frames
+
+Status: **unknown — needs frame-fixture-pinning experiment.**
+
+The existing pipeline emits ecc / conc / chains values that drift
+build-to-build, suggesting the byte offsets we read from are not
+stable or not the true source. Need to record N pinned BLE frames
+with known mode (ECC-only, CON-only, CHAIN on/off) and diff to find
+the authoritative byte positions. Tracked as KI-21.
+
+### OQ-T3 — Meaning of `2b000100` vs `2b010100` in `553a0470` frames
+
+Status: **hypothesis only.**
+
+Working guess: this is a phase / tension flag (e.g.
+ecc-active vs con-active, or load-engaged vs load-released). Need
+paired observation: log frame bytes against simultaneous user-visible
+phase to confirm. Until confirmed, decoder must flag this as
+hypothesis and round-trip the raw bytes. Tracked as KI-24.
+
+### OQ-T4 — Is there a dedicated notify/indicate status characteristic we are not subscribed to?
+
+Status: **needs full BLE characteristic audit.**
+
+Current code subscribes to a small set of characteristics. We do not
+have a documented audit of every advertised service / characteristic
+on the VOLTRA peripheral, nor which carry notify vs indicate vs
+read-only data. A device-state characteristic may exist that would
+make several hypotheses (OQ-T1, OQ-T3, OQ-T5) deterministic instead
+of inferred. **This is Step 1 of the Telemetry v2 cycle.** Tracked
+as KI-26.
+
+### OQ-T5 — Is force / tension decodable from current frames?
+
+Status: **partial — needs systematic mapping.**
+
+Some force-shaped values appear in stream frames but their unit,
+scale, and zero-point are not pinned. Need to perform a known-load
+experiment: hold N pounds of static load, capture frames, fit
+decoder. If the field is not present at any current offset, that
+becomes a hard "requires hardware spec" gate.
+
+### OQ-T6 — Compression strategy that preserves rep / force debug data
+
+Status: **design open.**
+
+The 5000-event ring buffer (per spec) will overflow on long sessions.
+We need a compression / aggregation strategy that drops bulk
+telemetry without losing per-rep force debug data (rep markers,
+peak force, ecc/con phase boundaries). Options to evaluate:
+per-rep summarization with raw-frame retention only on anomaly,
+delta-encoded stream frames, or tiered ring buffer (raw last N reps
++ summarized older reps). Decide before implementation step 6.
+
+### OQ-T7 — Should `load.state.change` be its own event or a field of `device.state.change`?
+
+Status: **schema decision — needs user / spec call.**
+
+Two viable shapes:
+  a. Two event types: `device.state.change` (connected/paired/etc.)
+     and `load.state.change` (loaded/unloaded/fault). Subscribers
+     filter by type.
+  b. One `device.state.change` event with a `load` sub-field. Fewer
+     event types; consumers must read nested fields.
+Leaning (a) for clarity and so the recorder can index by event type,
+but not committed. Affects schemaVersion 2 export shape; pick before
+implementation step 4.
+
+### OQ-T8 — Exact UI copy for unloaded / fault / unknown device states
+
+Status: **needs user / brand-voice call.**
+
+Telemetry v2 surfaces three new states the UI doesn't currently word
+for:
+  - **unloaded** (cable not engaged or load released mid-set)
+  - **fault** (device reports an error condition)
+  - **unknown** (state cannot be determined — e.g. stale notify, BLE
+    drop, or bytes outside known hypothesis range)
+Need exact short strings (≤ 24 chars) for each, plus tone
+(neutral / warning / error). Affects `VoltraUnitHeader` + any
+live-capture status surface. Pick before implementation step 9.
+
 ## Process
 
 ### "Should we auto-update CloudKit re-enablement?"

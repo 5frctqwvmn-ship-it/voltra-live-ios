@@ -1,12 +1,458 @@
 # 03_CURRENT_FEATURE_SPEC
 
-> **Scope.** This doc captures the V4 LiveCaptureView feature spec as
-> it stands at the **b58** ship. It is the authoritative description
-> of what the screen *does* — not how it's wired internally (that's
-> `04_ARCHITECTURE.md`) and not what's planned next (that's
-> `03_ROADMAP.md` — note: the 03_ROADMAP file predates this spec doc;
-> the two are intentionally separate).
+> **Active feature (post-b78).** Authoritative Device State +
+> Telemetry Collector v2. Spec immediately below.
 >
+> **Historical (still in force for the live capture screen itself).**
+> The V4 LiveCaptureView spec at b58 is preserved further down this
+> file under "Historical: V4 LiveCapture spec (b58)" — it is still
+> what the screen *does today*, and Telemetry v2 is additive on top
+> of it.
+
+---
+
+# Authoritative Device State + Telemetry Collector v2
+
+> Active feature spec. Targets the post-b78 cycle on
+> `feat/ui-v4-2-claude`. Docs-first; **no Swift until the user says
+> go.** Sacred protocol files
+> (`VoltraLive/Protocol/VoltraProtocol.swift`,
+> `TelemetryExtractor.swift`, `PacketParser.swift`,
+> `FrameAssembler.swift`) are NOT modified by this feature — see
+> `04_DECISIONS_AND_CONSTRAINTS.md` ADR **V4-D26**.
+
+## Goal
+
+Ship one coherent fix for two connected problems:
+
+1. The app does not reliably know the machine's true live state.
+2. The telemetry collector does not yet make session failures
+   obvious, decodable, and easy to debug.
+
+Feature area: **authoritative device state + session
+observability**.
+
+## Scope
+
+- New `DeviceState` model that mirrors the live VOLTRA machine
+  state (base weight, eccentric, concentric, chains, mode,
+  inverse, load state, connection state, last update timestamp,
+  last source).
+- New shared frame-decoder abstraction that consumes the same
+  raw BLE bytes today's `Protocol/` pipeline already parses, but
+  emits a **semantic event stream** that drives both UI state
+  and Session Recorder output.
+- Recorder upgrade: semantic events, complete cause→effect
+  chains, dedupe, compressed high-frequency stream frames,
+  session summary, incident banner.
+- Pending/confirmed write flow with timeout.
+- Load/unload/cutout detection with stream-gap heuristics.
+- BLE characteristic audit (nRF Connect / LightBlue) before
+  decoder assumptions are finalized.
+
+## Product principles
+
+- **Device is source of truth.** Always.
+- **App writes are requests, not truth.** Until confirmed by
+  decoded device telemetry, an app-issued write is `pending`.
+- A write is only considered `confirmed` when echoed back in a
+  decoded device-state frame.
+- App UI and Session Recorder consume the **same** parsed device
+  events. There is one decoder. UI and recorder are two
+  consumers of the same stream.
+- Raw BLE hex MAY be preserved for debugging, but **semantic
+  events are primary** in exports and in the UI binding path.
+- Session exports must make incidents (load drop, cutout,
+  unconfirmed write, stream gap) obvious on first read.
+
+## Problems being fixed
+
+1. App does not reliably reflect machine-side base-weight
+   changes — user adjusts the dial on the machine and the app
+   shows the stale number.
+2. Eccentric / concentric / chains can drift between hardware
+   and the app's in-memory model.
+3. Load drop / unload / cutout mid-set is not surfaced to app
+   state — the app keeps counting reps as if the cable were
+   still loaded.
+4. The Session Recorder shipped in b78 captures raw telemetry
+   but lacks semantic decoded state changes, incident
+   detection, compression of high-frequency stream frames,
+   complete cause→effect chains, and session summaries.
+5. Duplicate `ble.write.tx` events show up in recorder output.
+6. The 1000-event cap fills too quickly in real live capture.
+7. Demo-mode "not connected" guard logs as `ble.error` and
+   appears before the write event — should become
+   `ble.write.skipped` with clearer ordering.
+8. Weight / ecc / conc / chains UI controls don't emit
+   `ui.tap` / `actionId` instrumentation, breaking the
+   cause→effect correlation chain.
+
+## Architecture
+
+Single BLE decode pipeline:
+
+```
+BLE notify.rx / write.ack / connection signals
+        |
+        v
+  transport parser  (existing FrameAssembler / PacketParser)
+        |
+        v
+  frame decoder    (NEW — additive, alongside existing TelemetryExtractor)
+        |
+        v
+  semantic event stream
+        |
+        +--> DeviceState reducer  --> UI re-render
+        |
+        +--> Session Recorder append/export
+```
+
+The new decoder is **additive**. It sits next to the existing
+Protocol/ pipeline and consumes the same input bytes. The
+existing Protocol/ files are sacred (V4-D26).
+
+## Core models
+
+### DeviceState
+
+Fields:
+
+- `baseWeight` (lb)
+- `eccentricWeight` (lb)
+- `concentricWeight` (lb)
+- `chainsWeight` (lb)
+- `mode` (e.g. standard / chains / inverse / superset slot)
+- `inverse` (bool)
+- `loadState` (`LoadState`, see below)
+- `connectionState` (idle / scanning / connecting / connected /
+  disconnected)
+- `lastUpdatedAt` (timestamp)
+- `lastSource` (`DeviceUpdateSource`, see below)
+
+Each machine-facing field also tracks a per-field status:
+`confirmed`, `pending`, `stale`, `unknown`. "Stale" means the
+field was confirmed at some point but the last device frame
+hasn't refreshed it within a configurable window.
+
+### LoadState
+
+`idle` / `armed` / `loaded` / `unloaded` / `fault` / `unknown`.
+
+### DeviceUpdateSource
+
+`appRequestPending` / `appRequestConfirmed` /
+`deviceUnsolicited` / `deviceStateFrame` / `inferredFromGap` /
+`inferredFromStream`.
+
+## Event model changes
+
+New semantic recorder events:
+
+- `device.state.change` — a field of `DeviceState` changed.
+  Payload includes field name, old value, new value, source,
+  status.
+- `load.state.change` — OPTIONAL. If kept, must mirror
+  `DeviceState.loadState` exactly. See open question on whether
+  this should be a standalone event vs a field of
+  `device.state.change`.
+- `ble.stream.gap` — emitted when stream cadence violates the
+  soft / hard thresholds.
+- `incident.loadDropped` — high-priority incident, drives the
+  in-app banner and the export summary.
+- `write.confirmation.timeout` — a `pending` app write was not
+  echoed back within the timeout window.
+- `write.request.overridden` — device reported a value
+  different from the value the app requested. Emitted when the
+  decoded confirmation does not match the pending request.
+
+## Decoder requirements
+
+- One decoder. It feeds both `DeviceState` and the Session
+  Recorder. UI and recorder must never read different decoder
+  outputs.
+- Raw hex preserved alongside semantic events for debugging.
+- **Base-weight confirmations** appear in notify payloads
+  with tails like `863e5f=95`, `863e14=20`, `863e0f=15`. These
+  are **observed**, not sacred protocol — must be pinned by
+  fixture before the decoder relies on them, and must be
+  re-validated against `BLE characteristic audit` results.
+- **`553404ac` status frames** include a byte that
+  transitioned `0x02 → 0x03` around the load-cutout event
+  observed in chat. Treat `0x03` as a **hypothesis / candidate**
+  only until hardware-confirmed against multiple sessions.
+  Do not promote `0x03` to a named constant in the decoder
+  until validated.
+- **`553a0470` stream frames** include a byte near
+  `2b000100` vs `2b010100` that **may** represent phase /
+  tension state. Hypothesis only. Same validation gate.
+- Eccentric / concentric / chains byte positions are **unknown**
+  pending hardware tests. The decoder must surface
+  "received frame I cannot decode" rather than silently
+  guessing.
+- **Sacred files are NOT modified.** All decoding additions
+  live in new files alongside `Protocol/` (e.g.
+  `VoltraLive/Decode/SemanticDecoder.swift` — exact path TBD
+  during implementation).
+
+## Source-of-truth rules
+
+- Device-confirmed value is canonical for every machine-facing
+  field.
+- App-requested value is canonical only for `appRequestPending`
+  status. Once a confirmation arrives, the device value
+  replaces it.
+- The UI binds to `DeviceState`. The recorder appends
+  semantic events derived from the same updates. The UI does
+  not bind directly to BLE frames; the recorder does not
+  bind directly to UI state.
+
+## Conflict resolution
+
+**Latest device-confirmed value wins.**
+
+If the app requests `baseWeight = 80` but the device reports
+`70`, canonical state becomes `70` and the recorder emits
+`write.request.overridden` with payload `{requested: 80,
+observed: 70}`. The UI updates to `70`.
+
+## Load / unload behavior
+
+- `loaded → unloaded`: pause rep detector, show in-app banner,
+  stop assuming weight is stable, tag the in-progress set
+  `interrupted=true reason=unloaded_mid_set`.
+- `loaded → fault`: pause rep detector, surface fault, emit
+  `set.aborted` event in the recorder.
+- `unloaded → loaded`: do **not** auto-resume rep counting.
+  Offer the user "continue set" or "start new set".
+- `unknown`: grey live metrics (do not show stale numbers as if
+  fresh). If still `unknown` after 2 s, treat as `unloaded`.
+
+## Weight / mode sync requirements
+
+- App must reflect machine-side base-weight changes without
+  manual refresh, within the cadence of the next
+  `device.state.change` after the user moves the dial.
+- App must reflect machine-side eccentric / concentric / chains
+  changes after the decoder has been validated for those byte
+  positions on hardware. Until then, the UI greys those fields
+  and emits `device.state.change(field=..., status=unknown)` so
+  the recorder shows we saw the frame but couldn't decode it.
+- Mode changes (chains on/off, inverse) propagate via the same
+  semantic event path.
+
+## Telemetry recorder improvements
+
+- **De-dupe duplicate `ble.write.tx` events.** Same payload
+  within a small window collapses to one event with a
+  `coalescedCount` field.
+- **Complete correlation chain** for every user action that
+  touches the device:
+  `ui.tap (actionId=X) → write.request → write.tx → write.ack
+  → device.state.change → ui.commit`.
+  All entries share the same `actionId` UUID via the existing
+  `ActionScope` `@TaskLocal`.
+- **Instrument weight / ecc / conc / chains controls** with
+  `ui.tap` and an `actionId` so the chain begins at the user's
+  finger.
+- **Compress repeated identical high-frequency stream frames**
+  in the human-readable `.txt` export. Show the first frame,
+  then a single `… (×N over Tms)` line, then the next
+  divergent frame. Preserve full fidelity in the JSON export.
+- **Session summary** appended at the end of each export:
+  - duration
+  - total events
+  - semantic events (count by category)
+  - incidents
+  - stream gaps (count, max duration)
+  - load transitions
+  - unconfirmed writes
+  - last confirmed machine values for each field
+- **Incident banner** in the recorder viewer when the session
+  contains a `incident.loadDropped` or any `set.aborted`.
+
+## Constants
+
+- **Write confirmation timeout:** 750 ms. After this, the
+  pending write becomes `write.confirmation.timeout` and the
+  field reverts to its last `confirmed` value.
+- **Stream gap soft threshold:** 500 ms during LiveCapture —
+  emit `ble.stream.gap` and set `LoadState = unknown` unless a
+  stronger signal exists.
+- **Stream gap hard threshold:** 2000 ms — escalate to
+  `unloaded` / `fault` candidate.
+- **Recorder buffer strategy:** ring buffer, **5000 events
+  minimum** (up from b78's 1000).
+- **Retry:** one auto-retry for non-destructive scalar fields
+  (e.g. `baseWeight`). **No auto-retry** for ambiguous or
+  destructive ops.
+
+## Export requirements
+
+- `.txt` (AI-readable, human-readable): chronological semantic
+  events with compressed stream frames. Includes session
+  summary at the end. Includes incident banner at the top if
+  any incident was recorded.
+- `.json` (structured, full fidelity): every event, every raw
+  hex frame, every actionId chain. Schema version bumped from
+  the b78 `schemaVersion=1` to `schemaVersion=2` with backward
+  compatibility for readers (additive fields only).
+- Both exports retain the b78 redaction rules (peripheral
+  name → UUID; free text → `<redacted:len=N>`; `unsafeRaw`
+  opt-in only for `HKSource.name` / `bundleIdentifier`).
+
+## UX requirements
+
+- Live UI greys metrics whose `DeviceState` field is `unknown`
+  or `stale`.
+- Banner in `LiveCaptureViewV2` when `loadState` transitions to
+  `unloaded` mid-set: "Load dropped — set marked interrupted."
+- Banner in `LiveCaptureViewV2` when `loadState` transitions to
+  `fault`: "Hardware fault detected — set aborted."
+- After `unloaded → loaded`, present a two-button choice in
+  place of the normal active-set chrome: "Continue this set" /
+  "Start new set". Default tap-target: "Start new set" (safer).
+- Recorder viewer shows the incident banner at the top of the
+  timeline when present.
+- All UI copy lives in one place (TBD during implementation —
+  see open question on exact copy).
+
+## BLE characteristic audit requirement
+
+Before decoder assumptions are finalized, the user runs
+**nRF Connect** or **LightBlue** against a paired Voltra and
+documents:
+
+- Every service UUID and every characteristic UUID under it.
+- The properties bitmask for each characteristic
+  (read/write/writeWithoutResponse/notify/indicate).
+- The descriptors on each characteristic (CCCD presence in
+  particular).
+- Whether the iOS app currently subscribes to that
+  characteristic.
+- **Flag any notify-capable characteristic the app does NOT
+  currently subscribe to.** Those are the most likely sources
+  of the unsolicited machine-side updates the app is missing.
+
+Results land in `05_BLE_AND_PROTOCOL.md` under "BLE
+characteristic audit (post-b78)". The decoder must not
+finalize byte-position assumptions before the audit is in.
+
+## Migration notes
+
+- The existing `SessionRecorder.shared` 10,000-event FIFO
+  actor buffer (b77/b78) becomes a **5000-event ring buffer**
+  in v2. Sessions running across the upgrade will lose the
+  oldest events first; nothing on disk needs migrating because
+  the buffer is in-memory.
+- The b78 `Application Support/SessionRecorder/last_session.json`
+  file uses `schemaVersion=1`. v2 writes `schemaVersion=2`.
+  Readers must handle both. Older sessions on disk are read-
+  only and the viewer surfaces them with a "v1 capture" tag.
+- Existing UI bindings to in-memory `WriterState` /
+  `MultiDeviceManager` / `LoggingStore` keep working. The new
+  `DeviceState` is **introduced first as a read-only mirror**
+  of decoded events, and the UI binding path migrates one
+  field at a time (base weight first — see implementation
+  order).
+
+## Open hypotheses and constraints
+
+- `0x03` in `553404ac` status frames means "load dropped /
+  cutout" — hypothesis from a single observation. Needs
+  multi-session corroboration.
+- `2b010100` vs `2b000100` in `553a0470` stream frames is a
+  phase / tension flag — hypothesis only.
+- Eccentric / concentric / chains byte positions: unknown.
+- There may be a notify-capable characteristic the app does
+  not currently subscribe to that carries device-state
+  updates. The BLE characteristic audit will tell us.
+- All hypotheses above must be validated on hardware and
+  pinned by fixture in `VoltraLiveTests/ProtocolGoldenTests.swift`
+  (or a new sibling test file for the additive decoder)
+  before being promoted to named constants.
+
+## Acceptance criteria
+
+- App reflects machine-side base-weight changes without manual
+  refresh.
+- App reflects machine-side eccentric / concentric / chains
+  changes after decoder validation.
+- App detects and reacts to unload / cutout mid-session per the
+  Load / unload behavior section.
+- Rep / session logic responds appropriately (set marked
+  `interrupted=true` on unload mid-set; rep counting paused on
+  `loaded → unloaded`; no auto-resume on `unloaded → loaded`).
+- Recorder exports state transitions and incidents in plain
+  language at the top of the `.txt` export.
+- Duplicate `ble.write.tx` events removed from output.
+- Real sessions fit without premature truncation under the new
+  5000-event ring buffer.
+- One shared parser powers both UI state and recorder output.
+- `0x03` remains a candidate constant until validated, or is
+  renamed only after hardware evidence.
+- No sacred protocol file is modified by this feature.
+- BLE characteristic audit results are recorded in
+  `05_BLE_AND_PROTOCOL.md`.
+
+## Recommended implementation order
+
+1. **BLE characteristic audit** (no Swift; user runs nRF
+   Connect / LightBlue and pastes results).
+2. **Shared frame decoder abstraction** — additive scaffold
+   alongside `Protocol/`. Initially returns empty semantic
+   events; verifies the wiring path is correct.
+3. **`DeviceState` model + reducer** — reducer applies
+   semantic events; tested in isolation against fixtures.
+4. **Bind UI to `DeviceState` for base weight first** — one
+   field, end-to-end, before expanding.
+5. **Pending / confirmed write flow + 750 ms timeout.**
+6. **`LoadState` + stream-gap detection** at the 500 / 2000 ms
+   thresholds.
+7. **Semantic recorder events + export summary + incident
+   banner.**
+8. **Remove duplicate `ble.write.tx` events.**
+9. **Expand decoder coverage** to eccentric / concentric /
+   chains once the audit + hardware tests have validated byte
+   positions.
+10. **Validate on hardware** and revise the decode table.
+    Promote validated hypotheses (e.g. `0x03`) to named
+    constants.
+
+## Non-goals
+
+- Unrelated workout UX redesign.
+- Cloud sync redesign.
+- Backend analytics changes.
+- Firmware changes.
+- AI coaching.
+
+## Decision summary
+
+- ADR **V4-D26** in `04_DECISIONS_AND_CONSTRAINTS.md`: the new
+  decoder is additive and sits alongside the existing Protocol/
+  pipeline; sacred protocol files are not modified.
+- Recorder schema bump `1 → 2` is additive (readers handle
+  both).
+- Buffer policy: `5000-event ring buffer` (was 10,000-event
+  FIFO in b78; effective capacity in real sessions per the
+  hardware verification observation in chat).
+- Conflict resolution: latest device-confirmed value wins;
+  app-requested values are `pending` until echoed.
+
+---
+
+# Historical: V4 LiveCapture spec (b58)
+
+> The section below is the V4 LiveCaptureView spec at the
+> **b58** ship. It is still the authoritative description of
+> what the live capture screen *does today*. Telemetry v2
+> (above) is additive on top of it; it does not replace this
+> content. Edits to LiveCapture behaviour still belong here
+> until/unless a future cycle supersedes it.
+>
+
 > **V4 (b58) summary.** Four user-visible changes on top of V3 (b57):
 >
 > 1. **Dropsets are time-driven again.** First DROP tap fires an

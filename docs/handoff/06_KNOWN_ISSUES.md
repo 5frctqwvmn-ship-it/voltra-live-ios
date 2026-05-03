@@ -493,3 +493,244 @@ on-device verification on TestFlight (b73 still shipping). When
 the user confirms the grid moves with scroll on device, this
 entry should be revised to "Closed — VERIFIED on device on
 build N."
+
+---
+
+## Telemetry v2 (active-cycle) known issues (KI-14 … KI-26)
+
+> Opened 2026-05-03 in the docs-only alignment commit before the
+> Authoritative Device State + Telemetry Collector v2 work begins.
+> Each entry below is a problem that the v2 spec
+> (`03_CURRENT_FEATURE_SPEC.md`, "Authoritative Device State +
+> Telemetry Collector v2") explicitly addresses. They are tracked
+> here so progress can be measured commit-by-commit.
+
+### KI-14 (post-b78) — Handoff/current-state docs were stale
+
+**Status.** Closed at the docs-only alignment commit on
+2026-05-03.
+
+**What.** A previous handoff prompt referenced
+`docs/handoff/02_CURRENT_STATE.md` as stale at v0.4.34 / build 56
+while the current tested build was actually v0.4.51 / build 78.
+On inspection the file had already been advanced to "b78
+SHIPPING" (the b78 ship commit's same-commit doc update) but had
+NOT been advanced to "b78 SHIPPED" with the run + Delivery UUID
+artifacts after the tag-triggered release succeeded.
+
+**Resolution.** The docs-only alignment commit:
+- Advanced `02_CURRENT_STATE.md` from "SHIPPING" to "SHIPPED"
+  with run 25268455532, merge SHA `32f9300`, and Delivery UUID
+  `3433cd79-fb4a-48db-9c70-b3e0289740e1`.
+- Wrote down the demo-mode and hardware-mode recorder
+  verification observations that previously lived only in chat
+  (33-event demo session export; 1000-event live VOLTRA
+  session with real BLE write/ack/notify chain, base-weight
+  changes, probable load cutout) — explicitly NOT signing them
+  off as QA passes A–G until they are written per-pass to
+  `QA_LOG.md`.
+- Set the Active cycle to "Authoritative Device State +
+  Telemetry Collector v2" (docs-first).
+
+**General lesson.** Whenever the post-tag CI run completes and
+5-gate altool verify passes, the verification artifacts (run
+ID, altool wall-clock, Delivery UUID, success markers) MUST be
+written to `02_CURRENT_STATE.md` and `WORK_LOG.md` in a
+follow-up commit on the working branch. Letting the ship facts
+sit only in chat is what created this drift.
+
+### KI-15 (post-b78, open) — Duplicate `ble.write.tx` events
+
+**Status.** Open. Targeted by Telemetry v2 implementation step 8.
+
+**What.** The b78 recorder emits duplicate `ble.write.tx`
+events for the same payload. Observed during the 1000-event
+hardware session. Inflates event count, makes the actionId
+chain harder to read, and contributes to the buffer-fill rate
+described in KI-17.
+
+**Resolution plan.** De-dupe within a small window; collapse
+to a single event with a `coalescedCount` field. Spec is in
+`03_CURRENT_FEATURE_SPEC.md` "Telemetry recorder improvements".
+
+### KI-16 (post-b78, open) — Demo-mode not-connected guard logs as `ble.error`
+
+**Status.** Open. Targeted by Telemetry v2.
+
+**What.** When demo mode is enabled and a BLE write is
+attempted with no Voltra connected, the guard fires a
+`ble.error` event AHEAD of the corresponding write event.
+Reading the recorder timeline left-to-right makes it look
+like the error caused the write, when in reality the guard
+prevented the write from happening. Misleading.
+
+**Resolution plan.** Rename the event to `ble.write.skipped`
+with payload `{reason: "not_connected"}`, and emit it AFTER
+the `write.request` event so the chain is visually correct:
+`ui.tap → write.request → write.skipped`.
+
+### KI-17 (post-b78, open) — 1000-event cap fills too quickly in real live capture
+
+**Status.** Open. Targeted by Telemetry v2 buffer-policy
+change.
+
+**What.** The 1000-event in-memory buffer (b78) fills within
+a single representative live VOLTRA session (1000-event
+hardware capture observed in chat). High-frequency stream
+frames dominate. Useful incident context gets evicted before
+the user has a chance to look at the export.
+
+**Resolution plan.** Switch to a 5000-event ring buffer AND
+compress repeated identical high-frequency stream frames in
+the human-readable `.txt` export (preserve full fidelity in
+JSON). See `03_CURRENT_FEATURE_SPEC.md` "Constants" and
+"Telemetry recorder improvements".
+
+### KI-18 (post-b78, open) — Session Recorder lacks semantic device-state events
+
+**Status.** Open. Targeted by Telemetry v2.
+
+**What.** Today the recorder captures `ble.write.tx`,
+`ble.write.ack`, `ble.notify.rx`, `ui.tap` and lifecycle/nav
+events. It does NOT emit a "the device's base weight changed
+from X to Y" event, or "load state transitioned from loaded
+to unloaded". The user has to read raw hex to figure out what
+the machine actually did.
+
+**Resolution plan.** Add `device.state.change`,
+`load.state.change` (or its field-of equivalent — see
+KI-22 / open question), `incident.loadDropped`,
+`write.confirmation.timeout`, `write.request.overridden`,
+`ble.stream.gap`. Spec in `03_CURRENT_FEATURE_SPEC.md`.
+
+### KI-19 (post-b78, open) — App lacks authoritative DeviceState mirror
+
+**Status.** Open. Targeted by Telemetry v2.
+
+**What.** The app maintains in-memory state in
+`WriterState`, `MultiDeviceManager`, `LoggingStore`, etc., but
+none of those is a **decoded mirror of what the machine
+reports**. They reflect what the app last wrote, plus
+heuristics. There is no single place the UI can read to ask
+"what is the live VOLTRA's base weight, ecc, conc, chains,
+mode, load state right now, and how confident are we?"
+
+**Resolution plan.** Introduce `DeviceState` per the spec:
+each machine-facing field carries
+`confirmed | pending | stale | unknown` status. UI binds to
+`DeviceState`. Migration is one field at a time, base weight
+first.
+
+### KI-20 (post-b78, open) — Machine-side weight changes do not reliably update app
+
+**Status.** Open. Targeted by Telemetry v2 source-of-truth
+rules + decoder hypothesis on `863e..` notify tails.
+
+**What.** User adjusts the dial on the VOLTRA itself. App
+display does not update without manual refresh. Observed in
+the hardware verification session.
+
+**Resolution plan.** Decoder consumes the `863e..` notify
+payloads, emits `device.state.change(field=baseWeight,
+status=confirmed, source=deviceUnsolicited)`, reducer applies
+to `DeviceState`, UI re-renders. The hypothesis that
+`863e5f=95` etc. is the base-weight confirmation needs
+fixture-pinning before the decoder relies on it; see
+`03_CURRENT_FEATURE_SPEC.md` "Decoder requirements".
+
+### KI-21 (post-b78, open) — Eccentric/concentric/chains can drift between hardware and app
+
+**Status.** Open. Targeted by Telemetry v2 (deferred until
+BLE characteristic audit + decoder validation).
+
+**What.** When the user changes ecc / conc / chains values on
+the machine itself, the app's in-memory model can drift. Byte
+positions for these fields in device-state frames are
+**unknown**. The decoder cannot fix this until those positions
+are validated on hardware.
+
+**Resolution plan.** Until validated, the UI greys those
+fields and the recorder emits
+`device.state.change(field=..., status=unknown)` so we can see
+the frame arrived but couldn't decode it. Promotion to
+`confirmed` waits on hardware validation.
+
+### KI-22 (post-b78, open) — Load drop / unload / cutout not surfaced to app state
+
+**Status.** Open. Targeted by Telemetry v2 LoadState +
+stream-gap detection.
+
+**What.** During the 1000-event hardware session a probable
+load cutout was observed (status byte transition described in
+KI-23). The app continued behaving as if the cable were still
+loaded. Rep counting and weight-stable assumptions were
+wrong for that window.
+
+**Resolution plan.** Implement `LoadState` with the six
+states (`idle / armed / loaded / unloaded / fault / unknown`),
+the 500 ms soft + 2000 ms hard stream-gap thresholds, the
+`loaded → unloaded` set-interrupt + banner behavior, and the
+no-auto-resume on `unloaded → loaded`. Spec in
+`03_CURRENT_FEATURE_SPEC.md`.
+
+### KI-23 (post-b78, open) — `0x03` status byte is only a hypothesis
+
+**Status.** Open. Hypothesis-tracking entry.
+
+**What.** In a `553404ac` status frame observed during the
+hardware session, a byte transitioned `0x02 → 0x03` around
+the load-cutout event. **Hypothesis:** `0x03` means
+"load dropped / cutout". Single-session observation. Not
+enough to promote to a named constant.
+
+**Resolution plan.** Multi-session corroboration on hardware,
+fixture-pin in `VoltraLiveTests/ProtocolGoldenTests.swift` (or
+a new sibling test file for the additive decoder), THEN
+promote to a named constant. Until then the decoder treats
+`0x03` as a candidate and the UI/recorder must not assume the
+meaning. See open question OQ-T2 in `10_OPEN_QUESTIONS.md`.
+
+### KI-24 (post-b78, open) — `553a0470` phase / tension byte unknown
+
+**Status.** Open. Hypothesis-tracking entry.
+
+**What.** In `553a0470` stream frames, a byte near
+`2b000100` vs `2b010100` may represent phase / tension state.
+Hypothesis only.
+
+**Resolution plan.** Same gate as KI-23: hardware
+corroboration → fixture pin → named constant. See open
+question OQ-T3 in `10_OPEN_QUESTIONS.md`.
+
+### KI-25 (post-b78, open) — Weight/ecc/conc/chains controls missing `ui.tap` / `actionId` instrumentation
+
+**Status.** Open. Targeted by Telemetry v2 recorder
+correlation work.
+
+**What.** Today's recorder cannot draw a complete chain from
+"user tapped weight +5" to "device confirmed weight=85"
+because the source `ui.tap` event is missing on those
+controls. The chain is broken at the user's finger.
+
+**Resolution plan.** Add `recorder.uiTap(...)` calls inside
+an `ActionScope.run { ... }` on every weight / ecc / conc /
+chains stepper and on the LOAD/UNLOAD button. The
+`actionId` then propagates through the writer + decoder by
+the existing task-local mechanism.
+
+### KI-26 (post-b78, open) — Need BLE characteristic audit
+
+**Status.** Open. Step 1 of Telemetry v2 implementation.
+
+**What.** Before the decoder finalizes byte-position
+assumptions, every BLE service/characteristic exposed by the
+VOLTRA must be enumerated against nRF Connect or LightBlue.
+There may be a notify-capable characteristic the iOS app does
+not currently subscribe to that carries device-state
+updates we are missing today.
+
+**Resolution plan.** User runs nRF Connect or LightBlue
+against a paired Voltra and pastes results into
+`05_BLE_AND_PROTOCOL.md` "BLE characteristic audit
+(post-b78)". Decoder work cannot finalize before this is
+done.

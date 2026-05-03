@@ -1878,3 +1878,70 @@ on-device QA passes A–G are recorded in `QA_LOG.md`.
 `Info.plist` / `project.yml` / entitlements / release-workflow
 changes. No BLE / WatchConnectivity / HealthKit runtime
 behavior changes. No version bump. No TestFlight ship.
+
+## V4-D26 — Telemetry v2 decoder is additive, sacred files unchanged (post-b78, spec)
+
+**Date:** 2026-05-03 (post-b78).
+**Status:** SPEC. No Swift yet.
+**Cycle:** Authoritative Device State + Telemetry Collector v2.
+
+**Decision.** The Telemetry v2 decoder ships as a **new, additive
+module** alongside the existing `VoltraLive/Protocol/` pipeline. The
+existing pipeline keeps producing exactly what it produces today; the
+new decoder is layered over the same byte stream and emits richer,
+typed events (`device.state.change`, `load.state.change`, semantic
+rep markers, etc.) without removing or rewriting the legacy output.
+
+**Why.** Three constraints force additive rather than replacement:
+
+  1. **Sacred files DO NOT MODIFY.** `VoltraProtocol.swift`,
+     `TelemetryExtractor.swift`, `PacketParser.swift`,
+     `FrameAssembler.swift`, `.github/workflows/build.yml` are
+     locked. Any change there is a regression risk against every
+     shipped build's verified behavior.
+  2. **Hypothesis bytes (OQ-T1, OQ-T3).** The `0x03` byte in
+     `553404ac` status frames and the `2b010100` byte in `553a0470`
+     stream frames are **single-observation hypotheses**. Promoting
+     either to a constant inside the existing extractor would burn
+     the hypothesis into the build before hardware confirmation. The
+     additive decoder must round-trip raw bytes for any field flagged
+     as hypothesis and surface a hypothesis flag on the emitted event
+     so downstream consumers can choose to ignore it.
+  3. **Schema additivity.** Recorder export schemaVersion advances
+     1 → 2 **additively** (per spec). Existing consumers of the v1
+     export must keep working. Same principle applies inside the
+     pipeline: v2 events are added next to v1 output, not on top of
+     it.
+
+**Scope.**
+
+  - **In:** new `VoltraLive/Telemetry/` (or equivalent) module that
+    subscribes to the same byte stream `FrameAssembler` already
+    receives, runs its own decoder, and publishes
+    `DeviceState` / `LoadState` / semantic events. Conflict
+    resolution rules (per spec) decide which side "wins" when v1 and
+    v2 disagree on a derived value — but neither side is silenced.
+  - **Out:** any edit to a sacred file. Any rewrite of the existing
+    extractor. Any hypothesis promoted to a constant before the
+    matching OQ-T entry in `10_OPEN_QUESTIONS.md` is resolved with
+    hardware evidence.
+
+**Verification path.** Path C (docs-only) for this ADR.
+Implementation PRs land Path A (UNVERIFIED → VERIFIED) per
+`09_RELEASE_AND_SIGNING.md` once on-device fixtures pin OQ-T1, OQ-T3,
+OQ-T5 and the BLE audit (KI-26) closes.
+
+**Files touched in this ADR commit.** Docs only:
+
+  - `docs/handoff/02_CURRENT_STATE.md`
+  - `docs/handoff/03_CURRENT_FEATURE_SPEC.md`
+  - `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md` (this entry)
+  - `docs/handoff/04_ARCHITECTURE.md` (additive-decoder note)
+  - `docs/handoff/05_BLE_AND_PROTOCOL.md` (audit-plan section)
+  - `docs/handoff/06_KNOWN_ISSUES.md` (KI-14 … KI-26)
+  - `docs/handoff/09_NEXT_AGENT_PROMPT.md`
+  - `docs/handoff/10_OPEN_QUESTIONS.md` (OQ-T1 … OQ-T8)
+  - `docs/WORK_LOG.md`
+
+No Swift, no `Info.plist`, no `project.yml`, no entitlements, no
+release-workflow, no version bump.

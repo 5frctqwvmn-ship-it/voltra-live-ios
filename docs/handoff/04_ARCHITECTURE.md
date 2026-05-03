@@ -212,3 +212,25 @@ array is UI state only. See `08_SUPERSET.md` for the full picture.
 for the deferred Watch app. They round-trip JSON over WatchConnectivity.
 Both copies must stay in sync (identical raw `String` enum values) — see
 `AGENTS.md` workflow rules.
+
+## Telemetry v2 decoder (additive, post-b78)
+
+The Telemetry Collector v2 / Authoritative Device State module
+(spec in `03_CURRENT_FEATURE_SPEC.md`, ADR V4-D26 in
+`04_DECISIONS_AND_CONSTRAINTS.md`) is **additive**. It lives in a new
+module alongside the existing `VoltraLive/Protocol/` pipeline and
+subscribes to the same byte stream `FrameAssembler` already exposes.
+It does **not** replace, fork, or shadow any sacred file
+(`VoltraProtocol.swift`, `TelemetryExtractor.swift`,
+`PacketParser.swift`, `FrameAssembler.swift`,
+`.github/workflows/build.yml`).
+
+The legacy pipeline keeps emitting exactly what it emits today; the
+v2 decoder layers richer typed events (`device.state.change`,
+`load.state.change`, semantic rep markers, etc.) on top. Conflict
+resolution between the two outputs is documented in the spec; neither
+side is silenced. Hypothesis bytes (OQ-T1, OQ-T3 in
+`10_OPEN_QUESTIONS.md`) are round-tripped raw and flagged as
+hypothesis on the emitted event until hardware evidence promotes
+them. The export schema advances 1 → 2 additively so existing
+consumers keep working.
