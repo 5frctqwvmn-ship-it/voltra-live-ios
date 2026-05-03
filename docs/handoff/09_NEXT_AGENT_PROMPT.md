@@ -218,18 +218,26 @@ Closed in b58: KI-F3, KI-F4.
    `03_CURRENT_FEATURE_SPEC.md` and
    `04_DECISIONS_AND_CONSTRAINTS.md` if anything decided.
 
-## Where things stand (post-b77, B74-F11 SHIPPED)
+## Where things stand (post-b78, B74-F11 launch-crash hotfix shipped)
 
 **Branch:** `feat/ui-v4-2-claude` (integration). No feature
-in flight.
+in flight beyond post-ship QA.
 
-**Last shipped: v0.4.50 / build 77 — "Session Recorder" — B74-F11.**
-PR #10 merged via `88a4eaf`. Tag `v0.4.50-build77` triggered
-`release.yml` on the b77 ship commit. The full Session Recorder
-implementation chain — `76becdf` (Commit 1, core engine) →
-`2ee81be` (Commit 2, root overlay + viewer + share + screen tags) →
-`492130a` (Commit 3, instrumentation + loud guards) → `77e2b5a`
-(CI compile fix) — is part of `feat/ui-v4-2-claude`.
+**Last shipped: v0.4.51 / build 78 — "Session Recorder (launch fix)" —
+B74-F11 hotfix.** Re-injects `SessionRecorder` env-object directly
+on `SessionRecorderToggle()` inside the root `.overlay` closure in
+`VoltraLiveApp.swift`. Fixes the b77 launch crash where SwiftUI
+raised `EnvironmentObject.error()` because the overlay's content
+did not inherit env-objects from the modifier chain. Adds
+`VoltraLiveTests/RecorderLaunchSmokeTests.swift` regression test.
+PR #12 merged. Tag `v0.4.51-build78` triggered `release.yml` on the
+b78 ship commit. KI-13 in `06_KNOWN_ISSUES.md`.
+
+**Prior shipped (PULLED): v0.4.50 / build 77 — "Session Recorder" —
+B74-F11.** PR #10 merged via `88a4eaf`. Tag `v0.4.50-build77`.
+Pulled from TestFlight due to launch crash on first body
+evaluation. Implementation chain remains on `feat/ui-v4-2-claude`
+for context.
 
 **Pre-ship verification (PR #10 head, dry_run on `feat/b77-session-recorder`):**
 - `build.yml` workflow_dispatch run 25260420548: `success` in

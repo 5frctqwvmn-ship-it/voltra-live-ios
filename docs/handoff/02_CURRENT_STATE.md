@@ -1,6 +1,6 @@
 # 02 — Current State
 
-_Last updated: 2026-05-03 (b77 SHIPPING — B74-F11 Session Recorder. Tag `v0.4.50-build77` pushed; release.yml in flight on `feat/ui-v4-2-claude`.)_
+_Last updated: 2026-05-03 (b78 SHIPPING — B74-F11 launch-crash fix. Re-injects SessionRecorder env-object on root overlay content. Tag `v0.4.51-build78` to be pushed after PR merges.)_
 
 > **Maintenance rule:** this file is overwritten on every ship. The
 > append-only history lives in `docs/WORK_LOG.md`. If you're updating
@@ -11,6 +11,31 @@ _Last updated: 2026-05-03 (b77 SHIPPING — B74-F11 Session Recorder. Tag `v0.4.
 > updated together** on any version bump or cycle change.
 
 ## Latest shipped build
+
+**v0.4.51 / build 78** — label "Session Recorder (launch fix)" —
+tag `v0.4.51-build78` to be pushed at the b78 ship commit on
+`feat/ui-v4-2-claude`. Ships the B74-F11 launch-crash fix: b77
+shipped a SwiftUI `EnvironmentObject.error()` crash on launch
+because `SessionRecorderToggle`, mounted at the app root via
+`.overlay { ... }`, could not resolve its
+`@EnvironmentObject SessionRecorder` even though
+`.environmentObject(recorder)` was applied to the modifier chain
+above. Root cause: `.overlay { content }` creates a composite where
+`content` is a SIBLING of the modified view — env-objects on the
+modifier chain do NOT propagate to the overlay's content. Fix:
+re-inject `recorder` directly on `SessionRecorderToggle()` inside
+the overlay closure in `VoltraLiveApp.swift`. New
+`VoltraLiveTests/RecorderLaunchSmokeTests.swift` pins the fix by
+mounting the same root-overlay shape via `UIHostingController` and
+forcing layout — removing the fix crashes the test process.
+Pre-ship verification: `build.yml` run 25267980973 green in 1m18s;
+`release.yml dry_run=true` run 25267981601 green in 4m52s including
+`xcodebuild test` exercising the new smoke tests. KI-13 entry
+opened in `06_KNOWN_ISSUES.md`. Pre-b78 shipped state: **v0.4.50 /
+build 77** ("Session Recorder", B74-F11) — pulled from TestFlight
+due to launch crash.
+
+### Pre-b78 (b77) — pulled, do not install
 
 **v0.4.50 / build 77** — label "Session Recorder" — tag
 `v0.4.50-build77` pushed at the b77 ship commit on
@@ -43,21 +68,22 @@ build 76** ("Health signal indicator", B74-F8).
 
 ## Active cycle
 
-b77 release ship in progress on `feat/ui-v4-2-claude`. The b77 ship
-commit bumps `project.yml` + `VoltraLive/Info.plist` from
-v0.4.49/76 to v0.4.50/77 with `VOLTRAFeatureLabel = "Session
-Recorder"`, and updates handoff docs (`00_START_HERE.md`,
-`01_PROJECT_OVERVIEW.md`, this file, `03_ROADMAP.md`,
-`09_NEXT_AGENT_PROMPT.md`, `docs/WORK_LOG.md`) in the same commit
-per AGENTS.md "Mandatory ship discipline". Implementation lives in
-the merged B74-F11 chain (`76becdf` → `2ee81be` → `492130a` →
-`77e2b5a`), now part of `feat/ui-v4-2-claude` via merge commit
-`88a4eaf` (PR #10). Pre-ship verification: `release.yml dry_run`
-[run 25261426415](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25261426415)
-green in 5m21s on PR #10 head — `xcodebuild test` passed
-(including 4 new recorder unit-test files), signed archive +
-export green. Awaiting tag-triggered CI workflow conclusion +
-altool 5-gate verify on `v0.4.50-build77`.
+b78 launch-crash hotfix in progress on `feat/ui-v4-2-claude`. The
+b78 ship adds two changes to `feat/ui-v4-2-claude`: (1) the
+launch-crash fix on `VoltraLiveApp.swift` (re-inject `recorder` on
+the root overlay content) plus a new
+`VoltraLiveTests/RecorderLaunchSmokeTests.swift` regression test;
+and (2) the standard version bump + same-commit doc updates
+(`00_START_HERE.md`, `01_PROJECT_OVERVIEW.md`, this file,
+`03_ROADMAP.md`, `09_NEXT_AGENT_PROMPT.md`,
+`06_KNOWN_ISSUES.md` KI-13 entry, `docs/WORK_LOG.md`). Pre-ship
+verification on the fix branch:
+[`build.yml` run 25267980973](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25267980973)
+green in 1m18s;
+[`release.yml dry_run=true` run 25267981601](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25267981601)
+green in 4m52s — `xcodebuild test` exercised the three new launch
+smoke tests and passed. Awaiting tag-triggered CI workflow
+conclusion + altool 5-gate verify on `v0.4.51-build78`.
 
 ## Last cycle (b73, just shipped) — debug grid SCROLL-ANCHOR fix
 
@@ -97,6 +123,11 @@ Files touched (single commit):
 
 ## Recent shipped (history)
 
+- **b77 / v0.4.50 / build 77** — shipped 2026-05-03 ~01:00 UTC on
+  `feat/ui-v4-2-claude`. Label "Session Recorder" (B74-F11). Tag
+  `v0.4.50-build77`. **PULLED** — launch-crashed on first body
+  evaluation (SwiftUI EnvironmentObject.error() in
+  SessionRecorderToggle); fix shipped in b78.
 - **b76 / v0.4.49 / build 76** — shipped 2026-05-01 ~22:50 UTC on
   `feat/ui-v4-2-claude`. Label "Health signal indicator" (B74-F8).
   Release-only ship; implementation merged at `713a851` via PR #8.
