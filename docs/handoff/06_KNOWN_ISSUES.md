@@ -621,12 +621,17 @@ each machine-facing field carries
 `DeviceState`. Migration is one field at a time, base weight
 first.
 
-### KI-20 (post-b78, in progress) — Machine-side weight changes do not reliably update app
+### KI-20 (post-b78, implemented — pending hardware verification) — Machine-side weight changes do not reliably update app
 
-**Status.** In progress. Decoder + reducer landed in the
-first Telemetry v2 slice; UI binding to `DeviceState` for
-base-weight is the remaining piece before this can be marked
-resolved.
+**Status.** Implemented; pending hardware verification. Decoder
++ reducer landed in the first Telemetry v2 slice; the
+LiveCaptureViewV2 → LoggingStore base-weight bridge is now in
+place (single `.onChange` observer on
+`focusedBle.deviceState.baseWeightLb?.value`, filtered to
+`.deviceUnsolicited`, mirrored into
+`logging.pendingPlannedWeightLb`). NOT fully closed — needs
+hardware re-verification with the recorder armed before this
+KI is marked resolved.
 
 **What.** User adjusts the dial on the VOLTRA itself. App
 display does not update without manual refresh. Observed in
@@ -653,12 +658,20 @@ the hardware verification session.
   `SessionRecorder` under the new `.device` category.
 
 **Remaining for resolution.**
-- Bind LiveCaptureView's base-weight tile to
+- ~~Bind LiveCaptureView's base-weight tile to
   `VoltraBLEManager.deviceState.baseWeightLb` so the dial
-  update visibly reaches the user.
+  update visibly reaches the user.~~ DONE in this commit —
+  `LiveCaptureViewV2` observes `focusedBle.deviceState
+  .baseWeightLb?.value` via a single `.onChange` modifier and
+  routes `.deviceUnsolicited` confirmations into
+  `LoggingStore.pendingPlannedWeightLb`. App-initiated `+/-`
+  taps are unaffected (display continues to read
+  `pendingPlannedWeightLb`; `appRequestConfirmed` echoes are
+  filtered out so they never feed back).
 - Hardware re-verification with the recorder armed to
   confirm the `device.state.change` event stream matches
-  observed dial movements end-to-end.
+  observed dial movements end-to-end. **Required to close
+  this KI.**
 - Eccentric / chains / mode confirmations remain deferred
   (KI-21).
 

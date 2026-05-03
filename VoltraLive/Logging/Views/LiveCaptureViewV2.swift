@@ -349,6 +349,14 @@ struct LiveCaptureViewV2: View {
         .onDisappear {
             health.stop()
         }
+        // b73 Telemetry v2 slice 1: mirror device-confirmed base weight
+        // into LoggingStore. Filter is `.deviceUnsolicited` only, so app
+        // +/- taps and their echoes do not feed back into pendingPlannedWeightLb.
+        // Display calculation (weightCard) intentionally remains driven by
+        // local pendingPlannedWeightLb so user taps stay responsive.
+        .onChange(of: focusedConfirmedBaseWeightValue) { _, _ in
+            applyDeviceOriginatedBase(focusedConfirmedBaseWeight)
+        }
         // b66 V4.2: page-name badge — bottom-leading, faint mint,
         // Swift type name verbatim. Always visible in TestFlight.
         .pageBadge("LiveCaptureViewV2")
@@ -1417,6 +1425,37 @@ struct LiveCaptureViewV2: View {
         case .left:  return mdm.left
         case .right: return mdm.right
         }
+    }
+
+    // MARK: - Telemetry v2: machine → app base-weight bridge
+
+    /// Telemetry v2 bridge: last confirmed base weight from the focused
+    /// device. Used for machine → app sync, not as the direct display source.
+    private var focusedConfirmedBaseWeight: ConfirmedValue<Int>? {
+        focusedBle.deviceState.baseWeightLb
+    }
+
+    /// Equatable key for SwiftUI onChange. The full ConfirmedValue is read
+    /// inside the handler so source filtering stays available.
+    private var focusedConfirmedBaseWeightValue: Int? {
+        focusedBle.deviceState.baseWeightLb?.value
+    }
+
+    /// Only mirror machine-originated changes into local planned weight.
+    /// App-initiated writes are already reflected locally by adjustWeight,
+    /// and the confirmation echo must not clobber in-flight user taps.
+    private func applyDeviceOriginatedBase(_ confirmed: ConfirmedValue<Int>?) {
+        guard let confirmed else { return }
+        guard confirmed.source == .deviceUnsolicited else { return }
+
+        let lb = confirmed.value
+        guard lb >= 0, lb <= 500 else { return }
+
+        let current = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
+        guard current != lb else { return }
+
+        logging.pendingPlannedWeightLb = Double(lb)
+        logging.reanchorCascadeIfActive(toLb: Double(lb))
     }
 
     /// b58 V4 §5: per-write assignment override.

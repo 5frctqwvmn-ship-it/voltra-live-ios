@@ -415,12 +415,19 @@ finalize byte-position assumptions before the audit is in.
    chains / mode fields are intentionally absent until their
    confirmation patterns are pinned.
 4. **Bind UI to `DeviceState` for base weight first** —
-   ⏳ **NEXT.** `VoltraBLEManager` now publishes
-   `@Published var deviceState: DeviceState`; LiveCaptureView
-   needs to read `deviceState.baseWeightLb?.value` and
-   reconcile against the user's UI requested value. Out of
-   scope for the first slice so this commit can ship
-   independently.
+   ✅ **DONE.** `LiveCaptureViewV2` now mirrors
+   device-unsolicited base-weight confirmations from
+   `focusedBle.deviceState.baseWeightLb` into
+   `LoggingStore.pendingPlannedWeightLb` via a single
+   `.onChange` observer. **Display calculation in
+   `weightCard` intentionally remains driven by the local
+   `pendingPlannedWeightLb`** so rapid app-side `+/-` taps
+   stay responsive; machine-side dial changes flow into
+   that same local state through the bridge. The observer
+   filters strictly on `confirmed.source == .deviceUnsolicited`
+   so the `appRequestConfirmed` echo of an in-flight `+/-`
+   write cannot clobber a follow-up tap. Hardware
+   re-verification is the only remaining gate (see KI-20).
 5. **Pending / confirmed write flow + 750 ms timeout.**
    🟡 **PARTIAL.** `PendingWriteTracker` lives in
    `VoltraBLEFrameDecoder.swift` with a 2 s default window

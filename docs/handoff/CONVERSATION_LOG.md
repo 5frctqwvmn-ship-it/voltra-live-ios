@@ -397,3 +397,87 @@ output and writes to a separate `@Published deviceState`.
 - `xcodebuild test` not run in this session (Linux sandbox, no
   Swift toolchain). Tests included with the slice; CI / hardware
   verification gates the next commit.
+
+---
+
+## Session: 2026-05-03 — Telemetry v2 base-weight UI bind (LiveCaptureViewV2)
+
+### Starting situation
+
+- Branch `feat/ui-v4-2-claude` at `da34cd4` ("feat: add base-weight
+  device state decoder"). Clean tree.
+- KI-20 still "in progress" — decoder + reducer + recorder events
+  shipped at `da34cd4`, but no UI consumer of
+  `VoltraBLEManager.deviceState.baseWeightLb` yet.
+- Token-saver mode: user supplied a precise patch script, so the
+  agent did not freelance design.
+
+### Decisions
+
+1. **File path correction.** Patch spec named the V2 view file as
+   `VoltraLive/Features/LiveCapture/LiveCaptureViewV2.swift`. The
+   actual canonical location in this repo is
+   `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` (single V2
+   file, no Features/ directory). Edited the real path.
+2. **Type-name verification before editing.** Confirmed
+   `ConfirmedValue<T>` in `VoltraLive/BLE/State/DeviceState.swift`
+   has `.value` and `.source`, and that
+   `DeviceStateChangeSource.deviceUnsolicited` is the literal
+   enum case in `VoltraLive/BLE/Decoder/VoltraDecodedEvent.swift`.
+   No name collisions; patch applied verbatim.
+3. **Display intentionally remains driven by local planned
+   weight.** The WEIGHT card big number still computes off
+   `(logging.pendingPlannedWeightLb ?? 0) * pulleyMultiplier`;
+   the bridge writes machine-originated changes INTO that local
+   store rather than swapping the display source. Rationale:
+   keeps app-side `+/-` taps visually instant; avoids round-trip
+   lag through device echo + decoder + reducer + publish on every
+   user tap.
+4. **Filter is `.deviceUnsolicited` only.** App-issued writes are
+   already reflected locally by `adjustWeight`, and
+   `appRequestConfirmed` echoes must never feed back into
+   `pendingPlannedWeightLb` lest a follow-up tap be clobbered
+   mid-flight.
+5. **Two-parameter `.onChange(of:_:_:)` form.** Already in use in
+   this file at line 340 (`mdm.supersetActiveSlot`); iOS 17
+   minimum supports it. No fallback to one-param form needed.
+6. **Single observer point** — wired next to the existing
+   `.pageBadge`/`.recorderScreen` modifiers on the outermost
+   chain in `body`, so the observer lives at the same scope as
+   the screen-level lifecycle hooks.
+
+### Out of scope intentionally
+
+- Drop-set stuck fix.
+- Eccentric / chains / inverse-chain decode.
+- `LoadState` / cutout handling.
+- Duplicate `ble.write.tx` cleanup.
+- Export summary changes.
+- Layout rewrite of `weightCard`.
+- Touching `adjustWeight`, `pushUpcomingStateToDevice`,
+  `toggleHardwareLoad`, `tapDropTile`, or `WriterRouter.apply`.
+
+### Sacred-files invariant
+
+Verified zero edits to `VoltraProtocol.swift`,
+`TelemetryExtractor.swift`, `PacketParser.swift`,
+`FrameAssembler.swift`, `.github/workflows/build.yml`,
+`project.yml`. No version/build bump.
+
+### Verification
+
+- Static review only. No Swift toolchain in this Linux sandbox;
+  `xcodebuild test` must run on macOS/CI.
+- `git diff --name-only` shows only the V2 view + four doc files.
+
+### Status
+
+- KI-20 moves from "in progress" to
+  "implemented-pending-hardware-verification". NOT fully closed
+  until hardware re-verification confirms a dial twist updates
+  the WEIGHT tile end-to-end with the recorder armed.
+
+### Not pushed
+
+Per standing rule, the resulting commit is local-only. User must
+explicitly request `git push`.

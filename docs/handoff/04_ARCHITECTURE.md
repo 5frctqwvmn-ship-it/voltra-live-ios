@@ -273,3 +273,41 @@ emission is a follow-up.
 Pattern coverage today: **base weight only**
 (`PARAM_BP_BASE_WEIGHT = 0x3E86`, uint16-LE pounds). Adding eccentric,
 chains, mode, etc. is a one-row append to `VoltraDecodeTable.all`.
+
+### UI bridge: `LiveCaptureViewV2` → `LoggingStore`
+
+A single observer in `LiveCaptureViewV2` mirrors machine-originated
+base-weight changes into the local planned weight that drives the
+WEIGHT card. The bridge is intentionally minimal:
+
+- **Source.** `focusedBle.deviceState.baseWeightLb` — the
+  `ConfirmedValue<Int>` published by `VoltraBLEManager` on the
+  currently focused unit (`focusedBle` already disambiguates
+  single-Voltra vs. dual-Voltra Independent vs. Twin sessions; in
+  Twin mode left is canonical because writes mirror).
+- **Trigger.** `.onChange(of: focusedConfirmedBaseWeightValue)`
+  where the keypath is `baseWeightLb?.value` (an `Int?`) so the
+  observer is `Equatable`-stable. The full `ConfirmedValue` is
+  read inside the handler so the source filter still applies.
+- **Filter.** `confirmed.source == .deviceUnsolicited` only.
+  `appRequestConfirmed` echoes are dropped — the local
+  `pendingPlannedWeightLb` is already authoritative for app-issued
+  edits, and we must not let a confirmation race clobber a
+  follow-up `+/-` tap. `unknownOrigin` is reserved and currently
+  unused.
+- **Sink.** `LoggingStore.pendingPlannedWeightLb` (and
+  `reanchorCascadeIfActive(toLb:)` so an in-progress drop-set
+  cascade re-anchors). The WEIGHT card then renders normally
+  through its existing `pendingPlannedWeightLb × pulleyMultiplier`
+  formula — display path is unchanged.
+- **Why not bind display directly to `deviceState`.** Driving the
+  big number directly off `deviceState.baseWeightLb?.value` would
+  introduce a perceptible lag on every `+/-` tap (write → device
+  echo → decoder → reducer → publish). Mirroring into the
+  existing local store keeps tap responsiveness while still
+  letting machine-side dial moves win when nothing app-side is
+  in flight.
+
+This is the binding referenced in plan item 4 of the Telemetry v2
+spec, and the resolution path for **KI-20** (machine-side weight
+changes not reaching the app).

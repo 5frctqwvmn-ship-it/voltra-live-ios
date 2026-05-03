@@ -5492,3 +5492,71 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   KI-20 end-to-end, or (b) extend the decode table to chains
   (`0x3E87`) + eccentric (`0x3E88`) using the same proof-by-byte-
   vector approach. Both are independent of this commit.
+
+## 2026-05-03 20:03 UTC — LiveCaptureViewV2 mirrors device-confirmed base weight
+
+- **Files changed:** `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`,
+  `docs/handoff/03_CURRENT_FEATURE_SPEC.md`,
+  `docs/handoff/04_ARCHITECTURE.md`,
+  `docs/handoff/06_KNOWN_ISSUES.md`, `docs/WORK_LOG.md`.
+- **What changed:** Closed the UI half of the Telemetry v2 base-weight
+  bridge (KI-20). Added three private members to `LiveCaptureViewV2`
+  next to `focusedBle`:
+  - `focusedConfirmedBaseWeight: ConfirmedValue<Int>?` — the full
+    confirmed value off the focused unit's `deviceState`.
+  - `focusedConfirmedBaseWeightValue: Int?` — `Equatable` keypath for
+    `.onChange` so SwiftUI doesn't observe the whole struct.
+  - `applyDeviceOriginatedBase(_:)` — filters strictly on
+    `confirmed.source == .deviceUnsolicited`, clamps `0...500` lb,
+    and writes `LoggingStore.pendingPlannedWeightLb` +
+    `reanchorCascadeIfActive(toLb:)` only when the value actually
+    differs from current planned weight.
+  Wired a single `.onChange(of: focusedConfirmedBaseWeightValue)`
+  modifier to the existing outermost view chain (next to
+  `.pageBadge`/`.recorderScreen`) that calls
+  `applyDeviceOriginatedBase(focusedConfirmedBaseWeight)`.
+  **Display unchanged:** the WEIGHT card big number still computes
+  off `(logging.pendingPlannedWeightLb ?? 0) * pulleyMultiplier`,
+  so app-side `+/-` taps remain visually instant. `adjustWeight`,
+  `pushUpcomingStateToDevice`, `toggleHardwareLoad`, `tapDropTile`,
+  and `WriterRouter.apply` are untouched.
+- **Verification:** Static review only — no Swift toolchain in this
+  sandbox; `xcodebuild test` must run on macOS/CI. Verified by
+  inspection: `ConfirmedValue<Int>` and `DeviceStateChangeSource
+  .deviceUnsolicited` exist in `VoltraLive/BLE/State/DeviceState.swift`
+  and `VoltraLive/BLE/Decoder/VoltraDecodedEvent.swift` exactly as
+  the patch assumed. Two-parameter `.onChange(of:_:_:)` form is
+  already in use elsewhere in this file (line 340 `mdm
+  .supersetActiveSlot`) so the iOS 17 minimum is fine.
+  `git diff --name-only` against the sacred list (`VoltraProtocol
+  .swift`, `TelemetryExtractor.swift`, `PacketParser.swift`,
+  `FrameAssembler.swift`, `.github/workflows/build.yml`,
+  `project.yml`) returned 0 matches. No version/build bump.
+- **Risks:**
+  - The filter is `.deviceUnsolicited` only. If a future decode
+    path mis-attributes a machine-side change as
+    `appRequestConfirmed` (e.g. tracker window too wide and a
+    dial twist coincides with an in-flight write), that twist
+    would be silently dropped from the UI. Mitigation: the
+    `PendingWriteTracker` 2 s window is already conservative and
+    `consume(field:lb:)` requires a `(field, lb)` exact match,
+    so a coincidental same-pound write is the only failure
+    mode. Low risk in practice.
+  - The bridge mutates `logging.pendingPlannedWeightLb` outside
+    the `pushUpcomingStateToDevice()` path. That's intentional —
+    we don't want a machine-originated change to be re-written
+    back to the device — but it means the device will not be
+    "told" again by the app until the next user edit. That
+    matches the user's mental model (the dial is the source of
+    truth) but should be confirmed in hardware testing.
+  - `xcodebuild test` not run; if I miscounted a brace or got a
+    SwiftUI generic wrong, CI will catch it.
+- **Next step.** Hardware re-verification with the recorder armed:
+  twist the VOLTRA dial, confirm `device.state.change` events
+  emit with `source=deviceUnsolicited`, confirm the WEIGHT tile
+  on `LiveCaptureViewV2` updates within ~one frame, confirm
+  `+/-` app taps remain instant and don't flicker on echo. Once
+  green, mark KI-20 fully resolved (currently
+  "implemented-pending-hardware-verification") and start the
+  decode-table expansion for eccentric (`0x3E88`) and chains
+  (`0x3E87`).
