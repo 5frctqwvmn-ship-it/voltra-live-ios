@@ -621,18 +621,21 @@ each machine-facing field carries
 `DeviceState`. Migration is one field at a time, base weight
 first.
 
-### KI-20 (post-b79, shipped — pending hardware verification) — Machine-side weight changes do not reliably update app
+### KI-20 (post-b79 — fix implemented after failed A1 visual test — pending retest)
 
-**Status.** Shipped on TestFlight in `v0.4.52-build79`; pending
-hardware verification. Decoder + reducer landed in the first
-Telemetry v2 slice (da34cd4); the LiveCaptureViewV2 →
-LoggingStore base-weight bridge is now in place (bdbf91b: single
-`.onChange` observer on
-`focusedBle.deviceState.baseWeightLb?.value`, filtered to
-`.deviceUnsolicited`, mirrored into
-`logging.pendingPlannedWeightLb`). CI compile fix in 53af938.
-NOT fully closed — needs hardware re-verification by MJ with
-the recorder armed before this KI is marked resolved.
+**Status.** Fix implemented locally (NOT yet shipped to TestFlight);
+pending hardware retest on physical VOLTRA. The A1 hardware test
+(20 lb → 15 lb on physical VOLTRA) confirmed telemetry decode and
+`device.state.change` recorder emission passed, but the LiveCapture
+tile did NOT visually update. Root cause: computed `.onChange` on
+`deviceState.baseWeightLb?.value` was insufficient across
+foreground/background transitions. This commit implements the direct
+published bridge fix:
+- `VoltraBLEManager.deviceOriginatedBaseWeightUpdate` new
+  `@Published private(set)` set only for `.deviceUnsolicited` base-weight changes.
+- `LiveCaptureViewV2` observes it via `.onChange` and `.onAppear` reconciliation.
+- `ui.deviceBaseWeightApplied` recorder event emitted on each actual mutation.
+Do NOT close until MJ confirms tile updates on physical VOLTRA.
 
 **What.** User adjusts the dial on the VOLTRA itself. App
 display does not update without manual refresh. Observed in

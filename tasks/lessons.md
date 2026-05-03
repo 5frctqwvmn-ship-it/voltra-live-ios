@@ -53,3 +53,34 @@ the spec. Never leave a rule pointing at a non-existent file.
 
 **Where else this applies:** any future workflow doc, AGENTS.md
 extension, or onboarding spec that names a path.
+
+---
+
+## 2026-05-03 — ki20-visual-bridge
+
+**Mistake:** `bdbf91b` used a computed `.onChange` on
+`focusedBle.deviceState.baseWeightLb?.value` as the UI trigger for
+device-originated base-weight changes. A1 hardware test confirmed the
+decoder + recorder worked but the tile did not visually update.
+
+**Trigger:** SwiftUI `.onChange` on a computed property that reads
+through a chain of `@Published` values can fail to fire when the view
+is re-attached after a foreground/background transition, or when the
+value was already set before the observer attached.
+
+**Correction:** Add a dedicated `@Published` property
+(`deviceOriginatedBaseWeightUpdate`) that is set ONLY for
+device-originated changes. Observe that directly from the view, and
+add `.onAppear` reconciliation to catch values that arrived while the
+view was detached.
+
+**Rule for next time:** When bridging async device state into a
+SwiftUI view for user-visible updates, use a dedicated `@Published`
+property set at the point of the state change — do NOT compute the
+key from a nested `@Published`. Always add `.onAppear` reconciliation
+alongside any `.onChange` observer on device state.
+
+**Where else this applies:** Any future field (eccentric, chains, mode)
+that needs to bridge device-originated changes into the UI. Same
+pattern: dedicated `@Published` on the BLE manager, set only for
+`.deviceUnsolicited`, observed + onAppear-reconciled in the view.

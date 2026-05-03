@@ -5689,3 +5689,68 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   user instruction "Apply now and push." No CI required (doc
   only). KI-20 still at "shipped — pending hardware
   verification" — independent of this change.
+
+## 2026-05-03 22:10 UTC — KI-20 visual bridge fix
+
+- **Goal.** Fix the KI-20 visual update failure: after A1 hardware
+  test (physical VOLTRA 20→15 lb), telemetry decode passed but the
+  LiveCapture WEIGHT tile did NOT update. Fix the UI bridge without
+  touching the decoder or protocol.
+- **Files changed.**
+  - `VoltraLive/BLE/VoltraBLEManager.swift` — new
+    `@Published private(set) var deviceOriginatedBaseWeightUpdate:
+    ConfirmedValue<Int>?`; set inside `handleNotification` reducer
+    loop when `change.field == .baseWeight && change.source ==
+    .deviceUnsolicited`.
+  - `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — replaced
+    `focusedConfirmedBaseWeightValue` computed key with
+    `focusedDeviceOriginatedBaseWeightUpdateValue`; replaced old
+    `.onChange` with new `.onChange(of:
+    focusedDeviceOriginatedBaseWeightUpdateValue)`; added
+    `applyDeviceOriginatedBase(...)` call inside existing `.onAppear`;
+    added `SessionRecorder.shared.record(category: .ui, name:
+    "ui.deviceBaseWeightApplied", ...)` inside `applyDeviceOriginatedBase`.
+  - `docs/handoff/03_CURRENT_FEATURE_SPEC.md` — updated step 4 to
+    document A1 failure + new bridge architecture.
+  - `docs/handoff/04_ARCHITECTURE.md` — added "Telemetry v2 UI bridge
+    (post-A1 fix)" section with full path diagram.
+  - `docs/handoff/06_KNOWN_ISSUES.md` — updated KI-20 status to
+    "fix implemented after failed A1 visual test — pending retest".
+  - `docs/handoff/QA_LOG.md` — added b79 A1/B1 hardware test results.
+  - `docs/handoff/CONVERSATION_LOG.md` — appended decision record.
+  - `tasks/todo.md` — plan + review.
+  - `tasks/lessons.md` — appended lesson on dedicated @Published bridge.
+- **What changed.** Visual path only. Decoder, reducer,
+  PendingWriteTracker, recorder emission, and app +/- write path are
+  all unchanged. No sacred files touched.
+- **Verification result.** Static review only (no macOS/Xcode in
+  environment). Confirmed:
+  - `ConfirmedValue<Int>` is defined in `DeviceState.swift` and is
+    visible to `VoltraBLEManager.swift` (same module).
+  - `deviceOriginatedBaseWeightUpdate` property type matches
+    `deviceState.baseWeightLb` type exactly.
+  - `.onChange(of:)` uses two-parameter iOS 17 closure form
+    consistent with all other `.onChange` calls in the file.
+  - `applyDeviceOriginatedBase` still guards `source == .deviceUnsolicited`
+    as belt-and-suspenders even though the caller already guarantees it.
+  - `SessionRecorder.shared.record(category: .ui, ...)` uses the
+    existing `record(category:name:metadata:)` signature.
+  - Sacred files unchanged: `VoltraProtocol.swift`,
+    `TelemetryExtractor.swift`, `PacketParser.swift`,
+    `FrameAssembler.swift`, `.github/workflows/build.yml`.
+  - `project.yml` unchanged.
+  - No version/build bump.
+- **Risks.** SwiftUI `.onChange` behaviour on two-parameter form must
+  fire for reference-type wrapper (`ConfirmedValue` is a struct but
+  `Optional<ConfirmedValue<Int>>` equality depends on the contained
+  struct's `Equatable`). `ConfirmedValue` conforms to `Equatable` per
+  `DeviceState.swift`. The bridge assigns a new `ConfirmedValue` on
+  every device-unsolicited change (not idempotent for same value), so
+  SwiftUI will always see an inequality and fire onChange. The
+  `guard current != lb` inside `applyDeviceOriginatedBase` prevents
+  redundant `pendingPlannedWeightLb` mutations.
+- **Next step.** Push to `feat/ui-v4-2-claude`, ship to TestFlight.
+  Run A1 test: set app to 20 lb, change physical VOLTRA to 15 lb,
+  confirm tile changes to 15 lb. Expected logs:
+  `device.state.change source=deviceUnsolicited to=15` +
+  `ui.deviceBaseWeightApplied to=15`.

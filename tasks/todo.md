@@ -24,15 +24,30 @@
 
 ## Active task
 
-_(none currently — last shipped: TestFlight v0.4.52-build79
-"Telemetry v2 base weight" on 2026-05-03; KI-20 stays at
-`shipped — pending hardware verification` until MJ confirms on
-physical VOLTRA.)_
+KI-20 visual bridge fix — `fix: apply device-originated base weight in live capture`
 
 ## Plan
 
-- [ ] (next agent: write the plan here before touching code)
+- [x] Read AGENTS.md + AGENT_WORKFLOW.md + handoff docs
+- [x] Read DeviceState.swift, VoltraBLEManager.swift, LiveCaptureViewV2.swift
+- [x] Add `@Published deviceOriginatedBaseWeightUpdate` to VoltraBLEManager
+- [x] Set bridge in handleNotification for `.deviceUnsolicited` only
+- [x] Replace old `focusedConfirmedBaseWeightValue` onChange with `focusedDeviceOriginatedBaseWeightUpdateValue` onChange
+- [x] Add `.onAppear` reconciliation call inside existing onAppear
+- [x] Add `ui.deviceBaseWeightApplied` recorder event in applyDeviceOriginatedBase
+- [x] Update 03_CURRENT_FEATURE_SPEC.md, 04_ARCHITECTURE.md, 06_KNOWN_ISSUES.md, QA_LOG.md
+- [x] Append WORK_LOG.md entry
+- [x] Update tasks/lessons.md
+- [x] Commit locally (no push, no TestFlight)
 
 ## Review
 
-_(add when task closes)_
+Committed locally as `fix: apply device-originated base weight in live capture`.
+Files changed: `VoltraBLEManager.swift`, `LiveCaptureViewV2.swift`,
+`docs/handoff/03_CURRENT_FEATURE_SPEC.md`, `docs/handoff/04_ARCHITECTURE.md`,
+`docs/handoff/06_KNOWN_ISSUES.md`, `docs/handoff/QA_LOG.md`,
+`docs/handoff/CONVERSATION_LOG.md`, `docs/WORK_LOG.md`,
+`tasks/todo.md`, `tasks/lessons.md`.
+
+KI-20 status: fix implemented — pending hardware retest.
+Next: ship to TestFlight, run A1 test (20→15 lb), confirm tile updates.

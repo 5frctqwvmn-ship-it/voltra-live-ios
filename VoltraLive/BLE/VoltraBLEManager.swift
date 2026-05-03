@@ -66,6 +66,14 @@ final class VoltraBLEManager: NSObject, ObservableObject {
     @Published private(set) var deviceState: DeviceState = .empty
     let frameDecoder = VoltraBLEFrameDecoder()
 
+    /// Telemetry v2 UI bridge: the most-recent base-weight update that
+    /// originated from the physical device (not an app write). Set only
+    /// when field == .baseWeight AND source == .deviceUnsolicited.
+    /// LiveCaptureViewV2 observes this directly so the tile updates even
+    /// when the view returns from background or the SwiftUI onChange chain
+    /// would otherwise miss the transition.
+    @Published private(set) var deviceOriginatedBaseWeightUpdate: ConfirmedValue<Int>? = nil
+
     // MARK: Private CBCentral state
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -282,6 +290,18 @@ final class VoltraBLEManager: NSObject, ObservableObject {
                             "rawHex": .hex(String(change.rawHex.prefix(32)))
                         ])
                     addLog("Device \(change.field.rawValue): \(change.from.map(String.init) ?? "?") → \(change.to) lb (\(change.source.rawValue))")
+
+                    // Telemetry v2 UI bridge: publish device-originated
+                    // base-weight changes on a dedicated @Published so
+                    // LiveCaptureViewV2 can observe it reliably even across
+                    // foreground/background transitions. Intentionally NOT
+                    // set for .appRequestConfirmed — the app already reflects
+                    // those synchronously via pendingPlannedWeightLb.
+                    if change.field == .baseWeight,
+                       change.source == .deviceUnsolicited,
+                       let confirmed = deviceState.baseWeightLb {
+                        deviceOriginatedBaseWeightUpdate = confirmed
+                    }
                 }
             }
 

@@ -235,6 +235,42 @@ hypothesis on the emitted event until hardware evidence promotes
 them. The export schema advances 1 → 2 additively so existing
 consumers keep working.
 
+### Telemetry v2 UI bridge (post-A1 fix)
+
+The full path from physical device button press to visible tile update:
+
+```
+BLE notify (device-side dial)
+    │
+    ▼
+VoltraBLEManager.handleNotification → VoltraBLEFrameDecoder.decode
+    │
+    ▼
+DeviceStateReducer.apply → DeviceState.baseWeightLb (updated)
+    │  AND (when source == .deviceUnsolicited AND field == .baseWeight)
+    ▼
+VoltraBLEManager.deviceOriginatedBaseWeightUpdate (@Published)
+    │
+    ▼
+LiveCaptureViewV2.focusedDeviceOriginatedBaseWeightUpdateValue
+(SwiftUI .onChange observer OR .onAppear reconciliation)
+    │
+    ▼
+LiveCaptureViewV2.applyDeviceOriginatedBase(_:)
+    │  (guards: source == .deviceUnsolicited, 0≤lb≤500, != current)
+    ▼
+LoggingStore.pendingPlannedWeightLb + reanchorCascadeIfActive
+    │  (also emits ui.deviceBaseWeightApplied recorder event)
+    ▼
+WeightCard tile renders: pendingPlannedWeightLb × pulleyMultiplier
+```
+
+App `+/-` taps bypass this path entirely (they write directly to
+`pendingPlannedWeightLb` and then to the device). The
+`deviceOriginatedBaseWeightUpdate` bridge is NOT set for
+`appRequestConfirmed` echoes, so confirmation races cannot clobber
+rapid user taps.
+
 ### First-slice files (post-b78, this commit)
 
 ```

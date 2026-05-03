@@ -415,19 +415,34 @@ finalize byte-position assumptions before the audit is in.
    chains / mode fields are intentionally absent until their
    confirmation patterns are pinned.
 4. **Bind UI to `DeviceState` for base weight first** —
-   ✅ **DONE.** `LiveCaptureViewV2` now mirrors
-   device-unsolicited base-weight confirmations from
-   `focusedBle.deviceState.baseWeightLb` into
-   `LoggingStore.pendingPlannedWeightLb` via a single
-   `.onChange` observer. **Display calculation in
-   `weightCard` intentionally remains driven by the local
-   `pendingPlannedWeightLb`** so rapid app-side `+/-` taps
-   stay responsive; machine-side dial changes flow into
-   that same local state through the bridge. The observer
-   filters strictly on `confirmed.source == .deviceUnsolicited`
-   so the `appRequestConfirmed` echo of an in-flight `+/-`
-   write cannot clobber a follow-up tap. Hardware
-   re-verification is the only remaining gate (see KI-20).
+   ✅ **DONE (v2, post-A1 hardware test failure).** Hardware
+   test A1 (physical VOLTRA 20 lb → 15 lb) confirmed that
+   telemetry decode and recorder emission worked correctly but
+   the LiveCapture tile did NOT visually update — the computed
+   `.onChange` on `deviceState.baseWeightLb?.value` was
+   insufficient across foreground/background transitions.
+   This commit implements the direct bridge fix:
+   - **`VoltraBLEManager.deviceOriginatedBaseWeightUpdate`** —
+     new `@Published private(set)` property set ONLY when
+     `change.field == .baseWeight && change.source == .deviceUnsolicited`.
+     Dedicated published ensures SwiftUI fires onChange reliably.
+   - **`LiveCaptureViewV2`** observes
+     `focusedBle.deviceOriginatedBaseWeightUpdate` (via
+     `focusedDeviceOriginatedBaseWeightUpdateValue` key) and
+     calls `applyDeviceOriginatedBase(...)` on change.
+   - **`.onAppear` reconciliation** — the existing onAppear
+     also calls `applyDeviceOriginatedBase(...)` to catch
+     any update that arrived while the view was detached.
+   - **`ui.deviceBaseWeightApplied`** recorder event emitted
+     when `pendingPlannedWeightLb` is actually mutated.
+   **Display calculation in `weightCard` intentionally remains
+   driven by the local `pendingPlannedWeightLb`** so rapid
+   app-side `+/-` taps stay responsive. The bridge path is:
+   `notify → decoder → DeviceState →
+   VoltraBLEManager.deviceOriginatedBaseWeightUpdate →
+   LiveCaptureViewV2 → LoggingStore.pendingPlannedWeightLb →
+   tile render`. Hardware re-verification is the only
+   remaining gate (see KI-20).
 5. **Pending / confirmed write flow + 750 ms timeout.**
    🟡 **PARTIAL.** `PendingWriteTracker` lives in
    `VoltraBLEFrameDecoder.swift` with a 2 s default window

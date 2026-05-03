@@ -301,6 +301,13 @@ struct LiveCaptureViewV2: View {
             Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
                 Task { @MainActor in self.blinkOn.toggle() }
             }
+            // Telemetry v2 UI bridge (KI-20 fix): reconcile any device-
+            // originated base weight that arrived while the view was
+            // detached or the app was in the background. The onChange
+            // observer on focusedDeviceOriginatedBaseWeightUpdateValue may
+            // not fire when the view first mounts or re-mounts if the
+            // value was already set before the observer attached.
+            applyDeviceOriginatedBase(focusedBle.deviceOriginatedBaseWeightUpdate)
         }
         // b71 (V4-D21): mirror V1 LiveCaptureView.swift:250 — keep
         // cascade math + Combined parity in sync if the user
@@ -349,13 +356,15 @@ struct LiveCaptureViewV2: View {
         .onDisappear {
             health.stop()
         }
-        // b73 Telemetry v2 slice 1: mirror device-confirmed base weight
-        // into LoggingStore. Filter is `.deviceUnsolicited` only, so app
-        // +/- taps and their echoes do not feed back into pendingPlannedWeightLb.
-        // Display calculation (weightCard) intentionally remains driven by
-        // local pendingPlannedWeightLb so user taps stay responsive.
-        .onChange(of: focusedConfirmedBaseWeightValue) { _, _ in
-            applyDeviceOriginatedBase(focusedConfirmedBaseWeight)
+        // Telemetry v2 UI bridge (KI-20 fix): observe the dedicated
+        // deviceOriginatedBaseWeightUpdate @Published on VoltraBLEManager
+        // rather than computing from deviceState. The dedicated published
+        // property is set ONLY for .deviceUnsolicited changes, so the
+        // source guard inside applyDeviceOriginatedBase is a belt-and-
+        // suspenders backup. The direct @Published ensures SwiftUI fires
+        // this onChange reliably regardless of foreground/background state.
+        .onChange(of: focusedDeviceOriginatedBaseWeightUpdateValue) { _, _ in
+            applyDeviceOriginatedBase(focusedBle.deviceOriginatedBaseWeightUpdate)
         }
         // b66 V4.2: page-name badge — bottom-leading, faint mint,
         // Swift type name verbatim. Always visible in TestFlight.
@@ -1435,10 +1444,14 @@ struct LiveCaptureViewV2: View {
         focusedBle.deviceState.baseWeightLb
     }
 
-    /// Equatable key for SwiftUI onChange. The full ConfirmedValue is read
-    /// inside the handler so source filtering stays available.
-    private var focusedConfirmedBaseWeightValue: Int? {
-        focusedBle.deviceState.baseWeightLb?.value
+    /// Telemetry v2 UI bridge: direct published value from the focused
+    /// VoltraBLEManager that is only set for device-originated changes.
+    /// Using a dedicated @Published (rather than computing from deviceState)
+    /// ensures SwiftUI fires onChange even when the view re-attaches after
+    /// a foreground/background transition and the underlying value hasn't
+    /// changed since the last observation.
+    private var focusedDeviceOriginatedBaseWeightUpdateValue: Int? {
+        focusedBle.deviceOriginatedBaseWeightUpdate?.value
     }
 
     /// Only mirror machine-originated changes into local planned weight.
@@ -1456,6 +1469,18 @@ struct LiveCaptureViewV2: View {
 
         logging.pendingPlannedWeightLb = Double(lb)
         logging.reanchorCascadeIfActive(toLb: Double(lb))
+
+        // Telemetry v2 UI bridge instrumentation: record that the view
+        // applied a device-originated weight change. Helps correlate the
+        // device.state.change event with the resulting UI update in the
+        // recorder timeline.
+        SessionRecorder.shared.record(
+            category: .ui, name: "ui.deviceBaseWeightApplied",
+            metadata: [
+                "field":  .string("baseWeight"),
+                "source": .string(DeviceStateChangeSource.deviceUnsolicited.rawValue),
+                "to":     .int(Int64(lb))
+            ])
     }
 
     /// b58 V4 §5: per-write assignment override.

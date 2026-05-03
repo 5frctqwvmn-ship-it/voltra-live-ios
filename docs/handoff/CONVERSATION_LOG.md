@@ -481,3 +481,30 @@ Verified zero edits to `VoltraProtocol.swift`,
 
 Per standing rule, the resulting commit is local-only. User must
 explicitly request `git push`.
+
+---
+
+## 2026-05-03 — KI-20 visual bridge fix (post-A1 failure)
+
+**Context.** Hardware A1 test on build 79 proved the decoder,
+reducer, PendingWriteTracker, and recorder all worked for device-side
+20→15 lb change (`device.state.change source=deviceUnsolicited to=15`
+confirmed in session `7A15529C-5EA5-4B34-A91A-A07840048ED8`). But the
+LiveCapture tile did NOT visually update.
+
+**Decision.** Replace the computed `.onChange` key
+(`focusedConfirmedBaseWeightValue = focusedBle.deviceState.baseWeightLb?.value`)
+with a dedicated `@Published deviceOriginatedBaseWeightUpdate` on
+`VoltraBLEManager`, set only on `.deviceUnsolicited` base-weight
+changes. Add `.onAppear` reconciliation. This is the minimal
+mechanical fix \u2014 no decoder changes, no behavior changes to the app
+write path (B1 continues to work).
+
+**Why not bind tile directly to `deviceState.baseWeightLb?.value`.**
+Driving the WEIGHT tile number directly from device state would
+introduce perceptible lag on every app `+/-` tap (write \u2192 device
+echo \u2192 decoder \u2192 reducer \u2192 publish). The bridge into
+`pendingPlannedWeightLb` keeps tap responsiveness while still letting
+machine-side dial moves win.
+
+**KI-20 remains OPEN.** Pending hardware retest with the new build.

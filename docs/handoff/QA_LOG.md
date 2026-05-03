@@ -271,3 +271,37 @@ next ship cycle starts)
 - Confirm KI-20 disposition: only flip from
   `implemented-pending-hardware-verification` to closed once MJ
   confirms above on real hardware.
+
+
+---
+
+## b79 — v0.4.52-build79 — 2026-05-03 — Hardware A1/B1 Tests
+
+### Items tested
+
+- **A1 test:** Physical VOLTRA changed 20 lb → 15 lb (device-side dial).
+- **B1 test:** App-side +5 change (20 lb → 25 lb).
+
+### Results
+
+- **A1 — Telemetry:** PASSED.
+  Session `7A15529C-5EA5-4B34-A91A-A07840048ED8`.
+  Key log: `device.state.change {field="baseWeight" from=20 to=15 source="deviceUnsolicited"}`.
+  Decoder + reducer + PendingWriteTracker + recorder all worked.
+- **A1 — Visual tile:** FAILED.
+  LiveCapture tile did NOT update to 15 lb. Root cause: computed
+  `.onChange` on `deviceState.baseWeightLb?.value` was insufficient
+  across foreground/background transitions.
+- **B1 — App write path:** PASSED.
+  Session `06AD7C11-BA31-4DF5-94E9-74DD3CDB7D34`.
+  `ble.write.tx {cmd=hex:11 label="base=25"}` and
+  `device.state.change {field="baseWeight" from=20 to=25 source="appRequestConfirmed"}` both present.
+
+### Actions taken
+
+- KI-20 visual bridge fix implemented in this commit (see
+  `06_KNOWN_ISSUES.md` KI-20 and `03_CURRENT_FEATURE_SPEC.md`
+  step 4). Direct `@Published deviceOriginatedBaseWeightUpdate`
+  bridge added to `VoltraBLEManager`; `.onChange` + `.onAppear`
+  reconciliation added in `LiveCaptureViewV2`.
+- KI-20 remains OPEN — requires hardware retest with new build.
