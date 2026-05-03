@@ -4950,3 +4950,57 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   defer all device verification to the post-merge ship cycle.
   All three are valid; current branch state supports any of them.
   PR #10 remains OPEN and UNMERGED.
+
+## 2026-05-02 20:50 UTC — B74-F11 release.yml dry_run verification
+
+- **Files changed:** `docs/WORK_LOG.md` (this entry).
+- **Goal:** Record the B74-F11 `release.yml` dry_run verification on
+  PR #10's branch `feat/b77-session-recorder` so the repo captures
+  what the dry-run actually validated (chat is ephemeral).
+- **What changed:** Manually dispatched `release.yml` with
+  `dry_run=true` on `feat/b77-session-recorder` head
+  `6ab55b8681f039d9d927b4e8f9974fae565d2371`.
+  [Run 25261426415](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25261426415).
+- **Verification result:** `success` in **5m21s**. All steps green:
+  - `xcodebuild test -scheme VoltraLive -only-testing:VoltraLiveTests`
+    on iPhone simulator passed, including the 4 new recorder test
+    files: `RecorderBufferTests`, `RecorderRedactorTests`,
+    `RecorderExporterTests`, `ActionScopeTests`. Existing
+    `ProtocolGoldenTests`, `CombinedMathTests`, `DropSetCascadeTests`,
+    `HistoryImporterTests`, `RecentCustomLabelsTests`,
+    `SetSuggestionEngineTests`, `SideNameMatchTests`,
+    `VoltraControlFramesTests`, `WarmupAutoDetectTests` all still
+    pass — no regression.
+  - Independent ASC API key smoke test passed (read-only ASC REST
+    verification).
+  - Decode signing assets + Build and archive (signed) + Export
+    IPA for App Store Connect all green.
+  - `Upload IPA as workflow artifact (dry-run only)` produced
+    artifact `VoltraLive-dryrun-ipa` (signed IPA preserved as
+    workflow artifact for 7 days).
+- **Hard stops honored:**
+  - ❌ No TestFlight upload — `Upload to TestFlight via altool`
+    step correctly skipped by dry_run gate
+    (`if: github.event_name == 'push' || github.event.inputs.dry_run == 'false'`).
+  - ❌ No GitHub release / tag created — `Publish signed IPA to
+    GitHub release` step gated to `github.event_name == 'push'`,
+    and workflow_dispatch did not push a tag.
+  - ❌ No version / build number bumped (workflow does not mutate
+    those; the in-runner `Info.plist` Demo trace-relay substitution
+    was not committed back to the repo).
+  - ❌ No workflow edits, no repo `Info.plist` / `project.yml` /
+    entitlements / sacred-protocol / WatchConnectivity changes by
+    the agent.
+- **Risks:** On-device QA passes A–G remain required per the spec's
+  Verification Contract — the dry_run validates compile + tests +
+  signing pipeline but cannot exercise the recorder UI, real
+  CoreBluetooth callbacks, real HealthKit sample arrivals,
+  ShareLink, SwiftUI triple-tap timing, scenePhase lifecycle, or
+  Application Support `last_session.json` write on a real device.
+- **Next step:** Merge PR #10 into `feat/ui-v4-2-claude` via merge
+  commit (not squash) to preserve the implementation / checkpoint
+  / fix / doc commit chain. After merge, decide separately whether
+  to start the b77 TestFlight ship cycle (would require a manual
+  version + build bump in `project.yml` + `Info.plist`, a `v*` tag
+  push, and a non-dry-run `release.yml` invocation — all out of
+  scope for the current PR).
