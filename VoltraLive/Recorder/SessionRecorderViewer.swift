@@ -294,6 +294,11 @@ struct SessionRecorderViewer: View {
         case .`guard`:   return VoltraColor.warn
         case .lifecycle: return VoltraColor.textDim
         case .recorder:  return VoltraColor.danger
+        // Telemetry v2 (b73 / b79): authoritative device-side state
+        // changes. Distinct from `.ble` (raw bytes) and `.state` (app/UI
+        // state); accent color makes confirmed device transitions easy
+        // to spot in the recorder timeline.
+        case .device:    return VoltraColor.accent
         }
     }
 }

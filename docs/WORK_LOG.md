@@ -5560,3 +5560,31 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   "implemented-pending-hardware-verification") and start the
   decode-table expansion for eccentric (`0x3E88`) and chains
   (`0x3E87`).
+
+## 2026-05-03 20:30 UTC — Fix non-exhaustive switch on RecorderCategory.device
+
+- **Files changed:** `VoltraLive/Recorder/SessionRecorderViewer.swift`,
+  `docs/WORK_LOG.md`.
+- **What changed:** CI run 25289829556 on `feat/ui-v4-2-claude` failed
+  with one Swift compile error directly caused by the `da34cd4`
+  decoder slice:
+  ```
+  SessionRecorderViewer.swift:288:9: error: switch must be exhaustive
+  note: add missing case: '.device'
+  ```
+  `da34cd4` added `case device` to `RecorderCategory` (the new
+  Telemetry v2 semantic-event bucket) but did not update the
+  `categoryColor(_:)` exhaustive switch in `SessionRecorderViewer`.
+  Added a single `case .device: return VoltraColor.accent` arm with
+  a Telemetry v2 / b73-b79 comment explaining why the category gets
+  the accent color (distinct from `.ble` raw bytes and `.state`
+  app-side state). No other changes; no other files touched.
+- **Verification:** Static review only here; CI will re-verify on
+  push (this is a CI-loop fix, so re-run is the test).
+- **Risks:** None to runtime. Worst case the accent color choice
+  conflicts visually with `.ui`, but the recorder viewer is an
+  internal debug surface and color tuning is trivial.
+- **Next step:** Re-trigger build.yml; if green, KI-20 stays at
+  "implemented-pending-hardware-verification" awaiting hardware
+  re-test (unchanged). No TestFlight ship without explicit user
+  go-ahead.
