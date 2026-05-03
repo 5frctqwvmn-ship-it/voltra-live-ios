@@ -1,6 +1,6 @@
 # 02 — Current State
 
-_Last updated: 2026-05-01 (b76 SHIPPING — B74-F8 Health signal indicator. Single-commit feature build per the one-feature-per-build convention. Release dispatch in flight on `feat/ui-v4-2-claude`.)_
+_Last updated: 2026-05-03 (b77 SHIPPING — B74-F11 Session Recorder. Tag `v0.4.50-build77` pushed; release.yml in flight on `feat/ui-v4-2-claude`.)_
 
 > **Maintenance rule:** this file is overwritten on every ship. The
 > append-only history lives in `docs/WORK_LOG.md`. If you're updating
@@ -12,24 +12,52 @@ _Last updated: 2026-05-01 (b76 SHIPPING — B74-F8 Health signal indicator. Sing
 
 ## Latest shipped build
 
-**v0.4.49 / build 76** — label "Health signal indicator" — release
-dispatched 2026-05-01 ~22:50 UTC on `feat/ui-v4-2-claude`. Ships
-B74-F8: replaces the legacy dual-dot HR pill with a single neutral
-Health signal indicator on `VoltraUnitHeader`. Idle dot is faint but
-visible before HealthKit auth; tap-while-unauthorized routes to the
-HK consent sheet; live HR sample renders the dot in the header text
-color (not accent green); >10 s of no samples flips the dot back to
-faint without app re-foreground. L / R / ⋏ pills unchanged. Pre-b76
-shipped state: **v0.4.48 / build 75** ("L/R auto-connect", B74-F1) —
-HEAD `8fd6f95`, last build before this ship.
+**v0.4.50 / build 77** — label "Session Recorder" — tag
+`v0.4.50-build77` pushed at the b77 ship commit on
+`feat/ui-v4-2-claude`. Ships B74-F11 (PR #10 merged via `88a4eaf`):
+local-only AI-readable debug recorder. Hidden 24×24 dot under a
+single root-level `.overlay(alignment: .bottomTrailing)` — unlocked
+by triple-tapping the build-badge chip
+(`UserDefaults["VOLTRARecorderUnlocked"] = true`). Tap toggles
+recording (red 1 Hz `TimelineView` pulse while armed; faint
+`textFaint` while idle). Long-press opens
+`SessionRecorderViewer` (event timeline + category filter chips +
+`ShareLink` exporting both `.txt` AI-readable report and `.json`
+structured envelope, schemaVersion=1). Singleton
+`SessionRecorder.shared` (`ObservableObject`, non-`@MainActor`)
+owns a 10,000-event FIFO actor buffer, a `RecorderRedactor`
+(peripheral-name → UUID; free text → `<redacted:len=N>`;
+`unsafeRaw` opt-in only for `HKSource.name` /
+`bundleIdentifier`), and an `ActionScope` `@TaskLocal UUID` so
+downstream events auto-inherit `actionId` for cause→effect chains.
+Persists current session to
+`Application Support/SessionRecorder/last_session.json` on
+background / inactive (scenePhase observer). Additive
+instrumentation across BLE chokepoints
+(`VoltraBLEManager` 14 emits, `VoltraWriter` 2 emits,
+`MultiDeviceManager` 5 emit groups) and HealthKit sample arrivals
+(`HealthKitStore` 6 emit groups, read-only). 9 user-visible silent
+guards converted to `recorder.guardTrip(...)`. `.recorderScreen`
+tags on 13 top-level screens. Pre-b77 shipped state: **v0.4.49 /
+build 76** ("Health signal indicator", B74-F8).
 
 ## Active cycle
 
-b76 release-only ship in progress on `feat/ui-v4-2-claude`. No
-implementation changes — only `project.yml`, `VoltraLive/Info.plist`,
-handoff docs, and `docs/WORK_LOG.md` were touched in the release
-commit. Implementation lives at `713a851` (B74-F8 merged via PR #8 /
-`8fd6f95`). Awaiting CI workflow conclusion + altool 5-gate.
+b77 release ship in progress on `feat/ui-v4-2-claude`. The b77 ship
+commit bumps `project.yml` + `VoltraLive/Info.plist` from
+v0.4.49/76 to v0.4.50/77 with `VOLTRAFeatureLabel = "Session
+Recorder"`, and updates handoff docs (`00_START_HERE.md`,
+`01_PROJECT_OVERVIEW.md`, this file, `03_ROADMAP.md`,
+`09_NEXT_AGENT_PROMPT.md`, `docs/WORK_LOG.md`) in the same commit
+per AGENTS.md "Mandatory ship discipline". Implementation lives in
+the merged B74-F11 chain (`76becdf` → `2ee81be` → `492130a` →
+`77e2b5a`), now part of `feat/ui-v4-2-claude` via merge commit
+`88a4eaf` (PR #10). Pre-ship verification: `release.yml dry_run`
+[run 25261426415](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25261426415)
+green in 5m21s on PR #10 head — `xcodebuild test` passed
+(including 4 new recorder unit-test files), signed archive +
+export green. Awaiting tag-triggered CI workflow conclusion +
+altool 5-gate verify on `v0.4.50-build77`.
 
 ## Last cycle (b73, just shipped) — debug grid SCROLL-ANCHOR fix
 
@@ -69,6 +97,16 @@ Files touched (single commit):
 
 ## Recent shipped (history)
 
+- **b76 / v0.4.49 / build 76** — shipped 2026-05-01 ~22:50 UTC on
+  `feat/ui-v4-2-claude`. Label "Health signal indicator" (B74-F8).
+  Release-only ship; implementation merged at `713a851` via PR #8.
+- **b75 / v0.4.48 / build 75** — shipped before b76. Label
+  "L/R auto-connect" (B74-F1). Auto-connect L/R buttons by Voltra
+  advertised name (substring "left" / "right", case-insensitive).
+- **b74 / v0.4.47 / build 74** — label "Grid scroll fix v2".
+  V4-D24 debug grid TRUE content-space layer.
+- **b73 / v0.4.46 / build 73** — label "Grid scroll fix". V4-D23
+  scroll-anchor fix.
 - **b72 / v0.4.45 / build 72** — shipped 2026-05-01 02:41 UTC, run
   [25199600713](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25199600713),
   HEAD `bea7243`. Replaced 9-anchor debug overlay with

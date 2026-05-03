@@ -34,18 +34,16 @@ explicitly asked.
 **Then summarize state back to the user. Do not edit anything until you
 have done this.**
 
-## Active branch state (B74-F11 Session Recorder implementation)
+## Active branch state (no feature in flight)
 
-- **Branch:** `feat/b77-session-recorder`
-- **Base:** `origin/feat/ui-v4-2-claude` (PR target)
-- **Current head:** Commit 3 just landed (instrumentation + loud
-  guards + docs flip). All three Session Recorder commits are in;
-  branch ready for PR against `feat/ui-v4-2-claude`. See
-  `git log --oneline` for exact SHAs.
-- **Goal:** Implement B74-F11 Session Recorder per
-  `docs/handoff/SESSION_RECORDER_SPEC.md`.
+- **Branch:** `feat/ui-v4-2-claude` (integration branch).
+- **Last shipped:** **v0.4.50 / build 77 — "Session Recorder" — B74-F11.**
+  Tag `v0.4.50-build77`. PR #10 merged at `88a4eaf`. The full
+  Session Recorder feature (3 implementation commits + 2 checkpoint
+  commits + 1 CI fix + 2 docs-log commits) lives on this branch.
 - **Working tree:** clean except `.claude/` is untracked. **NEVER stage
   `.claude/`.**
+- **Goal:** none in flight; awaiting next feature request.
 
 ## Plan (3 logical commits → one PR against `feat/ui-v4-2-claude`)
 
@@ -176,15 +174,21 @@ minimum:
    verifiable on the Windows host (xcodebuild compile, unit-test run,
    simulator UI, ShareLink behavior, SwiftUI gesture timing, etc.).
 
-## Last shipped (informational, not the active branch)
+## Last shipped (informational)
 
-**v0.4.49 / build 76 — "Health signal indicator" — B74-F8.** Replaced
-the legacy dual-dot HR pill with a single neutral Health signal
-indicator on `VoltraUnitHeader`. See `02_CURRENT_STATE.md` for the
-rolling cycle snapshot and `03_ROADMAP.md` for what's queued.
+**v0.4.50 / build 77 — "Session Recorder" — B74-F11.** Local-only
+AI-readable debug recorder with redaction-by-default, 10,000-event
+FIFO buffer, `.txt` + `.json` export via `ShareLink`, and additive
+instrumentation across BLE chokepoints + HealthKit sample arrivals.
+9 user-visible silent guards converted to loud `guardTrip`. Hidden
+24×24 dot under the root overlay (triple-tap on the build-badge
+chip to unlock). Persists to
+`Application Support/SessionRecorder/last_session.json` on
+background. Tag `v0.4.50-build77`. See `02_CURRENT_STATE.md` for
+the rolling cycle snapshot and `03_ROADMAP.md` for what's queued.
 
-(`01_PROJECT_OVERVIEW.md` may show v0.4.46/73 — that line is stale and
-out of scope for this PR. Trust `git log` and `02_CURRENT_STATE.md`.)
+**Prior shipped: v0.4.49 / build 76 — "Health signal indicator" —
+B74-F8.**
 
 ## Sacred files (do not modify without explicit user approval)
 
