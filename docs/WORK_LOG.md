@@ -5802,3 +5802,27 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   Info.plist CFBundleVersion=80.
 - **Other sacred files.** Unchanged.
 - **Next step.** Commit, tag v0.4.52-build80, push tag to trigger release.yml.
+
+## 2026-05-03 22:22 UTC — TestFlight ship: v0.4.52-build80 (KI-20 visual bridge)
+
+- **Goal.** Ship build 80 to TestFlight for KI-20 hardware retest.
+- **Tag.** `v0.4.52-build80` at commit `51908f2`.
+- **Workflow run.** `release.yml` run 25292365029.
+  URL: https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25292365029
+  Conclusion: success. Duration: ~6 min.
+- **5-gate altool verification.**
+  1. Failure-marker grep: PASS — zero real error lines.
+  2. Wall-clock duration: PASS — ~6 min (>> 10 s floor).
+  3. Positive success marker: PASS — "No errors uploading archive at 'build/export/VoltraLive.ipa'."
+  4. No `ERROR:` lines in altool output: PASS.
+  5. Delivery UUID present: PASS — `1d4a639d-542a-4a3b-93ec-d640459da0cd`.
+- **Commits shipped.**
+  - `08a8b7c` fix: apply device-originated base weight in live capture
+  - `a46d45f` fix: make device base-weight bridge event-based
+  - `51908f2` chore(release): bump to 0.4.52 / build 80
+- **KI-20 status.** Pending hardware retest on build 80. DO NOT mark closed
+  until MJ confirms tile updates to 15 lb on physical VOLTRA.
+- **Next step.** Run A1 hardware test: set app to 20 lb, change physical
+  VOLTRA to 15 lb. Expected: tile updates to 15 lb. Expected logs:
+  device.state.change source=deviceUnsolicited to=15 +
+  ui.deviceBaseWeightApplied to=15.
