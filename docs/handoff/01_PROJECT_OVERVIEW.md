@@ -1,6 +1,6 @@
 # 01 — Project Overview
 
-_Current shipping build: **v0.4.50 / build 77** (b77 cycle, branch `feat/ui-v4-2-claude`). For the rolling cycle snapshot see `02_CURRENT_STATE.md`._
+_Current shipping build: **v0.4.51 / build 78** (b78 cycle, branch `feat/ui-v4-2-claude`). For the rolling cycle snapshot see `02_CURRENT_STATE.md`._
 
 ## What VOLTRA Live is
 

@@ -5060,3 +5060,89 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   run post-build QA checklist (passes A–G) and append results to
   `QA_LOG.md`. Any "Not" result → `KI-N` in `06_KNOWN_ISSUES.md`
   or follow-up fix PR.
+
+## 2026-05-03 02:51 UTC — b78 ship: v0.4.51 / build 78 — Session Recorder (launch fix)
+
+- **Files changed:** `VoltraLive/VoltraLiveApp.swift` (env-object
+  re-injection on root overlay content),
+  `VoltraLiveTests/RecorderLaunchSmokeTests.swift` (new regression
+  test), `project.yml`, `VoltraLive/Info.plist`,
+  `docs/handoff/00_START_HERE.md`,
+  `docs/handoff/01_PROJECT_OVERVIEW.md`,
+  `docs/handoff/02_CURRENT_STATE.md`,
+  `docs/handoff/03_ROADMAP.md`,
+  `docs/handoff/06_KNOWN_ISSUES.md` (KI-13 entry),
+  `docs/handoff/09_NEXT_AGENT_PROMPT.md`,
+  `docs/WORK_LOG.md` (this entry).
+- **Goal:** Hotfix the b77 launch crash. b77 (v0.4.50 / build 77,
+  PR #10 + PR #11) shipped a SwiftUI `EnvironmentObject.error()`
+  crash on launch — `SessionRecorderToggle` mounted at the app
+  root via `.overlay { ... }` could not resolve its
+  `@EnvironmentObject SessionRecorder` even though
+  `.environmentObject(recorder)` was applied to the modifier chain
+  above. Single-line code fix + smoke test + standard ship
+  bookkeeping.
+- **What changed:**
+  - **Fix (single line):** `VoltraLiveApp.swift` line ~346 — the
+    `.overlay(alignment: .bottomTrailing) { SessionRecorderToggle() }`
+    block now re-injects `recorder` via
+    `SessionRecorderToggle().environmentObject(recorder)`. Root
+    cause: `.overlay { content }` creates a composite where
+    `content` is a SIBLING of the modified view, not a descendant —
+    env-objects on the modifier chain do NOT propagate to the
+    overlay's content. Crash fires at SwiftUI's `_EnvironmentObject`
+    DynamicProperty resolution during initial view setup, even when
+    the toggle's body returns `EmptyView()` because
+    `VOLTRARecorderUnlocked` is `false` on a fresh install. See
+    KI-13 in `06_KNOWN_ISSUES.md` for the full diagnosis.
+  - **Regression test (new file):**
+    `VoltraLiveTests/RecorderLaunchSmokeTests.swift` — three tests:
+    1. `testRootOverlayWithRecorderToggleResolvesEnvironmentObject`
+       mounts the same `Color.clear.environmentObject(recorder).overlay { SessionRecorderToggle().environmentObject(recorder) }`
+       shape via `UIHostingController` and forces layout to exercise
+       the SwiftUI body / DynamicProperty resolution. Removing the
+       env-object re-injection in the future would crash this test.
+    2. `testSharedSingletonInitDoesNotCrash` sanity-checks
+       `SessionRecorder.shared` access (no force-unwraps in current
+       init).
+    3. `testSessionRecorderViewerResolvesEnvironmentObject` mirrors
+       the same pattern for the long-press sheet content.
+  - **Version bump:** `project.yml` + `VoltraLive/Info.plist` from
+    v0.4.50 / 77 to v0.4.51 / 78. `VOLTRAFeatureLabel` set to
+    `"Session Recorder (launch fix)"`.
+  - **Doc updates per AGENTS.md "Mandatory ship discipline":**
+    `00_START_HERE.md` (Last shipped lines updated; b77 marked
+    PULLED), `01_PROJECT_OVERVIEW.md` (current shipping build),
+    `02_CURRENT_STATE.md` (Last updated, Latest shipped build,
+    Active cycle, Recent shipped — b77 added with PULLED note),
+    `03_ROADMAP.md` (Last updated, b78 row added with b77 row
+    re-labeled "PULLED — launch crash"),
+    `09_NEXT_AGENT_PROMPT.md` (post-b78 status section).
+  - **KI-13 opened in `06_KNOWN_ISSUES.md`** with full diagnosis,
+    fix commit reference, verification, and a general lesson for
+    future SwiftUI overlay patterns.
+- **Verification (pre-tag):**
+  - `build.yml` workflow_dispatch
+    [run 25267980973](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25267980973)
+    on `fix/b78-recorder-launch-crash` head `e1c19c7`: `success`
+    in 1m18s. Compile + unsigned IPA artifact.
+  - `release.yml dry_run=true` workflow_dispatch
+    [run 25267981601](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25267981601)
+    on the same head: `success` in 4m52s.
+    `xcodebuild test -only-testing:VoltraLiveTests` exercised
+    the new smoke tests and they all passed alongside the existing
+    test suite. Signed archive + IPA export green.
+  - Post-bump dry_run on the bumped head: PENDING (will land before
+    PR open).
+- **Verification (post-tag):** PENDING — tag push triggers
+  `release.yml` non-dry-run path. 5-gate altool verify required per
+  `09_RELEASE_AND_SIGNING.md`.
+- **Risks:** On-device QA passes A–G per `SESSION_RECORDER_SPEC.md`
+  "Verification Contract" remain required. The smoke test only
+  verifies the SwiftUI env-object resolution pattern; full UI
+  exercise (recorder dot, viewer, ShareLink, scenePhase, etc.)
+  still needs device QA.
+- **Next step:** Open PR against `feat/ui-v4-2-claude` ready for
+  review. After user merges + pushes tag `v0.4.51-build78`, run
+  5-gate altool verify on the tag-triggered `release.yml` run.
+  Then on-device QA passes A–G to `QA_LOG.md`.

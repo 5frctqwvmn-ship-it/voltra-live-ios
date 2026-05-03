@@ -4,6 +4,73 @@
 > `docs/WORK_LOG.md` and are deleted from here. Unfixed items
 > stay until shipped.
 
+## KI-13 (b78) — B74-F11 Session Recorder launch crash (FIXED in b78)
+
+**Surfaced:** b77 ship to TestFlight, 2026-05-03. App crashed
+immediately on launch with `EXC_BREAKPOINT / SIGTRAP` on the main
+thread; stack trace top:
+`_assertionFailure → SwiftUI.EnvironmentObject.error() → ViewBodyAccessor.updateBody`.
+
+**Root cause:** `.overlay { content }` does NOT propagate env-objects
+from the modifier chain to the overlay's content. The overlay
+creates a composite where `content` is a SIBLING of the modified
+view, not a descendant — so `.environmentObject(X)` calls on the
+chain only reach the modified view's descendants, not the overlay
+content.
+
+In `VoltraLiveApp.swift` (b77 head `60df3f3`), `SessionRecorderToggle`
+was mounted via:
+
+```swift
+ContentView()
+    .environmentObject(recorder)   // line 127
+    ... other modifiers ...
+    .overlay(alignment: .bottomTrailing) {
+        SessionRecorderToggle()    // line 347 — DOES NOT inherit recorder
+    }
+```
+
+`SessionRecorderToggle` has `@EnvironmentObject private var recorder: SessionRecorder`.
+SwiftUI's `_EnvironmentObject` `DynamicProperty` resolution runs
+during initial view setup — even when the toggle's body returns
+`EmptyView()` because `VOLTRARecorderUnlocked` is `false` on a fresh
+install, the property-wrapper resolution still fires and crashes
+when the env-object cannot be found.
+
+**Fix commit:** `e1c19c7` on `fix/b78-recorder-launch-crash` →
+merged into `feat/ui-v4-2-claude` via PR #12.
+
+```swift
+.overlay(alignment: .bottomTrailing) {
+    SessionRecorderToggle()
+        .environmentObject(recorder)   // ← THE FIX
+}
+```
+
+**Verification:**
+- `build.yml` workflow_dispatch run 25267980973 on the fix branch
+  HEAD `e1c19c7`: `success` in 1m18s.
+- `release.yml dry_run=true` workflow_dispatch run 25267981601 on
+  the same head: `success` in 4m52s. `xcodebuild test` exercised
+  the new `VoltraLiveTests/RecorderLaunchSmokeTests.swift` (3
+  tests: `testRootOverlayWithRecorderToggleResolvesEnvironmentObject`,
+  `testSharedSingletonInitDoesNotCrash`,
+  `testSessionRecorderViewerResolvesEnvironmentObject`) and they
+  all passed. Removing the env-object re-injection in the future
+  would crash `testRootOverlayWithRecorderToggleResolvesEnvironmentObject`
+  and fail CI.
+- Final on-device verification deferred to b78 TestFlight surface +
+  QA passes A–G per `SESSION_RECORDER_SPEC.md`.
+
+**General lesson for future SwiftUI overlay patterns:** any view
+mounted via `.overlay { ... }` (or `.background { ... }`) at the
+app root that reads `@EnvironmentObject` MUST receive a direct
+`.environmentObject(...)` re-injection inside the overlay closure.
+The same applies to any view passed to a custom modifier that
+takes a `@ViewBuilder` content closure.
+
+---
+
 ## b68 Bug Batch — in flight
 
 Cycle opened Apr 29 2026 (PDT) immediately after b67 TestFlight

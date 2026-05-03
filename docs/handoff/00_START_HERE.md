@@ -176,18 +176,23 @@ minimum:
 
 ## Last shipped (informational)
 
-**v0.4.50 / build 77 — "Session Recorder" — B74-F11.** Local-only
-AI-readable debug recorder with redaction-by-default, 10,000-event
-FIFO buffer, `.txt` + `.json` export via `ShareLink`, and additive
-instrumentation across BLE chokepoints + HealthKit sample arrivals.
-9 user-visible silent guards converted to loud `guardTrip`. Hidden
-24×24 dot under the root overlay (triple-tap on the build-badge
-chip to unlock). Persists to
-`Application Support/SessionRecorder/last_session.json` on
-background. Tag `v0.4.50-build77`. See `02_CURRENT_STATE.md` for
-the rolling cycle snapshot and `03_ROADMAP.md` for what's queued.
+**v0.4.51 / build 78 — "Session Recorder (launch fix)" —
+B74-F11 hotfix.** Re-injects `SessionRecorder` env-object directly
+on `SessionRecorderToggle()` inside the root `.overlay` closure in
+`VoltraLiveApp.swift`. b77 shipped a SwiftUI
+`EnvironmentObject.error()` launch crash because
+`.overlay { content }` creates a composite where `content` is a
+SIBLING of the modified view — env-objects on the modifier chain
+do NOT propagate to the overlay's content. New
+`VoltraLiveTests/RecorderLaunchSmokeTests.swift` pins the fix via
+`UIHostingController` mount + force-layout. Tag `v0.4.51-build78`.
+KI-13 in `06_KNOWN_ISSUES.md`.
 
-**Prior shipped: v0.4.49 / build 76 — "Health signal indicator" —
+**Prior shipped (PULLED): v0.4.50 / build 77 — "Session Recorder" —
+B74-F11.** Pulled from TestFlight due to launch crash; fixed in
+b78.
+
+**Prior good: v0.4.49 / build 76 — "Health signal indicator" —
 B74-F8.**
 
 ## Sacred files (do not modify without explicit user approval)

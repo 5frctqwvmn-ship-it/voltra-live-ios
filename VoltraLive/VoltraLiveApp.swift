@@ -343,8 +343,20 @@ struct VoltraLiveApp: App {
                 // safe area. Hidden until the user triple-taps the
                 // build-badge chip (UserDefaults["VOLTRARecorderUnlocked"]).
                 // Sits above the build badge via the toggle's own padding.
+                //
+                // b78 launch-crash fix: `.overlay { content }` does NOT
+                // propagate env-objects from the modifier chain to the
+                // overlay content — the content is a sibling of the
+                // modified view, not a descendant. Without re-injecting
+                // `recorder` here, SwiftUI's DynamicProperty resolution
+                // for SessionRecorderToggle's @EnvironmentObject crashes
+                // at view setup with `EnvironmentObject.error()` even
+                // when the toggle's body returns EmptyView (because
+                // VOLTRARecorderUnlocked is false on a fresh install).
+                // See KI-13 in 06_KNOWN_ISSUES.md.
                 .overlay(alignment: .bottomTrailing) {
                     SessionRecorderToggle()
+                        .environmentObject(recorder)
                 }
         }
         .modelContainer(modelContainer)

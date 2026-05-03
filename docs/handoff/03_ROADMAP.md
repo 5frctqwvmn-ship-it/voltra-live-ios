@@ -1,6 +1,6 @@
 # 03 — Roadmap
 
-_Last updated: 2026-05-03 (b77 release dispatched — B74-F11 Session Recorder)._
+_Last updated: 2026-05-03 (b78 launch-crash hotfix dispatched — B74-F11 Session Recorder env-object re-injection)._
 
 > **Maintenance rule:** overwritten on every ship. Items that ship move to "Done" with the build number; items that emerge get added to "Next up". History lives in `docs/WORK_LOG.md`.
 
@@ -8,7 +8,8 @@ _Last updated: 2026-05-03 (b77 release dispatched — B74-F11 Session Recorder).
 
 | Build | Tag | Label | Highlights |
 |---|---|---|---|
-| 77 | v0.4.50-build77 | Session Recorder | B74-F11: local-only AI-readable debug recorder. Hidden 24×24 dot under root overlay (triple-tap build-badge chip to unlock). 10,000-event FIFO actor buffer; `.txt` + `.json` export via `ShareLink` (schemaVersion=1). `SessionRecorder.shared` singleton with `ActionScope` `@TaskLocal UUID` for cause→effect chains. Persists to `Application Support/SessionRecorder/last_session.json` on background. Additive instrumentation: 14 emits in `VoltraBLEManager`, 2 in `VoltraWriter`, 5 emit groups in `MultiDeviceManager`, 6 read-only emit groups in `HealthKitStore`. 9 user-visible silent guards converted to loud `guardTrip`. `.recorderScreen` tags on 13 top-level screens. PR #10 merged via `88a4eaf`. |
+| 78 | v0.4.51-build78 | Session Recorder (launch fix) | B74-F11 hotfix: re-injects `SessionRecorder` env-object directly on `SessionRecorderToggle()` inside the root `.overlay` closure in `VoltraLiveApp.swift`. b77 shipped a SwiftUI `EnvironmentObject.error()` launch crash because `.overlay { content }` does NOT propagate env-objects from the modifier chain — the overlay's content is a sibling of the modified view, not a descendant. New `VoltraLiveTests/RecorderLaunchSmokeTests.swift` pins the fix via `UIHostingController` mount + force-layout — removing the fix crashes the test. KI-13 in `06_KNOWN_ISSUES.md`. |
+| 77 | v0.4.50-build77 | Session Recorder (PULLED — launch crash) | B74-F11: local-only AI-readable debug recorder. Hidden 24×24 dot under root overlay (triple-tap build-badge chip to unlock). 10,000-event FIFO actor buffer; `.txt` + `.json` export via `ShareLink` (schemaVersion=1). `SessionRecorder.shared` singleton with `ActionScope` `@TaskLocal UUID` for cause→effect chains. Persists to `Application Support/SessionRecorder/last_session.json` on background. Additive instrumentation: 14 emits in `VoltraBLEManager`, 2 in `VoltraWriter`, 5 emit groups in `MultiDeviceManager`, 6 read-only emit groups in `HealthKitStore`. 9 user-visible silent guards converted to loud `guardTrip`. `.recorderScreen` tags on 13 top-level screens. PR #10 merged via `88a4eaf`. **Pulled from TestFlight — launch crash; fixed in b78.** |
 | 76 | v0.4.49-build76 | Health signal indicator | B74-F8: replaced legacy dual-dot HR pill in `VoltraUnitHeader` with a single neutral Health signal indicator. Idle = faint but visible pre-HK auth; tap-while-unauthorized → HK consent sheet; live = header text color when HR sample within 10 s freshness window; >10 s stale flips back to faint without app re-foreground. L / R / ⋏ pills unchanged. Release-only ship — implementation already merged at `713a851`. |
 | 75 | v0.4.48-build75 | L/R auto-connect | B74-F1: L/R buttons auto-connect to Voltras whose advertised names contain "left"/"right" (case-insensitive). |
 | 74 | v0.4.47-build74 | Grid scroll fix v2 | b74 V4-D24 debug grid TRUE content-space layer (PR-only / unverified) + b74 grid scroll-anchor fix. |
