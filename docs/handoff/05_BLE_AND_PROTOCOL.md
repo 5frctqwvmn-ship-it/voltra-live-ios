@@ -258,3 +258,65 @@ on-device evidence:
 
 The full unknowns list with proposed resolution paths is in
 `docs/handoff/artifacts/ble_characteristic_audit_2026-05-03.md`.
+
+## Base-weight confirmation byte layout (Telemetry v2 first slice, 2026-05-03)
+
+The Telemetry v2 frame decoder shipped in this commit recognizes one
+device-side notification pattern: **base-weight confirmation**.
+
+### Wire shape
+
+A param-write confirmation reuses the same inner payload structure
+the app emits when it sends a `CMD_PARAM_WRITE`:
+
+```
+[01] [00] [paramLo] [paramHi] [valueLo] [valueHi]
+```
+
+For base weight, `paramId = PARAM_BP_BASE_WEIGHT = 0x3E86` written
+little-endian on the wire as `86 3E`. The two value bytes are the
+weight in pounds as `uint16` little-endian.
+
+### Verified byte vectors
+
+The same builder exercised by `VoltraControlFramesTests` proves the
+encoding round-trip:
+
+| Weight (lb) | Inner payload bytes  |
+|------------:|----------------------|
+| 5           | `01 00 86 3E 05 00`  |
+| 10          | `01 00 86 3E 0A 00`  |
+| 15          | `01 00 86 3E 0F 00`  |
+| 20          | `01 00 86 3E 14 00`  |
+| 95          | `01 00 86 3E 5F 00`  |
+
+### Hardware-observed values
+
+The May 2026 hardware verification session captured `86 3e XX`
+substrings in three notify frames. With the `uint16-LE` rule pinned
+above, these decode unambiguously:
+
+| Observed bytes | Decoded base weight |
+|----------------|--------------------:|
+| `86 3e 5f`     | 95 lb              |
+| `86 3e 14`     | 20 lb              |
+| `86 3e 0f`     | 15 lb              |
+
+### Decoder invariants
+
+- The decoder scans the **assembled** frame (post-`FrameAssembler`)
+  for the `86 3E` token and reads the next 2 bytes as `uint16-LE`.
+  CRC is not re-checked — `FrameAssembler` already gates that.
+- Weights outside `[0, 250]` lb are rejected as corrupt and produce
+  a `.candidate` event instead of a `.stateConfirmation`.
+- Unknown frames pass through as `.candidate(rawHex:prefix:)` and
+  are not errors. The decoder is read-only and additive by design.
+
+### Reference
+
+- Implementation: `VoltraLive/BLE/Decoder/VoltraDecodeTable.swift`.
+- Tests: `VoltraLiveTests/VoltraBLEFrameDecoderTests.swift`.
+- Cross-reference: dylanmaniatakes/Beyond-Power-Voltra-Android
+  `core/protocol/.../VoltraNotificationParser.kt` (2005 lines, NOT
+  exhaustively read — eccentric / chains / mode patterns are still
+  pending hardware confirmation before the decode table grows).

@@ -20,6 +20,11 @@ enum RecorderCategory: String, Codable, Sendable, CaseIterable {
     case `guard`
     case lifecycle
     case recorder
+    /// Telemetry v2: authoritative device-side state changes (what the
+    /// VOLTRA hardware confirmed, not what the app requested). Distinct
+    /// from `.ble` (raw bytes) and `.state` (app/UI state) so semantic
+    /// events stay easy to filter in the export.
+    case device
 }
 
 /// Type-tagged value used in the metadata bag.

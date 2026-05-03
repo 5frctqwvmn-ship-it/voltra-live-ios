@@ -347,3 +347,53 @@ on device.
 `HealthKitStore.swift`, `VoltraLiveApp.swift`, `LoggingHomeView.swift`,
 `LiveCaptureViewV2.swift`, `LiveCaptureView.swift`,
 `07_FILE_MAP.md`, `03_CURRENT_FEATURE_SPEC.md` §10.
+
+---
+
+## Session: 2026-05-03 — Telemetry v2 first Swift slice (base-weight decoder)
+
+### Decision
+
+- **User decision.** Proceed with Telemetry v2 as the main track;
+  defer the drop-set stuck UI bug (KI-19). Telemetry/device-state
+  foundation should help debug + fix drop sets later.
+- **Scope landed in this commit.** Additive BLE frame decoder,
+  `DeviceState` + reducer, pending/confirmed source attribution,
+  `device.state.change` semantic recorder event — all scoped to
+  **base weight only**.
+- **Explicitly deferred.** Drop-set stuck bug, eccentric / chains /
+  mode decode, `LoadState` + stream-gap detection, treating `0x03`
+  as unloaded/fault, export compression / session summary, removing
+  duplicate `ble.write.tx` events.
+
+### Why base-weight first
+
+- Highest-confidence hypothesis: `setBaseWeightPayload(N)` produces
+  `01 00 86 3E <lo> <hi>` (uint16-LE) per the captured iPad frames
+  in `VoltraControlFramesTests`. The May-2026 hardware session
+  observed `86 3e 5f / 14 / 0f` substrings, which decode to
+  95 / 20 / 15 lb under that rule. Byte-vector parity with the
+  writer side pins the hypothesis — see new `05_BLE_AND_PROTOCOL.md`
+  §"Base-weight confirmation byte layout" and resolved OQ-T0 in
+  `10_OPEN_QUESTIONS.md`.
+- It also directly addresses the highest-impact known issue
+  (KI-20: machine-side dial changes not reaching the app).
+
+### Sacred-files invariant
+
+Verified zero edits to `VoltraProtocol.swift`,
+`TelemetryExtractor.swift`, `PacketParser.swift`,
+`FrameAssembler.swift`, `.github/workflows/build.yml`. The legacy
+0xAA telemetry pipeline keeps emitting exactly what it emits today;
+the new decoder runs alongside it on the same `FrameAssembler`
+output and writes to a separate `@Published deviceState`.
+
+### Out-of-scope intentionally
+
+- LiveCaptureView's base-weight tile does NOT yet read
+  `deviceState.baseWeightLb?.value`. Closing KI-20 end-to-end
+  needs that UI bind in a follow-up commit so revert granularity
+  stays one wire-change per commit.
+- `xcodebuild test` not run in this session (Linux sandbox, no
+  Swift toolchain). Tests included with the slice; CI / hardware
+  verification gates the next commit.

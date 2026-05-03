@@ -234,3 +234,42 @@ side is silenced. Hypothesis bytes (OQ-T1, OQ-T3 in
 hypothesis on the emitted event until hardware evidence promotes
 them. The export schema advances 1 → 2 additively so existing
 consumers keep working.
+
+### First-slice files (post-b78, this commit)
+
+```
+VoltraLive/BLE/Decoder/
+  VoltraDecodedEvent.swift     // Event + Source enums
+  VoltraDecodeTable.swift      // Pattern table (data-driven)
+  VoltraBLEFrameDecoder.swift  // decode(_:) + PendingWriteTracker
+VoltraLive/BLE/State/
+  DeviceState.swift            // DeviceState + reducer + ConfirmedValue<T>
+VoltraLiveTests/
+  VoltraBLEFrameDecoderTests.swift  // Golden + reducer + correlator
+```
+
+The decoder is invoked from `VoltraBLEManager.handleNotification(...)`
+immediately AFTER the existing `ble.notify.rx` recorder hook and
+BEFORE `parsePacket(...)`. The legacy pipeline (PacketParser →
+TelemetryExtractor → mergeTelemetry) is unchanged — the decoder runs
+in parallel and writes only to the new `@Published deviceState`.
+
+Outbound app-issued param writes register with
+`PendingWriteTracker` via the new `VoltraWriter.onOutboundParam`
+callback, wired in both `WriterRouter` (single-device) and
+`MultiDeviceManager` (per side). Confirmation source attribution:
+
+- `appRequestConfirmed` — the next matching `(field, lb)` confirmation
+  arrives within the 2 s window (configurable per `PendingWriteTracker`
+  init).
+- `deviceUnsolicited` — no matching pending entry. Most common cause:
+  user pressed the +/- buttons on the machine itself.
+- `unknownOrigin` — reserved; not emitted in this slice.
+
+Unknown frames produce `.candidate(rawHex:prefix:)` events and are
+currently dropped at the BLE manager. Sampled candidate-trace recorder
+emission is a follow-up.
+
+Pattern coverage today: **base weight only**
+(`PARAM_BP_BASE_WEIGHT = 0x3E86`, uint16-LE pounds). Adding eccentric,
+chains, mode, etc. is a one-row append to `VoltraDecodeTable.all`.

@@ -621,22 +621,46 @@ each machine-facing field carries
 `DeviceState`. Migration is one field at a time, base weight
 first.
 
-### KI-20 (post-b78, open) — Machine-side weight changes do not reliably update app
+### KI-20 (post-b78, in progress) — Machine-side weight changes do not reliably update app
 
-**Status.** Open. Targeted by Telemetry v2 source-of-truth
-rules + decoder hypothesis on `863e..` notify tails.
+**Status.** In progress. Decoder + reducer landed in the
+first Telemetry v2 slice; UI binding to `DeviceState` for
+base-weight is the remaining piece before this can be marked
+resolved.
 
 **What.** User adjusts the dial on the VOLTRA itself. App
 display does not update without manual refresh. Observed in
 the hardware verification session.
 
-**Resolution plan.** Decoder consumes the `863e..` notify
-payloads, emits `device.state.change(field=baseWeight,
-status=confirmed, source=deviceUnsolicited)`, reducer applies
-to `DeviceState`, UI re-renders. The hypothesis that
-`863e5f=95` etc. is the base-weight confirmation needs
-fixture-pinning before the decoder relies on it; see
-`03_CURRENT_FEATURE_SPEC.md` "Decoder requirements".
+**Progress (this commit).**
+- `VoltraBLEFrameDecoder` recognizes the `86 3E XX YY` token
+  in any assembled notify frame and decodes the trailing two
+  bytes as `uint16-LE` pounds.
+- Hypothesis pinned via byte-vector parity with the writer
+  side: the captured iPad frames in
+  `VoltraControlFramesTests` show `setBaseWeightPayload(5)`
+  produces `0100863E0500`, `setBaseWeightPayload(10)`
+  produces `0100863E0A00`, etc. The device echoes the same
+  param-id + uint16-LE value layout when confirming, so the
+  observed `863e5f / 863e14 / 863e0f` from the hardware
+  session decode correctly to 95 / 20 / 15 lb.
+- `PendingWriteTracker` (2 s window) attributes confirmations
+  to `appRequestConfirmed` vs. `deviceUnsolicited`; the
+  writer registers outbound base-weight writes via the new
+  `onOutboundParam` callback wired in both `WriterRouter`
+  (single-device) and `MultiDeviceManager` (per-side).
+- `device.state.change` semantic events now flow through
+  `SessionRecorder` under the new `.device` category.
+
+**Remaining for resolution.**
+- Bind LiveCaptureView's base-weight tile to
+  `VoltraBLEManager.deviceState.baseWeightLb` so the dial
+  update visibly reaches the user.
+- Hardware re-verification with the recorder armed to
+  confirm the `device.state.change` event stream matches
+  observed dial movements end-to-end.
+- Eccentric / chains / mode confirmations remain deferred
+  (KI-21).
 
 ### KI-21 (post-b78, open) — Eccentric/concentric/chains can drift between hardware and app
 

@@ -34,16 +34,25 @@ explicitly asked.
 **Then summarize state back to the user. Do not edit anything until you
 have done this.**
 
-## Active branch state (no feature in flight)
+## Active branch state (Telemetry v2 first slice in flight, post-b78)
 
 - **Branch:** `feat/ui-v4-2-claude` (integration branch).
-- **Last shipped:** **v0.4.50 / build 77 — "Session Recorder" — B74-F11.**
-  Tag `v0.4.50-build77`. PR #10 merged at `88a4eaf`. The full
-  Session Recorder feature (3 implementation commits + 2 checkpoint
-  commits + 1 CI fix + 2 docs-log commits) lives on this branch.
+- **Last shipped to TestFlight:** **v0.4.51 / build 78 — "Session
+  Recorder (launch fix)" — B74-F11.** Tag `v0.4.51-build78`.
+- **In flight on the branch (not shipped).**
+  - Telemetry v2 docs alignment commit `6a3162b`.
+  - BLE characteristic audit commit `2636b49`.
+  - **Telemetry v2 first Swift slice** (this commit) — additive
+    BLE frame decoder + `DeviceState` reducer + base-weight
+    confirmation handling. See `03_CURRENT_FEATURE_SPEC.md`
+    "Recommended implementation order" steps 2 / 3 / 5 / 7 for the
+    partial-status breakdown.
 - **Working tree:** clean except `.claude/` is untracked. **NEVER stage
   `.claude/`.**
-- **Goal:** none in flight; awaiting next feature request.
+- **Goal:** ship the Telemetry v2 base-weight slice end-to-end (data
+  path landed; LiveCaptureView UI bind to
+  `VoltraBLEManager.deviceState.baseWeightLb?.value` is the next
+  follow-up commit before this is release-worthy).
 
 ## Plan (3 logical commits → one PR against `feat/ui-v4-2-claude`)
 

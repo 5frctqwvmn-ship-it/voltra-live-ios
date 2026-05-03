@@ -399,26 +399,53 @@ finalize byte-position assumptions before the audit is in.
 ## Recommended implementation order
 
 1. **BLE characteristic audit** (no Swift; user runs nRF
-   Connect / LightBlue and pastes results).
+   Connect / LightBlue and pastes results). ✅ **DONE** —
+   reference-only audit at `docs/handoff/artifacts/ble_characteristic_audit_2026-05-03.md`,
+   committed at `2636b49`.
 2. **Shared frame decoder abstraction** — additive scaffold
-   alongside `Protocol/`. Initially returns empty semantic
-   events; verifies the wiring path is correct.
-3. **`DeviceState` model + reducer** — reducer applies
-   semantic events; tested in isolation against fixtures.
-4. **Bind UI to `DeviceState` for base weight first** — one
-   field, end-to-end, before expanding.
+   alongside `Protocol/`. ✅ **DONE (first slice).** Lives in
+   `VoltraLive/BLE/Decoder/{VoltraBLEFrameDecoder,
+   VoltraDecodeTable, VoltraDecodedEvent}.swift`. Pattern
+   table is data-driven so adding eccentric / chains / mode
+   in a follow-up is a one-line addition.
+3. **`DeviceState` model + reducer** — ✅ **DONE (base-weight
+   only).** `VoltraLive/BLE/State/DeviceState.swift` with
+   `ConfirmedValue<T>` carrying `(value, source, at)` and a
+   pure `DeviceStateReducer.apply(_:to:)`. Eccentric /
+   chains / mode fields are intentionally absent until their
+   confirmation patterns are pinned.
+4. **Bind UI to `DeviceState` for base weight first** —
+   ⏳ **NEXT.** `VoltraBLEManager` now publishes
+   `@Published var deviceState: DeviceState`; LiveCaptureView
+   needs to read `deviceState.baseWeightLb?.value` and
+   reconcile against the user's UI requested value. Out of
+   scope for the first slice so this commit can ship
+   independently.
 5. **Pending / confirmed write flow + 750 ms timeout.**
+   🟡 **PARTIAL.** `PendingWriteTracker` lives in
+   `VoltraBLEFrameDecoder.swift` with a 2 s default window
+   (more conservative than the 750 ms target while we
+   validate cadence). The writer registers outbound
+   base-weight writes via `onOutboundParam`. Other params
+   are not yet registered. `pending` UI status is not yet
+   surfaced — only the source attribution
+   (`appRequestConfirmed` vs. `deviceUnsolicited`) is
+   recorded today.
 6. **`LoadState` + stream-gap detection** at the 500 / 2000 ms
-   thresholds.
+   thresholds. ⏳ Deferred.
 7. **Semantic recorder events + export summary + incident
-   banner.**
-8. **Remove duplicate `ble.write.tx` events.**
+   banner.** 🟡 **PARTIAL.** New `RecorderCategory.device`
+   case. `device.state.change` event emitted on every real
+   transition with `field / from / to / source / rawHex`
+   metadata. Export summary + incident banner deferred.
+8. **Remove duplicate `ble.write.tx` events.** ⏳ Deferred
+   (writer-level + manager-level write.tx still both fire).
 9. **Expand decoder coverage** to eccentric / concentric /
    chains once the audit + hardware tests have validated byte
-   positions.
+   positions. ⏳ Deferred.
 10. **Validate on hardware** and revise the decode table.
     Promote validated hypotheses (e.g. `0x03`) to named
-    constants.
+    constants. ⏳ Deferred.
 
 ## Non-goals
 

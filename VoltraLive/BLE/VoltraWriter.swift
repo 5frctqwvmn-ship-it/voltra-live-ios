@@ -77,6 +77,12 @@ final class VoltraWriter: VoltraWriting {
     private let writeFrame: (Data) -> Void
     /// Closure for log/UI surfacing. Same shape as VoltraBLEManager.addLog.
     private let log: (String) -> Void
+    /// Telemetry v2: optional hook called for each outbound param write the
+    /// decoder can attribute. The BLE manager wires this to its
+    /// `PendingWriteTracker` so the next matching device confirmation is
+    /// classified as `appRequestConfirmed` rather than `deviceUnsolicited`.
+    /// Optional so existing callers / mocks compile unchanged.
+    private let onOutboundParam: ((DeviceStateField, Int) -> Void)?
 
     // MARK: Tunables (match the prototype's auto-write cadence)
 
@@ -104,9 +110,12 @@ final class VoltraWriter: VoltraWriting {
 
     // MARK: Init
 
-    init(writeFrame: @escaping (Data) -> Void, log: @escaping (String) -> Void) {
+    init(writeFrame: @escaping (Data) -> Void,
+         log: @escaping (String) -> Void,
+         onOutboundParam: ((DeviceStateField, Int) -> Void)? = nil) {
         self.writeFrame = writeFrame
         self.log = log
+        self.onOutboundParam = onOutboundParam
     }
 
     // MARK: Public API
@@ -154,9 +163,14 @@ final class VoltraWriter: VoltraWriting {
             }
             // Base weight (always sent in weight mode).
             if prior?.weights.baseLb != target.weights.baseLb || prior?.mode != .weight {
-                trySend("base=\(target.weights.baseLb)") {
-                    try VoltraControlFrames.setBaseWeightPayload(target.weights.baseLb)
+                let lb = target.weights.baseLb
+                trySend("base=\(lb)") {
+                    try VoltraControlFrames.setBaseWeightPayload(lb)
                 }
+                // Telemetry v2: register the request so the decoder can
+                // attribute the resulting `86 3E XX` confirmation. Posted
+                // post-send because `trySend` may swallow on out-of-range.
+                onOutboundParam?(.baseWeight, lb)
             }
             // Eccentric weight is only meaningful when the eccentric modifier
             // is on; if it's off we explicitly send 0 to clear any prior load.

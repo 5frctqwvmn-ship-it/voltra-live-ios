@@ -366,11 +366,19 @@ final class MultiDeviceManager: ObservableObject {
         // doesn't create a retain cycle with the manager.
         self.leftWriter = VoltraWriter(
             writeFrame: { [weak self] data in self?.left.writeControlFrame(data)  },
-            log:        { [weak self] msg  in self?.left.addLog(msg) }
+            log:        { [weak self] msg  in self?.left.addLog(msg) },
+            // Telemetry v2: per-side pending-write registration so the
+            // left manager's decoder attributes its own confirmations.
+            onOutboundParam: { [weak self] field, lb in
+                self?.left.recordOutboundParamWrite(field: field, lb: lb)
+            }
         )
         self.rightWriter = VoltraWriter(
             writeFrame: { [weak self] data in self?.right.writeControlFrame(data) },
-            log:        { [weak self] msg  in self?.right.addLog(msg) }
+            log:        { [weak self] msg  in self?.right.addLog(msg) },
+            onOutboundParam: { [weak self] field, lb in
+                self?.right.recordOutboundParamWrite(field: field, lb: lb)
+            }
         )
 
         // Wire each device's onTelemetry to its slot-specific hook + the

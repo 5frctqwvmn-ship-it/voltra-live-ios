@@ -56,6 +56,16 @@ final class VoltraBLEManager: NSObject, ObservableObject {
     // Callback for callers that need raw telemetry (e.g. SessionStore)
     var onTelemetry: ((Telemetry) -> Void)?
 
+    // MARK: Telemetry v2 — additive decoder + authoritative device state
+    //
+    // Runs ALONGSIDE the legacy 0xAA telemetry pipeline (FrameAssembler →
+    // PacketParser → TelemetryExtractor). Sees the same assembled frames
+    // and looks for param-write confirmations the legacy path ignores.
+    // Currently models base-weight only; eccentric / chains / mode land
+    // in follow-up commits.
+    @Published private(set) var deviceState: DeviceState = .empty
+    let frameDecoder = VoltraBLEFrameDecoder()
+
     // MARK: Private CBCentral state
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -250,6 +260,31 @@ final class VoltraBLEManager: NSObject, ObservableObject {
                                   characteristic: nil,
                                   hex: String(frame.hexString.prefix(32)),
                                   length: frame.count, rssi: nil))
+
+            // Telemetry v2 (additive): feed the same frame through the
+            // device-state decoder and apply any confirmations to the
+            // authoritative `deviceState`. The legacy pipeline below is
+            // unchanged. Unknown frames produce a `.candidate` event
+            // which we currently drop — adding a sampled candidate-trace
+            // recorder event is a follow-up.
+            for event in frameDecoder.decode(frame) {
+                let reduction = DeviceStateReducer.apply(event, to: deviceState)
+                deviceState = reduction.newState
+                if let change = reduction.change {
+                    let fromMeta: RecorderValue = change.from.map { .int(Int64($0)) } ?? .string("nil")
+                    SessionRecorder.shared.record(
+                        category: .device, name: "device.state.change",
+                        metadata: [
+                            "field": .string(change.field.rawValue),
+                            "from": fromMeta,
+                            "to": .int(Int64(change.to)),
+                            "source": .string(change.source.rawValue),
+                            "rawHex": .hex(String(change.rawHex.prefix(32)))
+                        ])
+                    addLog("Device \(change.field.rawValue): \(change.from.map(String.init) ?? "?") → \(change.to) lb (\(change.source.rawValue))")
+                }
+            }
+
             guard let pkt = parsePacket(frame) else {
                 addLog("Unparseable frame: \(frame.hexString.prefix(40))…", level: .warn)
                 // B74-F11: surface the parser-failure case in the recorder too.
@@ -270,6 +305,15 @@ final class VoltraBLEManager: NSObject, ObservableObject {
                 onTelemetry?(telem)
             }
         }
+    }
+
+    /// Telemetry v2: register an outbound app-issued param write so the
+    /// decoder can attribute the resulting confirmation to
+    /// `appRequestConfirmed` (vs. `deviceUnsolicited` for machine-side
+    /// button presses). Called by `VoltraWriter.send(...)` for fields the
+    /// decoder currently understands. Safe noop for unrecognized fields.
+    func recordOutboundParamWrite(field: DeviceStateField, lb: Int) {
+        frameDecoder.pendingTracker.record(field: field, lb: lb)
     }
 
     /// b51: Public mirror so routed telemetry (from MultiDeviceManager when

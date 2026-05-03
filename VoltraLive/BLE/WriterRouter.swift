@@ -38,7 +38,13 @@ final class WriterRouter: ObservableObject {
         guard singleWriter == nil else { return }
         singleWriter = VoltraWriter(
             writeFrame: { [weak ble] frame in ble?.writeControlFrame(frame) },
-            log:        { [weak ble] msg   in ble?.addLog(msg) }
+            log:        { [weak ble] msg   in ble?.addLog(msg) },
+            // Telemetry v2: register outbound param writes with the BLE
+            // manager's pending tracker so the decoder can attribute the
+            // resulting confirmation to `appRequestConfirmed`.
+            onOutboundParam: { [weak ble] field, lb in
+                ble?.recordOutboundParamWrite(field: field, lb: lb)
+            }
         )
     }
 

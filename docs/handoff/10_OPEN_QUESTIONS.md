@@ -81,6 +81,17 @@ plus controlled hardware experiments before the decoder can promote
 any hypothesis to a constant. See `03_CURRENT_FEATURE_SPEC.md`
 ("Telemetry v2") and `06_KNOWN_ISSUES.md` (KI-23, KI-24, KI-26).
 
+### OQ-T0 — Base-weight confirmation byte layout — RESOLVED 2026-05-03
+
+Status: **resolved.** The hypothesis that the `86 3e XX` pattern in
+the notify stream is a base-weight confirmation is now pinned by
+byte-vector parity with the writer side: `setBaseWeightPayload(N)`
+produces `01 00 86 3E <lo> <hi>` (uint16-LE pounds) and the device
+echo-confirms the same layout. The May-2026 hardware observations
+(`86 3e 5f / 86 3e 14 / 86 3e 0f`) decode to 95 / 20 / 15 lb under
+this rule. Implemented in `VoltraDecodeTable.baseWeight`; see
+`05_BLE_AND_PROTOCOL.md` “Base-weight confirmation byte layout”.
+
 ### OQ-T1 — Meaning of `0x03` byte in `553404ac` status frames
 
 Status: **needs hardware experiment + spec confirmation.**

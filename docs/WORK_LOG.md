@@ -5402,3 +5402,93 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   VOLTRA and drop the export at
   `docs/handoff/artifacts/ble_scan_<date>.{json,txt}` — that closes
   the remaining unknowns in OQ-T4.
+
+## 2026-05-03 15:30 EDT — Telemetry v2 first slice: base-weight decoder
+
+- **Goal.** Land the first Swift slice of Telemetry v2 / Authoritative
+  Device State: an additive BLE frame decoder, a `DeviceState` model
+  and reducer, pending/confirmed write attribution, and a
+  `device.state.change` semantic recorder event — all scoped to base
+  weight only. User explicitly authorized the Swift work in this
+  session; release-only mode lifted for this slice. Drop-set stuck
+  bug (KI-19) is deferred per user decision.
+
+- **Files added.**
+  - `VoltraLive/BLE/Decoder/VoltraDecodedEvent.swift` — `DeviceStateField`,
+    `DeviceStateChangeSource`, `VoltraDecodedEvent`.
+  - `VoltraLive/BLE/Decoder/VoltraDecodeTable.swift` — `VoltraDecodePattern`
+    + base-weight pattern (`paramId 0x3E86`, uint16-LE pounds, range 0..250).
+  - `VoltraLive/BLE/Decoder/VoltraBLEFrameDecoder.swift` — `decode(_:)`
+    + `PendingWriteTracker` (FIFO, 32 cap, 2 s window).
+  - `VoltraLive/BLE/State/DeviceState.swift` — `DeviceState`,
+    `ConfirmedValue<T>`, `DeviceStateReducer.apply(_:to:)`,
+    `DeviceStateChange`.
+  - `VoltraLiveTests/VoltraBLEFrameDecoderTests.swift` — 11 cases
+    (golden 5/15/20/95, source attribution, pending expiry, candidate
+    pass-through, reducer idempotency + transitions).
+
+- **Files modified.**
+  - `VoltraLive/Recorder/RecorderEvent.swift` — added
+    `RecorderCategory.device` (additive enum case).
+  - `VoltraLive/BLE/VoltraBLEManager.swift` — added
+    `@Published deviceState: DeviceState`, `frameDecoder`, decoder
+    invocation in `handleNotification(...)` (between `ble.notify.rx`
+    and the legacy `parsePacket(...)`), `device.state.change` recorder
+    emit, `recordOutboundParamWrite(field:lb:)` public hook.
+  - `VoltraLive/BLE/VoltraWriter.swift` — added optional
+    `onOutboundParam` init param; calls it after each base-weight
+    write in `flush()`.
+  - `VoltraLive/BLE/WriterRouter.swift` — wires `onOutboundParam` to
+    the legacy single-device manager's pending tracker.
+  - `VoltraLive/BLE/Dual/MultiDeviceManager.swift` — wires
+    `onOutboundParam` per side (left/right).
+
+- **Docs updated in same commit.** `03_CURRENT_FEATURE_SPEC.md`
+  (implementation order steps 1–7 status), `04_ARCHITECTURE.md`
+  (first-slice file map + invocation point + source attribution),
+  `05_BLE_AND_PROTOCOL.md` (base-weight wire format with byte-vector
+  table + decoder invariants), `06_KNOWN_ISSUES.md` (KI-20 →
+  in-progress), `10_OPEN_QUESTIONS.md` (new OQ-T0 RESOLVED entry),
+  `CONVERSATION_LOG.md`.
+
+- **Sacred-files invariant.** Verified untouched:
+  `VoltraProtocol.swift`, `TelemetryExtractor.swift`,
+  `PacketParser.swift`, `FrameAssembler.swift`,
+  `.github/workflows/build.yml`. The legacy 0xAA telemetry pipeline
+  is unchanged; the v2 decoder runs alongside it.
+
+- **Verification.**
+  - Static review of all 5 new files + 5 modified files; no obvious
+    Swift syntax issues. Decoder logic is pure-function over `Data`
+    and uses `subdata(in:)` indices correctly for sliced buffers.
+  - `xcodebuild test` could not run in this Linux sandbox (no Swift
+    toolchain). Tests must be run by the user / CI before this slice
+    is shipped to TestFlight. 11 unit tests are included; the build
+    surface change is small (no new `import`s, no project.yml change
+    — XcodeGen `path: VoltraLive` glob auto-includes the new
+    `BLE/Decoder/` and `BLE/State/` subdirectories, and the test
+    file lands in the existing `VoltraLiveTests` target).
+  - `git diff --name-only HEAD` against the sacred list returned 0
+    matches. Confirmed twice.
+
+- **Risks.**
+  - `DeviceState.baseWeightLb` is published but no UI binds to it
+    yet. `LiveCaptureView` still reads the user's most recent UI
+    request, so machine-side dial changes still won't visibly update
+    the tile — KI-20 stays "in progress" until that wire is run.
+    Decision: ship the data path now, bind UI in a follow-up commit
+    so each commit can be reverted independently if it misbehaves.
+  - The `PendingWriteTracker` window is 2 s (vs. 750 ms target in
+    the spec). Conservative on purpose while we observe the real
+    confirmation cadence; tightening is a one-line change once we
+    have a bigger sample.
+  - Eccentric / chains / inverse-chain confirmations are NOT yet
+    decoded. The writer registers ONLY base-weight outbound writes;
+    other params will surface as `deviceUnsolicited` in the recorder
+    until their patterns are added. Documented in 03 step 9 and 10.
+
+- **Next step.** Either (a) bind LiveCaptureView's base-weight tile
+  to `VoltraBLEManager.deviceState.baseWeightLb?.value` to close
+  KI-20 end-to-end, or (b) extend the decode table to chains
+  (`0x3E87`) + eccentric (`0x3E88`) using the same proof-by-byte-
+  vector approach. Both are independent of this commit.
