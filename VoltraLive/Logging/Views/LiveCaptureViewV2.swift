@@ -1428,11 +1428,25 @@ struct LiveCaptureViewV2: View {
     /// both via `mdm.applyCombined`. In Independent mode this returns the
     /// focused unit. In single-Voltra sessions this returns the legacy
     /// `ble` so existing logic keeps working unchanged.
+    ///
+    /// KI-20 fix: routing is based purely on connection topology, not
+    /// peripheral names or labels. When both MDM slots are connected the
+    /// existing focusedSlot switch applies. When exactly one MDM slot is
+    /// connected that manager is returned regardless of which slot it
+    /// occupies. The standalone `ble` is returned only when neither MDM
+    /// slot is connected (no MDM device paired at all).
     private var focusedBle: VoltraBLEManager {
-        if !bothVoltrasConnected { return ble }
-        switch focusedSlot {
-        case .left:  return mdm.left
-        case .right: return mdm.right
+        let leftOn  = mdm.left.connectionState.isConnected
+        let rightOn = mdm.right.connectionState.isConnected
+        switch (leftOn, rightOn) {
+        case (true, true):
+            return focusedSlot == .left ? mdm.left : mdm.right
+        case (true, false):
+            return mdm.left
+        case (false, true):
+            return mdm.right
+        case (false, false):
+            return ble
         }
     }
 

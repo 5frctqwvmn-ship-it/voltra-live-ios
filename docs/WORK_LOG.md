@@ -5826,3 +5826,29 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   VOLTRA to 15 lb. Expected: tile updates to 15 lb. Expected logs:
   device.state.change source=deviceUnsolicited to=15 +
   ui.deviceBaseWeightApplied to=15.
+
+## 2026-05-03 23:10 UTC — KI-20 focusedBle topology fix
+
+- **Goal.** Fix root cause of KI-20 visual bridge miss on build 80.
+  Read-only audit confirmed: when only one VOLTRA is connected via MDM,
+  `bothVoltrasConnected` is false and `focusedBle` was returning the
+  standalone `ble` manager (never receives BLE notifications in MDM
+  sessions), not the MDM slot manager that actually has the connection.
+- **Files changed.**
+  - `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — `focusedBle`
+    computed property replaced with a topology-only switch on
+    `(mdm.left.connectionState.isConnected, mdm.right.connectionState.isConnected)`.
+    Routes to `mdm.left` when only left is connected, `mdm.right` when
+    only right is connected, `focusedSlot` switch when both are connected,
+    standalone `ble` only when neither MDM slot is connected.
+    No peripheral names, labels, or advertised names used.
+- **What changed.** `focusedBle` now always returns the manager that
+  holds the live BLE connection, regardless of how many MDM slots are
+  active. `deviceOriginatedBaseWeightUpdateID` on the correct manager
+  will now fire the SwiftUI onChange in LiveCaptureViewV2.
+- **What did NOT change.** `bothVoltrasConnected`, `twinModeActive`,
+  `focusedSlot`, writer routing, header UI, `applyDeviceOriginatedBase`
+  guards — all unchanged.
+- **Sacred files.** Unchanged.
+- **Verification.** Static review only (no Xcode available).
+- **Next step.** Commit, bump build 81, ship TestFlight, run A1 retest.
