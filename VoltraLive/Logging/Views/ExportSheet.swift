@@ -84,6 +84,8 @@ struct ExportSheet: View {
         .buildBadgeOverlay()
         // b66 V4.2: page-name badge.
         .pageBadge("ExportSheet")
+        // B74-F11: recorder screen tag.
+        .recorderScreen("ExportSheet")
         }
 
     // MARK: - v0.4.4 summary cards

@@ -294,6 +294,8 @@ struct LiveCaptureView: View {
         }
         // b66 V4.2: page-name badge.
         .pageBadge("LiveCaptureView")
+        // B74-F11: recorder screen tag.
+        .recorderScreen("LiveCaptureView")
         }
 
     /// b47: when entering (or already in) Combined mode, round the standing
@@ -973,11 +975,16 @@ struct LiveCaptureView: View {
     /// connected, so V1 users get the same "weights loaded → simulated
     /// telemetry" experience B68-01 added on V2.
     private func sendLoad() {
-        autoEngageDemoIfNeeded()
-        if mdm.state != .idle {
-            mdm.load()
-        } else {
-            ble.sendLoad()
+        // B74-F11: ActionScope so the LOAD chain (autoEngage demo +
+        // mdm.load / ble.sendLoad) shares an actionId. action() helper
+        // auto-emits ui.tap.weight at the top of the scope.
+        SessionRecorder.shared.action("ui.tap.weight", screen: "LiveCaptureView") {
+            autoEngageDemoIfNeeded()
+            if mdm.state != .idle {
+                mdm.load()
+            } else {
+                ble.sendLoad()
+            }
         }
     }
 
@@ -995,8 +1002,23 @@ struct LiveCaptureView: View {
     /// is connected. Idempotent — `DemoController.enter` early-returns
     /// when already active. Ports B68-01's V2 helper verbatim.
     private func autoEngageDemoIfNeeded() {
-        guard !anyDeviceConnected, !demo.isActive else { return }
-        guard let handler = DemoTelemetryBridge.shared.handler else { return }
+        guard !anyDeviceConnected, !demo.isActive else {
+            SessionRecorder.shared.guardTrip(
+                name: "demo.alreadyArmedOrConnected",
+                reason: "anyDeviceConnected=\(anyDeviceConnected) demo.isActive=\(demo.isActive)",
+                state: ["screen": .string("LiveCaptureView"),
+                        "anyDeviceConnected": .bool(anyDeviceConnected),
+                        "demoActive": .bool(demo.isActive)])
+            return
+        }
+        guard let handler = DemoTelemetryBridge.shared.handler else {
+            SessionRecorder.shared.guardTrip(
+                name: "demo.handlerMissing",
+                reason: "DemoTelemetryBridge.shared.handler == nil",
+                state: ["screen": .string("LiveCaptureView"),
+                        "source": .string("autoEngage")])
+            return
+        }
         demo.note(.buttonTap(
             label: "Auto-engage (no device, LOAD pressed)",
             screen: "LiveCaptureView"
@@ -1017,10 +1039,13 @@ struct LiveCaptureView: View {
 
     /// UNLOAD command. Same routing as sendLoad().
     private func sendUnload() {
-        if mdm.state != .idle {
-            mdm.unload()
-        } else {
-            ble.sendUnload()
+        // B74-F11: ActionScope so the UNLOAD chain shares an actionId.
+        SessionRecorder.shared.action("ui.tap.unload", screen: "LiveCaptureView") {
+            if mdm.state != .idle {
+                mdm.unload()
+            } else {
+                ble.sendUnload()
+            }
         }
     }
 
@@ -1172,7 +1197,13 @@ struct LiveCaptureView: View {
                     logging.bumpCascadeTier()
                 } else {
                     let starting = logging.pendingPlannedWeightLb ?? 0
-                    guard starting > 0 else { return }
+                    guard starting > 0 else {
+                        SessionRecorder.shared.guardTrip(
+                            name: "dropStart.noWeight",
+                            reason: "pendingPlannedWeightLb is 0 — cannot start drop",
+                            state: ["screen": .string("LiveCaptureView")])
+                        return
+                    }
                     logging.startDropSet(startingLb: starting) { lb in
                         pushWeightToDevice(lb)
                     }

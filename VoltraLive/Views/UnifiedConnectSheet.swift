@@ -86,6 +86,8 @@ struct UnifiedConnectSheet: View {
         .onChange(of: scanner.discovered) { _, _ in
             tryAutoConnectForRequestedSlot()
         }
+        // B74-F11: recorder screen tag.
+        .recorderScreen("UnifiedConnectSheet")
     }
 
     // MARK: - Header

@@ -4654,3 +4654,353 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   and run QA passes A–G with the user, recording results in
   `QA_LOG.md`. Any **Not** result becomes a KI-N entry in
   `06_KNOWN_ISSUES.md` or a follow-up fix PR.
+
+## 2026-05-02 17:00 UTC — Durable handoff checkpoint after B74-F11 Commit 1
+
+- **Files changed:** `docs/handoff/00_START_HERE.md` (overwrite),
+  `docs/handoff/CONVERSATION_LOG.md` (new), `docs/WORK_LOG.md` (this
+  entry).
+- **What changed:** Captured the full session context for B74-F11
+  Session Recorder implementation in repo so a fresh Voltra Brain chat
+  can resume by reading files only. Documented: worktree blocker
+  resolution (created `feat/b77-session-recorder` from
+  `origin/feat/ui-v4-2-claude` inside the existing worktree instead of
+  switching branches in the main checkout); approved 3-commit plan
+  (core engine done at `76becdf`, then root overlay + viewer + share +
+  screen tags, then instrumentation + loud guards + docs); hard stops
+  (no Info.plist / project.yml / entitlements / workflow / release /
+  TestFlight / version bump / `git add -A` / `.claude/` staging /
+  rebase / force-push / BLE-runtime / WatchConnectivity-runtime /
+  network / analytics / per-screen toggle / new silent guard);
+  approval policy (auto / pause / reject buckets); Windows host
+  limitation (no `xcodebuild`); PR description requirements (spec
+  clause → file mapping, touched-file list, `.recorderScreen` tags,
+  loud-guard conversions, "Could not verify" section); commit cadence
+  (push every ~10 turns); risks; Commit 1 state at `76becdf` (11
+  files, 1098 insertions). No code behavior changed in this entry.
+- **Verification:** `git status --short` reviewed before staging; only
+  the three intended doc files staged. `.claude/` left untracked. No
+  source files touched.
+- **Risks:** Docs drift from code if not updated in the same commit.
+  `CONVERSATION_LOG.md` will go stale if future commits skip the
+  append step — `00_START_HERE.md` documents this requirement
+  explicitly so fresh agents enforce it.
+- **Next step:** Proceed with B74-F11 Commit 2 — root overlay
+  (`SessionRecorderToggle`) + viewer (`SessionRecorderViewer`) + share
+  (`ShareLink` for `.txt` + `.json`) + `.recorderScreen` tags on
+  ~13 top-level screens. Edits to `VoltraLiveApp.swift` and
+  `BuildBadgeOverlay.swift` per the route map.
+
+## 2026-05-02 17:30 UTC — Add full Perplexity control-plane transcript
+
+- **Files changed:** `docs/handoff/PERPLEXITY_TRANSCRIPT_2026-05-02.md`
+  (new), `docs/handoff/00_START_HERE.md` (link added to read order +
+  index), `docs/handoff/CONVERSATION_LOG.md` (pointer added at top of
+  Perplexity section).
+- **What changed:** Added the complete verbatim Perplexity AI advisory
+  chat transcript that directed the B74-F11 implementation session.
+  19 turns captured in full, including paste-to-Claude prompts,
+  approval decisions, screenshots interpreted, and the final
+  meta-iteration where the user pushed for transcript-grade fidelity
+  rather than a decision summary. `00_START_HERE.md` now lists this
+  file at position #4 in the read order so a fresh agent picks it up
+  before the spec. `CONVERSATION_LOG.md`'s Perplexity-session section
+  now links to the transcript as the authoritative "why" reference.
+  No code behavior changed.
+- **Verification:** `git status --short` reviewed before staging; only
+  the four intended doc files staged. `.claude/` left untracked.
+- **Risks:** Transcript is human-curated from one side of a two-party
+  chat — Perplexity's responses are paraphrased / structurally
+  reconstructed from what Perplexity output, since Claude cannot read
+  the Perplexity chat directly. Future Perplexity turns must be
+  appended by the user pasting them into Claude (Claude has no other
+  way to see them).
+- **Next step:** Proceed with B74-F11 Commit 2 (unchanged from the
+  previous WORK_LOG entry).
+
+## 2026-05-02 17:35 UTC — Add Karpathy context protocol (AGENTS.md + CONTEXT_LEDGER.md)
+
+- **Files changed:** `AGENTS.md` (new section "Voltra Brain & Agent
+  Organization (Karpathy Method)"),
+  `docs/handoff/CONTEXT_LEDGER.md` (new),
+  `docs/handoff/00_START_HERE.md` (added `CONTEXT_LEDGER.md` to read
+  order, added "Context protocol" section, added entry to handoff
+  index), `docs/handoff/CONVERSATION_LOG.md` (new entry),
+  `docs/handoff/PERPLEXITY_TRANSCRIPT_2026-05-02.md` (Turn 20
+  appended), `docs/WORK_LOG.md` (this entry).
+- **What changed:** Established automatic context management protocol
+  so we never need another massive transcript backfill. Three
+  additions, all in `AGENTS.md` so they apply to every future agent:
+  (1) every response that does repo work must end with one of
+  `Context is good.` / `Context is degrading.` /
+  `Context is dangerously low.`; (2) every 10 turns (or sooner if
+  health drops) the agent appends a structured summary to
+  `CONTEXT_LEDGER.md` and commits before writing more code;
+  (3) Karpathy filesystem-as-memory + select-don't-dump read order +
+  leash constraints (every Voltra Brain instruction must include
+  clear instruction, constraints, scope, stopping criteria).
+  No code behavior changed.
+- **Verification:** `git status --short` reviewed before staging; only
+  the six intended files staged. `.claude/` left untracked. No Swift
+  files touched.
+- **Risks:** Agents may not follow the protocol if they skip reading
+  `AGENTS.md`. Mitigation: `00_START_HERE.md` puts `AGENTS.md` first
+  in the read order and the new "Context protocol" section there
+  surfaces the rules a second time.
+- **Next step:** Proceed with B74-F11 Commit 2 — root overlay
+  (`SessionRecorderToggle`) + viewer (`SessionRecorderViewer`) + share
+  (`ShareLink` for `.txt` + `.json`) + `.recorderScreen` tags on
+  ~13 top-level screens.
+
+## 2026-05-02 17:55 UTC — B74-F11 (2/3): Root overlay + viewer + share + screen tags
+
+- **Files changed:**
+  - NEW Swift: `VoltraLive/Recorder/SessionRecorderToggle.swift`,
+    `VoltraLive/Recorder/SessionRecorderViewer.swift`.
+  - EDIT Swift: `VoltraLive/VoltraLiveApp.swift` (env-object
+    injection + bottom-trailing overlay + scenePhase persist hook),
+    `VoltraLive/Views/BuildBadgeOverlay.swift` (triple-tap unlock
+    declared before existing single-tap so disambiguation prefers it),
+    `VoltraLive/Recorder/RecorderEvent.swift` (added `CaseIterable`
+    to `RecorderCategory` for viewer filter chips).
+  - EDIT (13 screens, 1 line each — `.recorderScreen("Name")`):
+    `LoggingHomeView`, `LiveCaptureView`, `LiveCaptureViewV2`,
+    `LiveCaptureContainer`, `ConnectView`, `DebugView`,
+    `DashboardView`, `ExerciseDetailView`, `ExerciseStartView`,
+    `ExercisePickerView`, `SetLogView`, `ExportSheet`,
+    `UnifiedConnectSheet`.
+  - DOCS: `docs/handoff/00_START_HERE.md` (state update),
+    `docs/handoff/CONVERSATION_LOG.md` (Commit 2 entry),
+    `docs/handoff/CONTEXT_LEDGER.md` (entry 1), this entry.
+- **What changed:** Added the recorder UI surface. `SessionRecorder`
+  is now injected at the app root via `.environmentObject`; a
+  24x24 pt dot lives in a single root-level
+  `.overlay(alignment: .bottomTrailing)`, hidden until the user
+  triple-taps the build-badge chip
+  (`UserDefaults["VOLTRARecorderUnlocked"] = true`). Tap toggles
+  recording; long-press opens `SessionRecorderViewer` (event timeline
+  with category filter chips + `ShareLink` exporting both `.txt` and
+  `.json` payloads). Recording state shows a 1 Hz red pulse via
+  `TimelineView(.animation)`; idle is faint `VoltraColor.textFaint`.
+  scenePhase observer calls `recorder.persist()` on background /
+  inactive. `.recorderScreen("Name")` on 13 top-level screens emits
+  `nav.screenAppear` / `nav.screenDisappear`.
+- **Verification:** Cannot run `xcodebuild` (Windows host).
+  `git status --short` reviewed before staging; `.claude/` not staged;
+  no `git add -A`. No `Info.plist`, `project.yml`, entitlements,
+  workflow, BLE, HealthKit, sacred-protocol, or version-bump files
+  touched.
+- **Risks:**
+  - SwiftUI single-tap on the build badge now has a ~250 ms delay
+    introduced by triple-tap disambiguation. Spec accepts this; needs
+    QA verification on device.
+  - The recorder dot's 36 pt bottom padding assumes the build badge
+    chip stays roughly its current size (~14 pt + 6 pt padding). If
+    that chrome changes, revisit padding.
+  - `ShareLink` writes temp files on viewer open; the user may share
+    a stale snapshot if they leave the viewer open and trigger more
+    events. Reload button regenerates.
+- **Next step:** B74-F11 Commit 3 — instrumentation + loud guards
+  (additive BLE sinks, HK read-only, ActionScope wrapping for major
+  UI actions, user-visible silent-guard sweep) + remaining doc
+  updates (`07_FILE_MAP.md` PLACEHOLDER → EXISTS,
+  `03_CURRENT_FEATURE_SPEC.md` pointer, `09_NEXT_AGENT_PROMPT.md`
+  append).
+
+## 2026-05-02 18:30 UTC — B74-F11 (3/3): Session Recorder instrumentation + loud guards
+
+- **Files changed (Swift, additive only):**
+  - `VoltraLive/BLE/VoltraBLEManager.swift` — 14 recorder emit
+    sites across BLE chokepoints (`ble.discovery`, `ble.connect`,
+    `ble.disconnect`, `ble.write.tx`, `ble.write.ack`,
+    `ble.notify.rx`, `ble.error`). NO behavior change.
+  - `VoltraLive/BLE/VoltraWriter.swift` — 2 sites: writer-level
+    `ble.write.tx` with high-level `label` + `cmd` metadata,
+    `ble.error` on payload-build failure.
+  - `VoltraLive/BLE/Dual/MultiDeviceManager.swift` — 5 emit-site
+    groups: slot-tagged `ble.connect`/`disconnect`,
+    `state.modeChange` for disconnectBoth, `ble.error` +
+    `state.modeChange` on combined drop,
+    `async.taskStart`/`.taskEnd`/`.taskError` for the reconnect
+    loop.
+  - `VoltraLive/Health/HealthKitStore.swift` — 6 read-only emit
+    groups: `state.flagChange` for auth attempt + result,
+    `lifecycle.healthkit.start`/`.stop`, per-sample HR/kcal events
+    with `HKSource.name` + `bundleIdentifier` (passed via
+    `redactor.unsafeRaw` since these are developer-controlled
+    identifiers, not user PII).
+  - `VoltraLive/VoltraLiveApp.swift` — scenePhase observer extended
+    with `lifecycle.appBackground` / `lifecycle.appForeground`
+    events alongside the existing persist call.
+  - `VoltraLive/Logging/Views/LoggingHomeView.swift` — wrapped Demo
+    Mode button tap and `startCustom(_:)` in
+    `SessionRecorder.shared.action(...)`; converted 2 user-visible
+    silent guards (`demo.handlerMissing`, `startCustom.emptyLabel`).
+  - `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — wrapped
+    `tapDropTile()` and `toggleHardwareLoad()` in `action()`;
+    converted 4 user-visible silent guards (`dropStart.noWeight`,
+    `dropStep.notActive`, `demo.alreadyArmedOrConnected`,
+    `demo.handlerMissing`).
+  - `VoltraLive/Logging/Views/LiveCaptureView.swift` (V1) — wrapped
+    `sendLoad()` and `sendUnload()` in `action()`; converted 3
+    user-visible silent guards (V1 mirrors of `dropStart.noWeight`,
+    `demo.alreadyArmedOrConnected`, `demo.handlerMissing`).
+- **Files changed (docs, per AGENTS.md mandatory enforcement):**
+  - `docs/handoff/07_FILE_MAP.md` — flipped 9 source + 4 test
+    PLACEHOLDER → EXISTS, expanded mounts + screen-tag +
+    instrumentation sections.
+  - `docs/handoff/03_CURRENT_FEATURE_SPEC.md` — added §10 Session
+    Recorder pointer.
+  - `docs/handoff/09_NEXT_AGENT_PROMPT.md` — appended
+    "post-b76, B74-F11 implementation merged" status section.
+  - `docs/handoff/00_START_HERE.md` — Commit 3 marked DONE.
+  - `docs/handoff/CONVERSATION_LOG.md` — Commit 3 entry (V1
+    parallel wrapping decision; ActionScope inner-body indentation
+    note).
+  - `docs/handoff/CONTEXT_LEDGER.md` — entry 2 (Commit 3 checkpoint
+    per the 10-turn protocol).
+  - `docs/WORK_LOG.md` — this entry.
+- **What changed:** Added the recorder instrumentation layer. Every
+  BLE chokepoint and every HealthKit sample arrival now emits a
+  recorder event when recording is active. Major user actions
+  (Demo Mode, startCustom, drop tile, weight tap, LOAD/UNLOAD)
+  mint a fresh `actionId` via `SessionRecorder.shared.action(...)`
+  so downstream events auto-inherit it for cause→effect chains.
+  9 user-visible silent guards now leave `guard.trip` traces with
+  the original condition preserved verbatim.
+- **Verification:** Cannot run `xcodebuild` (Windows host).
+  `git status --short` reviewed before staging; `.claude/` not
+  staged; no `git add -A`. No `Info.plist`, `project.yml`,
+  entitlements, workflow, sacred-protocol, WatchConnectivity, or
+  version-bump files touched.
+- **Risks:**
+  - Layered `ble.write.tx` events from `VoltraWriter.send` (intent)
+    + `VoltraBLEManager.writeControlFrame` (bytes) are intentional
+    pairs; reviewers reading the export should expect both.
+  - Per-frame `ble.notify.rx` emit fires at the assembly rate
+    (~10–50 Hz during a live set). With a 10k-cap buffer, ~3
+    minutes of live BLE activity will start dropping the oldest
+    events. By design (FIFO; current-session bias) but worth
+    flagging.
+  - ActionScope inner-body indentation in
+    `LiveCaptureViewV2.tapDropTile()` and `toggleHardwareLoad()`
+    intentionally NOT re-indented — the wrapper sits at the same
+    indent level as the original body to keep the diff small.
+    Swift tolerates this; reviewers may find it stylistically odd.
+- **Next step:** Push branch and open PR against
+  `feat/ui-v4-2-claude` with the spec-required PR description
+  (clause→file map, `.recorderScreen` tag list, guard-conversion
+  list, "Could not verify" section). Do not merge. Do not release.
+
+## 2026-05-02 19:55 UTC — B74-F11 CI compile fix (failed run → green run)
+
+- **Files changed:** `docs/WORK_LOG.md` (this entry).
+- **Goal:** document the CI failure → fix → green CI outcome on
+  PR #10's branch `feat/b77-session-recorder` so the repo records
+  what happened (chat is ephemeral).
+- **What changed:** PR #10 was opened at head `492130a`. Branch CI
+  (`build.yml`) was manually dispatched
+  ([run 25260163621](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25260163621))
+  and FAILED at the "Build (unsigned, iphoneos SDK)" step in 47s
+  with 3 Swift compile errors:
+  - `MultiDeviceManager.swift:697` — `argument 'metadata' must
+    precede argument 'error'` in the `async.taskError` emit inside
+    `scheduleReconnect` (parameter-order swap on
+    `SessionRecorder.shared.record(...)`).
+  - `SessionRecorder.swift:76` — `invalid redeclaration of
+    'start()'` because Commit 1 declared both
+    `@Published var start: Date?` and `@MainActor func start()`
+    (Swift refuses property + method sharing the same base name).
+  - `SessionRecorder.swift:73` — cascading `cannot call value of
+    non-function type 'Date?'` from the same name collision.
+
+  Fix landed at `77e2b5a B74-F11: fix session recorder CI compile
+  errors` (2 files, +16 / −10):
+  - `MultiDeviceManager.swift`: swapped `metadata:` and `error:`
+    argument order on the `async.taskError` emit.
+  - `SessionRecorder.swift`: renamed `start: Date?` →
+    `startedAt: Date?` and `end: Date?` → `endedAt: Date?`;
+    updated 4 internal references (`start()` setter,
+    `stop()` setter, two `await MainActor.run` blocks in
+    `currentExport()` and `persist()`). External impact: zero —
+    the viewer doesn't reference these properties and tests pass
+    dates directly to `RecorderExporter` rather than through the
+    singleton.
+
+  Re-dispatched
+  ([run 25260420548](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25260420548)):
+  green in 1m17s. Unsigned IPA artifact produced.
+
+  PR #10 follow-up comment posted:
+  [#issuecomment-4364664979](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/pull/10#issuecomment-4364664979).
+- **Verification result:** `build.yml` manual `workflow_dispatch`
+  on `feat/b77-session-recorder` succeeded — full app Swift compile
+  + unsigned IPA package + artifact upload. **`xcodebuild test`
+  did NOT run** (build.yml does not invoke the test action); the 4
+  new recorder unit-test files compile (since the test target
+  builds as a dependency) but their assertions remain unverified.
+- **Risks:** Unit-test assertions and on-device QA passes A–G
+  remain unverified. The Commit 1 `start`/`end` → `startedAt`/`endedAt`
+  rename is undocumented in the PR #10 description body but is
+  captured in the follow-up PR comment and in this entry.
+- **Next step:** Decide whether to (a) run `release.yml dry_run`
+  against this branch to exercise `xcodebuild test` + signed-archive
+  flow before TestFlight, or (b) proceed with on-device QA
+  passes A–G first, or (c) merge the PR after a code review and
+  defer all device verification to the post-merge ship cycle.
+  All three are valid; current branch state supports any of them.
+  PR #10 remains OPEN and UNMERGED.
+
+## 2026-05-02 20:50 UTC — B74-F11 release.yml dry_run verification
+
+- **Files changed:** `docs/WORK_LOG.md` (this entry).
+- **Goal:** Record the B74-F11 `release.yml` dry_run verification on
+  PR #10's branch `feat/b77-session-recorder` so the repo captures
+  what the dry-run actually validated (chat is ephemeral).
+- **What changed:** Manually dispatched `release.yml` with
+  `dry_run=true` on `feat/b77-session-recorder` head
+  `6ab55b8681f039d9d927b4e8f9974fae565d2371`.
+  [Run 25261426415](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25261426415).
+- **Verification result:** `success` in **5m21s**. All steps green:
+  - `xcodebuild test -scheme VoltraLive -only-testing:VoltraLiveTests`
+    on iPhone simulator passed, including the 4 new recorder test
+    files: `RecorderBufferTests`, `RecorderRedactorTests`,
+    `RecorderExporterTests`, `ActionScopeTests`. Existing
+    `ProtocolGoldenTests`, `CombinedMathTests`, `DropSetCascadeTests`,
+    `HistoryImporterTests`, `RecentCustomLabelsTests`,
+    `SetSuggestionEngineTests`, `SideNameMatchTests`,
+    `VoltraControlFramesTests`, `WarmupAutoDetectTests` all still
+    pass — no regression.
+  - Independent ASC API key smoke test passed (read-only ASC REST
+    verification).
+  - Decode signing assets + Build and archive (signed) + Export
+    IPA for App Store Connect all green.
+  - `Upload IPA as workflow artifact (dry-run only)` produced
+    artifact `VoltraLive-dryrun-ipa` (signed IPA preserved as
+    workflow artifact for 7 days).
+- **Hard stops honored:**
+  - ❌ No TestFlight upload — `Upload to TestFlight via altool`
+    step correctly skipped by dry_run gate
+    (`if: github.event_name == 'push' || github.event.inputs.dry_run == 'false'`).
+  - ❌ No GitHub release / tag created — `Publish signed IPA to
+    GitHub release` step gated to `github.event_name == 'push'`,
+    and workflow_dispatch did not push a tag.
+  - ❌ No version / build number bumped (workflow does not mutate
+    those; the in-runner `Info.plist` Demo trace-relay substitution
+    was not committed back to the repo).
+  - ❌ No workflow edits, no repo `Info.plist` / `project.yml` /
+    entitlements / sacred-protocol / WatchConnectivity changes by
+    the agent.
+- **Risks:** On-device QA passes A–G remain required per the spec's
+  Verification Contract — the dry_run validates compile + tests +
+  signing pipeline but cannot exercise the recorder UI, real
+  CoreBluetooth callbacks, real HealthKit sample arrivals,
+  ShareLink, SwiftUI triple-tap timing, scenePhase lifecycle, or
+  Application Support `last_session.json` write on a real device.
+- **Next step:** Merge PR #10 into `feat/ui-v4-2-claude` via merge
+  commit (not squash) to preserve the implementation / checkpoint
+  / fix / doc commit chain. After merge, decide separately whether
+  to start the b77 TestFlight ship cycle (would require a manual
+  version + build bump in `project.yml` + `Info.plist`, a `v*` tag
+  push, and a non-dry-run `release.yml` invocation — all out of
+  scope for the current PR).

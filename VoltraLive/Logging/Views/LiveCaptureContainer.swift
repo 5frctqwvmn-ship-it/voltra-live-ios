@@ -85,6 +85,8 @@ struct LiveCaptureContainer: View {
         }
         // b66 V4.2: page-name badge.
         .pageBadge("LiveCaptureContainer")
+        // B74-F11: recorder screen tag.
+        .recorderScreen("LiveCaptureContainer")
         }
 
     /// Decide whether to render V2. As of b71 (V4-D21 part 3): V2 is

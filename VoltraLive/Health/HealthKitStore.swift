@@ -82,6 +82,11 @@ final class HealthKitStore: ObservableObject {
     /// workout would never trigger the dialog. Idempotent and cheap.
     func requestAuthIfNeeded() {
         #if canImport(HealthKit)
+        // B74-F11: signal the auth attempt + availability state.
+        SessionRecorder.shared.record(
+            category: .state, name: "state.flagChange",
+            metadata: ["name": .string("hk.requestAuthIfNeeded"),
+                       "available": .bool(isAvailable)])
         guard isAvailable else {
             print("[HealthKit] requestAuthIfNeeded skipped - not available")
             return
@@ -89,6 +94,11 @@ final class HealthKitStore: ObservableObject {
         print("[HealthKit] requestAuthIfNeeded - calling requestAuthorization")
         requestAuthorization { [weak self] ok in
             print("[HealthKit] requestAuthIfNeeded completed ok=\(ok)")
+            // B74-F11: outcome of the system auth callback.
+            SessionRecorder.shared.record(
+                category: .state, name: "state.flagChange",
+                metadata: ["name": .string("hk.authResult"),
+                           "ok": .bool(ok)])
             Task { @MainActor in
                 self?.hasRequestedAuthorization = true
             }
@@ -118,6 +128,10 @@ final class HealthKitStore: ObservableObject {
         sessionKcal = 0
         lastHRSampleAt = nil
         lastKcalSampleAt = nil
+        // B74-F11: lifecycle event marking the start of HK data flow.
+        SessionRecorder.shared.record(
+            category: .lifecycle, name: "lifecycle.healthkit.start",
+            metadata: ["available": .bool(isAvailable)])
 
         // Always (re-)ask. requestAuthorization is idempotent on Apple's
         // side: if the user previously granted, no dialog appears and the
@@ -146,6 +160,9 @@ final class HealthKitStore: ObservableObject {
     /// Stop polling and clear values.
     func stop() {
         #if canImport(HealthKit)
+        // B74-F11: lifecycle event marking the end of HK data flow.
+        SessionRecorder.shared.record(
+            category: .lifecycle, name: "lifecycle.healthkit.stop")
         if let q = hrQuery { store.stop(q) }
         if let q = kcalQuery { store.stop(q) }
         hrQuery = nil
@@ -236,6 +253,18 @@ final class HealthKitStore: ObservableObject {
         guard let s = latest else { return }
         let bpm = Int(s.quantity.doubleValue(for: unit).rounded())
         let arrivedAt = s.endDate
+        // B74-F11: per-sample event with HKSource identifiers passed
+        // through unsafeRaw — these are developer-controlled (e.g.
+        // "Apple Watch", "com.apple.health"), not user PII.
+        SessionRecorder.shared.record(
+            category: .state, name: "state.flagChange",
+            metadata: [
+                "name": .string("hk.hrSample"),
+                "bpm": .int(Int64(bpm)),
+                "arrivedAt": .double(arrivedAt.timeIntervalSince1970),
+                "source.name": .string(SessionRecorder.shared.redactor.unsafeRaw(s.sourceRevision.source.name)),
+                "source.bundleIdentifier": .string(SessionRecorder.shared.redactor.unsafeRaw(s.sourceRevision.source.bundleIdentifier)),
+            ])
         Task { @MainActor in
             self.currentHR = bpm
             self.lastHRSampleAt = arrivedAt
@@ -271,6 +300,19 @@ final class HealthKitStore: ObservableObject {
         let delta = qs.reduce(0.0) { acc, s in acc + s.quantity.doubleValue(for: unit) }
         // Use the most-recent sample's endDate as the freshness marker.
         let arrivedAt = qs.map { $0.endDate }.max() ?? Date()
+        // B74-F11: per-batch event. delta aggregates the batch (matches
+        // the existing math); source.* is taken from the most-recent
+        // sample since multiple sources can interleave in the same batch.
+        let latestSource = qs.max(by: { $0.endDate < $1.endDate })?.sourceRevision.source
+        SessionRecorder.shared.record(
+            category: .state, name: "state.flagChange",
+            metadata: [
+                "name": .string("hk.kcalSample"),
+                "delta": .double(delta),
+                "arrivedAt": .double(arrivedAt.timeIntervalSince1970),
+                "source.name": .string(SessionRecorder.shared.redactor.unsafeRaw(latestSource?.name ?? "?")),
+                "source.bundleIdentifier": .string(SessionRecorder.shared.redactor.unsafeRaw(latestSource?.bundleIdentifier ?? "?")),
+            ])
         Task { @MainActor in
             self.sessionKcal += delta
             self.lastKcalSampleAt = arrivedAt

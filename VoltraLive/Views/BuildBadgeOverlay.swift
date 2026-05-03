@@ -81,6 +81,15 @@ private struct BuildBadgeChip: View {
             // contentShape ensures the entire capsule (including the
             // padding) is tappable, not just the rendered glyph rect.
             .contentShape(Capsule())
+            // B74-F11: triple-tap unlocks the SessionRecorder dot.
+            // Declared BEFORE the single-tap so SwiftUI's tap-count
+            // disambiguation prefers it. A lone single tap still cycles
+            // the grid (with a ~250 ms delay introduced by the
+            // disambiguation window). Persisted in UserDefaults so the
+            // unlock survives app launches.
+            .onTapGesture(count: 3) {
+                UserDefaults.standard.set(true, forKey: "VOLTRARecorderUnlocked")
+            }
             .onTapGesture {
                 let current = DebugGridDensity.from(modeRaw)
                 modeRaw = current.next().rawValue

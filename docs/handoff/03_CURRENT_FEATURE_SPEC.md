@@ -455,3 +455,34 @@ visible regardless of pairing — only hidden when demo is
 already active. Per V4-D17, no live call site uses
 `source: .settingsRestore`; that case is retained in
 `DemoEntrySource` for trace-replay compatibility only.
+
+## §10 Session Recorder (B74-F11)
+
+Local-only AI-readable debug recorder. Hidden until the user
+**triple-taps the build-badge chip**, which flips
+`UserDefaults["VOLTRARecorderUnlocked"] = true`. After unlock, a
+**24×24 pt dot** lives in a single root-level
+`.overlay(alignment: .bottomTrailing)` (mounted in
+`VoltraLiveApp.swift`, never per-screen).
+
+- **Tap** → toggle recording. Red 1 Hz `TimelineView(.animation)`
+  pulse while armed; faint `VoltraColor.textFaint` while idle.
+- **Long-press** → present `SessionRecorderViewer` sheet (event
+  timeline + category filter chips + `ShareLink` exporting both
+  `.txt` and `.json`).
+- **scenePhase** observer in `VoltraLiveApp.swift` emits
+  `lifecycle.appBackground` / `lifecycle.appForeground` and calls
+  `recorder.persist()` on background / inactive.
+
+Single shared `SessionRecorder.shared` (`ObservableObject`,
+non-`@MainActor`) owns a 10,000-event FIFO actor buffer, an
+`ActionScope` task-local UUID, and the redactor. `record(...)` is
+thread-safe and callable from any context.
+
+Persistence: on background / kill, current session JSON is written
+to `Application Support/SessionRecorder/last_session.json`. No other
+disk writes; no network; no analytics.
+
+Authoritative spec: [`SESSION_RECORDER_SPEC.md`](SESSION_RECORDER_SPEC.md).
+Per-file map: [`07_FILE_MAP.md`](07_FILE_MAP.md) "B74-F11 — Session
+Recorder (EXISTS)".

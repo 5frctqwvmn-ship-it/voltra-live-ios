@@ -352,6 +352,8 @@ struct LiveCaptureViewV2: View {
         // b66 V4.2: page-name badge — bottom-leading, faint mint,
         // Swift type name verbatim. Always visible in TestFlight.
         .pageBadge("LiveCaptureViewV2")
+        // B74-F11: recorder screen tag.
+        .recorderScreen("LiveCaptureViewV2")
     }
 
     // MARK: - Toolbar
@@ -1494,6 +1496,10 @@ struct LiveCaptureViewV2: View {
     /// telemetry pipe — that is the engine that engages the armed
     /// cascade once the lift has been idle for 2 s.
     private func tapDropTile() {
+        // B74-F11: ActionScope so the cascade writerRouter.apply chain
+        // inherits an actionId. action() helper auto-emits ui.tap.dropTile.
+        // Inner body keeps its original indentation for diff clarity.
+        SessionRecorder.shared.action("ui.tap.dropTile", screen: "LiveCaptureViewV2") {
         if logging.dropSetActive {
             // Tap-while-active: bump the tier & fire immediately.
             logging.bumpCascadeTier()
@@ -1505,7 +1511,13 @@ struct LiveCaptureViewV2: View {
             return
         }
         let starting = (logging.pendingPlannedWeightLb ?? 0)
-        guard starting > 0 else { return }
+        guard starting > 0 else {
+            SessionRecorder.shared.guardTrip(
+                name: "dropStart.noWeight",
+                reason: "pendingPlannedWeightLb is 0 — cannot start drop",
+                state: ["screen": .string("LiveCaptureViewV2")])
+            return
+        }
         // Capture writerRouter + mdm so the cascade can re-target the device
         // ONCE the arm-idle gate elapses and the engine engages the chain.
         // armDropSet is a no-op weight write — the cable holds the working
@@ -1551,6 +1563,7 @@ struct LiveCaptureViewV2: View {
             )
             _ = ble  // silences capture warning when unused
         }
+        } // B74-F11: closes SessionRecorder.shared.action(...) wrapper
     }
 
     /// Long-press cancel for the DROP tile. Branches on cascade state:
@@ -1637,7 +1650,14 @@ struct LiveCaptureViewV2: View {
     private func adjustDropStep(_ delta: Int) {
         // Clamp to multiples of 5 — micro-drops are forbidden per spec.
         guard delta == 5 || delta == -5 else { return }
-        guard logging.dropSetActive else { return }
+        guard logging.dropSetActive else {
+            SessionRecorder.shared.guardTrip(
+                name: "dropStep.notActive",
+                reason: "dropSetActive == false",
+                state: ["screen": .string("LiveCaptureViewV2"),
+                        "delta": .int(Int64(delta))])
+            return
+        }
         // bumpCascadeTier rolls 1→2→3→1. For −5 we want the previous tier;
         // since the cycle is 3-wide, two forward bumps == one backward.
         if delta == 5 {
@@ -1654,6 +1674,10 @@ struct LiveCaptureViewV2: View {
     /// reusing the same opcode path V1 uses (sendLoad/sendUnload). When
     /// any MDM slot is paired we route through MDM; otherwise legacy ble.
     private func toggleHardwareLoad() {
+        // B74-F11: ActionScope so the LOAD/UNLOAD chain (writes via
+        // mdm/ble + the auto-engage demo path) shares an actionId.
+        // action() auto-emits ui.tap.weight at the top of the scope.
+        SessionRecorder.shared.action("ui.tap.weight", screen: "LiveCaptureViewV2") {
         // b68 (B68-01): if no Voltra is connected and demo isn't already
         // active, auto-engage prePair demo so the force chart + rep
         // counter respond to synthetic telemetry. Replaces the orphaned
@@ -1675,6 +1699,7 @@ struct LiveCaptureViewV2: View {
             if mdm.state != .idle { mdm.load() } else { ble.sendLoad() }
             deviceLoaded = true
         }
+        } // B74-F11: closes SessionRecorder.shared.action(...) wrapper
     }
 
     /// b68 (B68-01): true when no Voltra is paired & connected on any
@@ -1689,8 +1714,23 @@ struct LiveCaptureViewV2: View {
     /// with weight controls but no Voltra is connected. Idempotent —
     /// `DemoController.enter` early-returns when already active.
     private func autoEngageDemoIfNeeded() {
-        guard !anyDeviceConnected, !demo.isActive else { return }
-        guard let handler = DemoTelemetryBridge.shared.handler else { return }
+        guard !anyDeviceConnected, !demo.isActive else {
+            SessionRecorder.shared.guardTrip(
+                name: "demo.alreadyArmedOrConnected",
+                reason: "anyDeviceConnected=\(anyDeviceConnected) demo.isActive=\(demo.isActive)",
+                state: ["screen": .string("LiveCaptureViewV2"),
+                        "anyDeviceConnected": .bool(anyDeviceConnected),
+                        "demoActive": .bool(demo.isActive)])
+            return
+        }
+        guard let handler = DemoTelemetryBridge.shared.handler else {
+            SessionRecorder.shared.guardTrip(
+                name: "demo.handlerMissing",
+                reason: "DemoTelemetryBridge.shared.handler == nil",
+                state: ["screen": .string("LiveCaptureViewV2"),
+                        "source": .string("autoEngage")])
+            return
+        }
         demo.note(.buttonTap(
             label: "Auto-engage (no device, weight tapped)",
             screen: "LiveCaptureViewV2"

@@ -24,51 +24,69 @@
   to `EXISTS` in place; sections for completed features can be
   trimmed once the feature has shipped and been QA'd.
 
-## B74-F11 — Session Recorder (PLACEHOLDER)
+## B74-F11 — Session Recorder (EXISTS)
 
 Spec: [`SESSION_RECORDER_SPEC.md`](SESSION_RECORDER_SPEC.md). ADR:
 [`04_DECISIONS_AND_CONSTRAINTS.md`](04_DECISIONS_AND_CONSTRAINTS.md)
 V4-D25. Bug-queue entry:
 [`B74_BUG_QUEUE.md`](B74_BUG_QUEUE.md) B74-F11.
 
-**Status:** SPEC ONLY in this commit. All paths below are
-`PLACEHOLDER` and will be created in the implementation PR.
+**Status:** IMPLEMENTED on `feat/b77-session-recorder` across three
+commits (core engine, root overlay + viewer + tags, instrumentation +
+loud guards). All source paths below are `EXISTS`.
 
 ### Source
 
 | Path | Status | Role |
 |---|---|---|
-| `VoltraLive/Recorder/SessionRecorder.swift` | PLACEHOLDER | Single shared `ObservableObject`. Owns `isRecording`, `sessionId`, `start`/`end`, FIFO ring buffer, `ActionScope` task-local. Injected at app root via `.environmentObject`. |
-| `VoltraLive/Recorder/RecorderEvent.swift` | PLACEHOLDER | `RecorderEvent: Codable, Identifiable` and the `Value`, `ErrorRecord`, `BLESubrecord` types described in the spec's Event Schema. |
-| `VoltraLive/Recorder/RecorderBuffer.swift` | PLACEHOLDER | Thread-safe 10,000-event FIFO ring buffer (serial queue or `actor`). |
-| `VoltraLive/Recorder/RecorderRedactor.swift` | PLACEHOLDER | PII rules per the spec's Redaction section. Default-redact path + explicit `unsafeRaw` API. |
-| `VoltraLive/Recorder/RecorderExporter.swift` | PLACEHOLDER | `.txt` AI-readable report + `.json` full structured export. Writes nothing to disk; output is data passed to `ShareLink`. |
-| `VoltraLive/Recorder/ActionScope.swift` | PLACEHOLDER | Task-local `UUID` plumbing. UI actions mint a new `actionId` and downstream events auto-inherit it. |
-| `VoltraLive/Recorder/SessionRecorderToggle.swift` | PLACEHOLDER | The 24×24 pt root-overlay dot. Tap = toggle, long-press = open viewer, red 1 Hz pulse via `TimelineView(.animation)` while armed. |
-| `VoltraLive/Recorder/SessionRecorderViewer.swift` | PLACEHOLDER | Long-press sheet. Renders the in-memory timeline + share affordance. |
-| `VoltraLive/Recorder/View+RecorderScreen.swift` | PLACEHOLDER | `.recorderScreen("ScreenName")` modifier wrapping `.onAppear` / `.onDisappear` to emit `nav.screenAppear` / `nav.screenDisappear`. |
+| `VoltraLive/Recorder/SessionRecorder.swift` | EXISTS | Single shared `ObservableObject`. Owns `isRecording`, `sessionId`, `start`/`end`, FIFO ring buffer, `ActionScope` task-local plumbing. Injected at app root via `.environmentObject`. `record(...)` is thread-safe (NSLock-protected mirror state + actor-backed buffer). `start()`/`stop()`/`toggle()`/`action()` are `@MainActor`. |
+| `VoltraLive/Recorder/RecorderEvent.swift` | EXISTS | `RecorderEvent: Codable, Identifiable` plus `RecorderCategory` (`CaseIterable`), `RecorderValue` (single-value JSON encoding with `"hex:"` prefix), `RecorderErrorRecord`, `BLESubrecord`, `BLESubrecordKind`. |
+| `VoltraLive/Recorder/RecorderBuffer.swift` | EXISTS | `actor RecorderBuffer` — 10,000-event FIFO ring buffer with O(1) wrap (head/size cursors). |
+| `VoltraLive/Recorder/RecorderRedactor.swift` | EXISTS | Per-recorder peripheral-name → UUID map (NSLock-protected); free-text → `<redacted:len=N>`; `unsafeRaw` opt-in passthrough used only for `HKSource.name` and `HKSource.bundleIdentifier`. |
+| `VoltraLive/Recorder/RecorderExporter.swift` | EXISTS | Pure builders: `.json` envelope (`schemaVersion=1`) and `.txt` AI-readable report (header + actionId-grouped timeline + errors/guards + BLE transcript). No disk I/O. |
+| `VoltraLive/Recorder/ActionScope.swift` | EXISTS | `@TaskLocal currentActionId: UUID?`. Inherited by `Task { }` children automatically. |
+| `VoltraLive/Recorder/SessionRecorderToggle.swift` | EXISTS | 24×24 pt root-overlay dot. Hidden until `VOLTRARecorderUnlocked`. Tap = toggle, long-press = viewer sheet, 1 Hz red pulse via `TimelineView(.animation)` while recording, faint `VoltraColor.textFaint` while idle. Sits with extra bottom padding so it does not collide with the build-badge chip. |
+| `VoltraLive/Recorder/SessionRecorderViewer.swift` | EXISTS | Long-press sheet. Filter chips per category, event timeline (newest first), `ShareLink` exporting both `.txt` and `.json` payloads via temp files, reload button. |
+| `VoltraLive/Recorder/View+RecorderScreen.swift` | EXISTS | `.recorderScreen("ScreenName")` modifier wrapping `.onAppear` / `.onDisappear`. Calls `SessionRecorder.shared` directly so SwiftUI previews don't crash. |
 
 ### Mounts (existing files touched in implementation PR)
 
 | Path | Status | Role |
 |---|---|---|
-| `VoltraLive/VoltraLiveApp.swift` | EXISTS | Add `.environmentObject(SessionRecorder.shared)` and `.overlay(alignment: .bottomTrailing) { SessionRecorderToggle() }` at app root. No other change. |
-| Build-badge chip view (file TBD by implementation agent) | EXISTS | Add a triple-tap gesture that flips `UserDefaults.standard.set(true, forKey: "VOLTRARecorderUnlocked")`. Visual chrome unchanged. |
+| `VoltraLive/VoltraLiveApp.swift` | EXISTS | `@StateObject SessionRecorder.shared`, `@Environment scenePhase`, `.environmentObject(recorder)`, root `.overlay(alignment: .bottomTrailing) { SessionRecorderToggle() }`, `scenePhase` observer emits `lifecycle.appBackground`/`lifecycle.appForeground` and calls `recorder.persist()` on background/inactive. |
+| `VoltraLive/Views/BuildBadgeOverlay.swift` | EXISTS | Triple-tap gesture (declared before existing single-tap so disambiguation prefers it) flips `UserDefaults["VOLTRARecorderUnlocked"] = true`. Existing single-tap grid cycle preserved. |
+
+### Screen tags (`.recorderScreen("Name")`)
+
+13 top-level screens tagged: `LoggingHomeView`, `LiveCaptureView`,
+`LiveCaptureViewV2`, `LiveCaptureContainer`, `ConnectView`,
+`DashboardView`, `DebugView`, `ExerciseDetailView`,
+`ExerciseStartView`, `ExercisePickerView`, `SetLogView`,
+`ExportSheet`, `UnifiedConnectSheet`.
+
+### Instrumentation sites (Commit 3)
+
+| File | Recorder calls |
+|---|---|
+| `VoltraLive/BLE/VoltraBLEManager.swift` | 14 emits across `ble.discovery` / `ble.connect` / `ble.disconnect` / `ble.write.tx` / `ble.write.ack` / `ble.notify.rx` / `ble.error`. |
+| `VoltraLive/BLE/VoltraWriter.swift` | 2 emits: writer-level `ble.write.tx` with `label` + `cmd` metadata, and `ble.error` on payload-build failure. |
+| `VoltraLive/BLE/Dual/MultiDeviceManager.swift` | 5 emit-site groups across `ble.connect` / `ble.disconnect` / `state.modeChange` / `ble.error` / `async.taskStart`/`.taskEnd`/`.taskError` (reconnect lifecycle). |
+| `VoltraLive/Health/HealthKitStore.swift` | 6 emit groups: `state.flagChange` for auth attempt + result, `lifecycle.healthkit.start`/`.stop`, `state.flagChange` per HR/kcal sample arrival with `HKSource.name` + `bundleIdentifier`. |
 
 ### Persistence target
 
 | Path | Status | Role |
 |---|---|---|
-| `Application Support/SessionRecorder/last_session.json` | RUNTIME | Single JSON file written on app background / kill, read on init. **No** other disk writes anywhere in this feature. |
+| `Application Support/SessionRecorder/last_session.json` | RUNTIME | Single JSON file written on app background / kill via the scenePhase observer in `VoltraLiveApp.swift`. **No** other disk writes anywhere in this feature. |
 
 ### Tests
 
 | Path | Status | Role |
 |---|---|---|
-| `VoltraLiveTests/RecorderBufferTests.swift` | PLACEHOLDER | Wrap behavior at 10,000 events; thread-safety under concurrent writers. |
-| `VoltraLiveTests/RecorderRedactorTests.swift` | PLACEHOLDER | Positive / negative cases for every PII rule in the spec; `unsafeRaw` opt-in passes through unchanged. |
-| `VoltraLiveTests/RecorderExporterTests.swift` | PLACEHOLDER | `.txt` + `.json` round-trip; schema-version invariant; non-empty outputs. |
-| `VoltraLiveTests/ActionScopeTests.swift` | PLACEHOLDER | Task-local propagation across `Task { }` boundaries; nested scopes; ambient-event nil case. |
+| `VoltraLiveTests/RecorderBufferTests.swift` | EXISTS | Wrap behavior at small + 10,000 cap; thread-safety under concurrent writers; clear + reuse. |
+| `VoltraLiveTests/RecorderRedactorTests.swift` | EXISTS | Stable peripheral mapping; per-instance independence; free-text length-only; `unsafeRaw` passthrough; concurrent lookups. |
+| `VoltraLiveTests/RecorderExporterTests.swift` | EXISTS | JSON round-trip; `schemaVersion` invariant; hex `"hex:"` prefix round-trip; `.txt` header + actionId grouping + ambient section + guards + BLE transcript. |
+| `VoltraLiveTests/ActionScopeTests.swift` | EXISTS | Nil ambient; nested scope shadowing; `Task { }` inheritance; async chain propagation. |
 
 ### Anti-paths (must NOT be created or modified)
 

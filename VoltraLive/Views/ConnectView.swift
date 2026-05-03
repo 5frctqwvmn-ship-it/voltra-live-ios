@@ -42,6 +42,8 @@ struct ConnectView: View {
         }
         // b66 V4.2: page-name badge.
         .pageBadge("ConnectView")
+        // B74-F11: recorder screen tag.
+        .recorderScreen("ConnectView")
         }
 
     private var content: some View {

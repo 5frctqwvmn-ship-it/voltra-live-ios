@@ -1,77 +1,194 @@
 # 00 — START HERE
 
 > **You are an LLM agent (or future-me) starting a session on this repo.**
-> Read these handoff docs **before writing any code**. Then summarize the
-> current state back to the user before proceeding (Karpathy method).
+> The repo is the source of truth, not chat memory. Read these files in
+> the order below **before** writing any code, then summarize the current
+> state back to the user.
 
-This folder is the **durable source of truth** for VOLTRA Live iOS. Chat
-history is ephemeral — anything that should survive across sessions lives here.
+## Mandatory startup sequence (read in this order)
 
-## Mandatory startup sequence
+1. `AGENTS.md` (repo root) — sacred files, hard constraints, signing.
+2. **This file** — `docs/handoff/00_START_HERE.md` — branch state, plan,
+   commit cadence, approval policy, hard stops.
+3. `docs/handoff/CONVERSATION_LOG.md` — append-only log of decisions,
+   blockers, and deviations from plan across sessions. Must be updated
+   in the same commit as any code change going forward.
+4. `docs/handoff/CONTEXT_LEDGER.md` — rolling 10-turn context
+   summaries. Read the **latest 3 entries**, not the whole file.
+5. `docs/handoff/PERPLEXITY_TRANSCRIPT_2026-05-02.md` — complete
+   verbatim transcript of the Perplexity AI advisory chat that
+   directed this implementation session. Read this for full "why"
+   context behind the decisions in `CONVERSATION_LOG.md`.
+6. `docs/handoff/SESSION_RECORDER_SPEC.md` — authoritative spec for the
+   feature currently in flight (B74-F11).
+7. `docs/handoff/01_PROJECT_OVERVIEW.md` through
+   `docs/handoff/10_OPEN_QUESTIONS.md` — the rest of the handoff binder
+   (what the app is, current state, roadmap, architecture, BLE protocol,
+   HealthKit, dual-Voltra, superset, release/signing, open questions).
+8. `docs/WORK_LOG.md` — tail (last ~200 lines) for recent activity.
 
-1. Read `AGENTS.md` (repo root) — sacred files, hard constraints, signing.
-2. Read `docs/handoff/01_PROJECT_OVERVIEW.md` — what the app is.
-3. Read `docs/handoff/02_CURRENT_STATE.md` — what shipped, what's broken.
-4. Read `docs/handoff/03_ROADMAP.md` — what's next and why.
-5. Read `docs/handoff/10_OPEN_QUESTIONS.md` — anything blocked on user input.
-6. Skim `docs/WORK_LOG.md` (tail — last 200 lines is enough) — recent activity in append-only form.
-7. Summarize state back to the user. Then start work.
+Apply the **Karpathy Select Rule** in `AGENTS.md`: read only what's
+needed. Do not dump full transcripts or all handoff docs unless
+explicitly asked.
 
-**Last shipped: v0.4.49-build76 ("Health signal indicator" — B74-F8).** Release-only ship from `feat/ui-v4-2-claude` of the B74-F8 implementation already merged at `713a851` (PR #8 → `8fd6f95`). The legacy dual-dot HR pill in `VoltraUnitHeader.swift` was replaced by a single neutral Health signal indicator: idle dot is faint (`VoltraColor.textFaint`) but visible before HealthKit auth; tap-while-unauthorized routes through `hk.requestAuthIfNeeded()` (HK consent sheet); live state requires `hk.isAvailable && hk.hasRequestedAuthorization && hk.currentHR != nil` plus `lastHRSampleAt` within a 10 s freshness window, rendered in header text color (not accent green); a `TimelineView(.periodic(by:1))` keeps the freshness check live so >10 s without samples flips the dot back to faint without an app re-foreground. L / R / ⋏ pills untouched. The b76 commit only bumped version (75 → 76 / 0.4.48 → 0.4.49), feature label, and handoff docs — no implementation changes.
+**Then summarize state back to the user. Do not edit anything until you
+have done this.**
 
-**Prior shipped: v0.4.48-build75 ("L/R auto-connect" — B74-F1).** Auto-connect L/R buttons by Voltra advertised name (substring match "left"/"right", case-insensitive); deliberate no-fallback if the matching device isn't in range.
+## Active branch state (B74-F11 Session Recorder implementation)
 
-**Earlier: v0.4.34-build56 ("V2 mods + rest timer + V1 restore").** b56 takes the b55 V2 LiveCaptureView and (a) fixes the bug where ECC / CHAIN / INV CHAIN tiles were unselectable (their `onTap` was nil so `disabled(onTap == nil)` killed taps), (b) replaces the V1 modal `DropSetConfigureSheet` with a tap-arms-deeper-on-each-tap + long-press-cancels + idle-fires interaction (each tap deepens the step `−5 → −10 → −15 → −20…`), (c) adds INV CHAIN as a first-class fourth mod with its own `LoggingStore.upcomingInverseLb / upcomingInverseEnabled` fields and protocol-level `VoltraModifiers.inverse` writeback (CHAIN and INV CHAIN are mutually exclusive — you can't lighten and add through the ROM at the same time), (d) replaces the active phase-strip during rest with a new `RestTimerBarV2` that does a continuous HSL sweep `green(140°,70%,45%) → amber(40°,90%,50%) → red(0°,80%,50%)` and blinks on overtime with a `+MM:SS` overtime counter, (e) restyles the WEIGHT card so tapping the big number toggles hardware LOAD/UNLOAD (reusing V1's `sendLoad`/`sendUnload` opcode path) and turns green when loaded, (f) replaces the b55 hardcoded `maxFCeiling: 160` chart Y-axis with a parent-driven `yAxisMaxLb = max(workingLb, eccEffective) × 1.3` that animates smoothly when weight or ECC changes, (g) ECC range expanded from 0–300 to 5–400 lb working per user direction, and (h) ports the V1 affordances under the chart **verbatim** — pulley-mode chip, added-plates picker, `LOGGED SETS` swipeable list, Next-exercise NavigationLink, and End-session button — into a new `V1RestoreSection` so V2 reaches feature parity with V1 below the fold. New files: `V2/RestTimerBarV2.swift`, `V2/NestedModRowV2.swift`, `V2/ModStepperRowV2.swift`, `V2/V1RestoreSection.swift`. Deleted: `V2/DropSetConfigureSheet.swift`, `V2/DropSetBannerV2.swift`, `V2/DropRowV2.swift`, `V2/TopBannerV2.swift`. `LiveCaptureViewV2.swift` was rewritten end-to-end (~850 lines) and `ForceChartV2.swift` gained the `yAxisMaxLb` parameter. The `private` on V1's `SwipeableSetRow` was promoted to file-internal so V2's `V1RestoreSection` can reuse it.
+- **Branch:** `feat/b77-session-recorder`
+- **Base:** `origin/feat/ui-v4-2-claude` (PR target)
+- **Current head:** Commit 3 just landed (instrumentation + loud
+  guards + docs flip). All three Session Recorder commits are in;
+  branch ready for PR against `feat/ui-v4-2-claude`. See
+  `git log --oneline` for exact SHAs.
+- **Goal:** Implement B74-F11 Session Recorder per
+  `docs/handoff/SESSION_RECORDER_SPEC.md`.
+- **Working tree:** clean except `.claude/` is untracked. **NEVER stage
+  `.claude/`.**
 
-**Prior shipped: v0.4.33-build55 ("V2 single-Voltra LiveCapture").** b55 rewrote the V2 LiveCaptureView to match the design-handoff render after a sign-off pass on `voltra-v2-preview/index.html`. b54's "V2 spec match" turned out to be a 2x2 tile grid that didn't actually match `screenshots/A1-states.png` — b55 ports the signed-off web preview to SwiftUI: header → phase strip (always-visible) → optional rest row → WEIGHT card with stepper + DROP row → 4-up mod tiles → REPS + TOTAL VOLUME → FORCE chart. New V2-only DROP-SET creation flow: tap DROP mod tile to open `DropSetConfigureSheet`. **b55 had to ship twice** — the first push went green on CI but did not reach TestFlight because (a) `project.yml` was the version source of truth and still said `0.4.32 / 54`, so xcodegen overwrote the bumped `Info.plist`, and (b) the release-workflow's altool success-grep was Application-Loader-era and missed `Failed to upload package` / `ERROR: [ContentDelivery.Uploader` / `(-19232)` style errors. The b55-fix commit moved version-of-truth to `project.yml` and hardened the workflow with a 3-layer altool guard (failure-grep, ≥10s wall-clock duration, mandatory positive `UPLOAD COMPLETED SUCCESSFULLY` marker). See WORK_LOG b55-fix entry. If `02_CURRENT_STATE.md` shows a different latest build than this line, the file is stale — trust `git log` and `gh run list` over either source and surface the discrepancy to the user before coding.
+## Plan (3 logical commits → one PR against `feat/ui-v4-2-claude`)
 
-## Mandatory commit discipline
+### Commit 1 — Core engine ✅ DONE at `76becdf`
 
-- After **any meaningful change**, append an entry to `docs/WORK_LOG.md` (date/time UTC, goal, files changed, what changed, verification, risks, next step) and commit it **in the same commit** as the code change.
-- If the change touches a topic owned by a handoff doc (architecture, BLE, health, dual-Voltra, releases, secrets, open questions), update that doc in the **same commit**.
-- Never rely on chat history for facts that should live in repo.
+- 11 files, 1098 insertions.
+- New: `VoltraLive/Recorder/{RecorderEvent, RecorderBuffer, RecorderRedactor,
+  ActionScope, RecorderExporter, SessionRecorder, View+RecorderScreen}.swift`.
+- New tests: `VoltraLiveTests/{RecorderBufferTests, RecorderRedactorTests,
+  RecorderExporterTests, ActionScopeTests}.swift`.
+- Pure engine — no app mounts, no overlay, no instrumentation.
 
-## Mandatory ship discipline (Karpathy method)
+### Commit 2 — Root overlay + viewer + share + screen tags ✅ DONE
 
-**Every ship must update the durable state, not just append to history.** A fresh agent must be able to read 4 files (`AGENTS.md` → `01` → `02` → `03`) and know the current state without reading the WORK_LOG.
+- New: `VoltraLive/Recorder/SessionRecorderToggle.swift` —
+  24×24 pt bottom-trailing dot, hidden until `VOLTRARecorderUnlocked`,
+  tap = toggle, long-press = open viewer, red 1 Hz `TimelineView` pulse
+  while recording, `textFaint` while idle.
+- New: `VoltraLive/Recorder/SessionRecorderViewer.swift` —
+  event list + category filters + `ShareLink` exporting both `.txt` and
+  `.json` payloads.
+- Edit: `VoltraLive/VoltraLiveApp.swift` —
+  `@StateObject SessionRecorder.shared`, `.environmentObject`,
+  `.overlay(alignment: .bottomTrailing) { SessionRecorderToggle() }`,
+  scenePhase observer to call `recorder.persist()` on background.
+- Edit: `VoltraLive/Views/BuildBadgeOverlay.swift` —
+  add a `TapGesture(count: 3)` that flips
+  `UserDefaults["VOLTRARecorderUnlocked"] = true`. Existing single-tap
+  grid cycle stays. SwiftUI's ~250 ms count-disambiguation delay is
+  acceptable per spec.
+- Edit ~13 top-level screens to add `.recorderScreen("ScreenName")`.
 
-On every successful ship, in the SAME commit as the version bump:
+### Commit 3 — Instrumentation + loud guards + docs ✅ DONE
 
-1. **`docs/handoff/02_CURRENT_STATE.md`** — overwrite the "Latest shipped build", "What works today", and "Recent tags" sections to match HEAD. If the build changed mode handling, regenerate the mode matrix.
-2. **`docs/handoff/03_ROADMAP.md`** — move the just-shipped item from "Next up" to "Done" with its tag and label. Add anything new the build surfaced.
-3. **`docs/handoff/00_START_HERE.md`** — update the "Last shipped" line.
-4. **Topic docs** (`04_ARCHITECTURE.md`, `05_BLE_AND_PROTOCOL.md`, `06_HEALTHKIT.md`, `07_DUAL_VOLTRA.md`, `08_SUPERSET.md`, `09_RELEASE_AND_SIGNING.md`) — update only the ones whose subject area changed in this build. Do not update them speculatively.
-5. **`docs/WORK_LOG.md`** — append the build entry.
+- Additive BLE sinks in `VoltraBLEManager.swift`, `VoltraWriter.swift`,
+  `MultiDeviceManager.swift` — **NO behavior change**.
+- HealthKit read-only instrumentation in `HealthKitStore.swift`.
+- `ActionScope` wrapping for major UI actions.
+- Convert user-visible silent `guard … else { return }` to
+  `rec.guardTrip(...)` then return. **Bounded to user-visible paths
+  only** per spec wording.
+- Doc updates: `03_CURRENT_FEATURE_SPEC.md`, `07_FILE_MAP.md`,
+  `09_NEXT_AGENT_PROMPT.md`, `WORK_LOG.md`,
+  `CONVERSATION_LOG.md` (append). `04_DECISIONS_AND_CONSTRAINTS.md`
+  only if implementation diverges from V4-D25.
 
-If you skip steps 1-4, the next agent's session-resume summary will be wrong, which is exactly how b53 shipped a broken V2 (the prior session's summary claimed design-studio was "fetched" while the handoff docs said the latest build was b29; the resuming agent trusted the summary instead of opening the source).
+## Context protocol
 
-## Mandatory external-spec discipline
+Fresh agents must:
 
-If a build ports an external spec (HTML, CSS, design doc, screenshot, RFC, etc.), **open and read the spec verbatim before writing any code.** Do not rely on prose summaries from prior sessions. Cite the exact file path and commit hash of the spec in the WORK_LOG entry. b53 violated this rule and produced a build that did not match its claimed source.
+- Report **context health** at the end of every response that performs
+  or plans repo work — exactly one of `Context is good.`,
+  `Context is degrading.`, or `Context is dangerously low.` See
+  `AGENTS.md` "Context Health Check" for thresholds.
+- Append a rolling summary to
+  `docs/handoff/CONTEXT_LEDGER.md` every 10 turns, or sooner if
+  context health drops to degrading / dangerously low.
+- Stage and commit the ledger update to Git before writing more code.
 
-## Mandatory TestFlight ship-verification (added b55-fix)
+This protocol is enforced by `AGENTS.md` "Voltra Brain & Agent
+Organization (Karpathy Method)".
 
-A TestFlight ship is **not** considered shipped until all five of these are confirmed. CI green is a necessary but **not sufficient** signal — Xcode 26's `xcrun altool` can exit 0 while Apple rejects the upload.
+## Commit cadence
 
-1. Release workflow polled to `conclusion: success`.
-2. Raw job log pulled via `gh api -H "Accept: application/vnd.github.raw" repos/<owner>/<repo>/actions/jobs/<job_id>/logs`.
-3. The "Upload to TestFlight via altool" step shows wall-clock duration ≥ 20 seconds. A 4-second altool exit means the request never reached Apple's servers (this is the b55 silent-fail signature).
-4. The altool log contains a positive success marker — one of: `UPLOAD COMPLETED SUCCESSFULLY`, `No errors uploading`, `package was successfully uploaded`, `successfully uploaded`.
-5. The altool log contains zero `ERROR:`, `Failed to upload package`, `ERROR: [ContentDelivery`, or parenthesised numeric error code (`(-NNNNN)`) lines.
+Push the branch every ~10 turns even if mid-implementation. The remote
+is the durable backup. Don't let work pile up locally.
 
-If any of (1)–(5) fails, report "build status unconfirmed, investigating" — never "shipped". The release.yml workflow now enforces (3)–(5) inside the altool step itself (see `.github/workflows/release.yml:679–732`), so a re-shipped b55-fix-and-later build that turns the workflow green has by definition passed all three checks. (1)–(2) are still on the agent.
+## Approval policy
 
-This rule exists because in the b55 first-ship, CI reported green and the agent told the user the build had shipped. The user pulled up TestFlight, did not see the build, and corrected the agent: "You've been trained to process. Are you sure you sent it?" They were right. Don't repeat that.
+- **AUTO (no pause needed):**
+  - File reads, `Glob`, `Grep`.
+  - Edits inside the route map (files in the table above).
+  - `git add <named paths>` (never `-A`).
+  - Descriptive commits with bot identity:
+    `git -c user.name="VOLTRA Live Bot" -c user.email="bot@voltralive.app" commit ...`.
+- **PAUSE (surface intent first):**
+  - Edits to `VoltraLive/VoltraLiveApp.swift`,
+    `VoltraLive/Views/BuildBadgeOverlay.swift`, BLE files
+    (`VoltraBLEManager.swift`, `VoltraWriter.swift`,
+    `MultiDeviceManager.swift`), `VoltraLive/Health/HealthKitStore.swift`.
+- **REJECT (do not do without explicit permission):**
+  - `.github/workflows/*` changes.
+  - `project.yml` changes.
+  - Release / TestFlight / version bump.
+  - Anything touching secrets.
+  - `git add -A` or `.claude/` staging.
+  - `git rebase -i`, `git push --force` to a shared branch.
 
-## Mandatory secrets discipline
+## Hard stops (from `SESSION_RECORDER_SPEC.md`)
 
-- Reference secrets by **NAME ONLY**. Never paste values, p8 contents,
-  tokens, or signing material into any file.
-- If you see a secret value in chat, do not commit it. Stop and tell the user.
+- No `Info.plist` changes.
+- No `project.yml` changes.
+- No entitlements changes.
+- No `.github/workflows/*` changes (build / release).
+- No release workflow / TestFlight ship / version bump in this PR.
+- No `git add -A`.
+- No staging of `.claude/`.
+- No `git rebase`. No `git push --force`.
+- No BLE runtime behavior change.
+- No `WatchConnectivity` runtime behavior change.
+- No server / network calls. No analytics. No external logging.
+- No per-screen toggle buttons (overlay is root-only).
+- No new silent guards anywhere.
+
+## Windows host limitation
+
+The session is running on Windows. **Cannot run** `xcodebuild`, `xcrun`,
+the iOS Simulator, or any Swift compile / test step. Compile + tests
+will be exercised by `build.yml` when the PR opens. Every PR description
+must include an explicit **"Could not verify"** section listing
+everything the agent could not run on Windows.
+
+## PR description requirements
+
+The implementation PR (against `feat/ui-v4-2-claude`) must include, at
+minimum:
+
+1. **Spec clause → file/line mapping table** —
+   each clause from `SESSION_RECORDER_SPEC.md` mapped to the file (and
+   line, where useful) that implements it.
+2. **Full touched-file list** — every file added or edited across all
+   three commits.
+3. **Every `.recorderScreen("Name")` tag added** — so reviewers can grep
+   coverage at a glance.
+4. **Every loud-guard conversion** — old `guard … else { return }` →
+   new `rec.guardTrip(...)` paired with file/line.
+5. **"Could not verify" section** — explicit listing of what was not
+   verifiable on the Windows host (xcodebuild compile, unit-test run,
+   simulator UI, ShareLink behavior, SwiftUI gesture timing, etc.).
+
+## Last shipped (informational, not the active branch)
+
+**v0.4.49 / build 76 — "Health signal indicator" — B74-F8.** Replaced
+the legacy dual-dot HR pill with a single neutral Health signal
+indicator on `VoltraUnitHeader`. See `02_CURRENT_STATE.md` for the
+rolling cycle snapshot and `03_ROADMAP.md` for what's queued.
+
+(`01_PROJECT_OVERVIEW.md` may show v0.4.46/73 — that line is stale and
+out of scope for this PR. Trust `git log` and `02_CURRENT_STATE.md`.)
 
 ## Sacred files (do not modify without explicit user approval)
 
-See `AGENTS.md` "Sacred files" section. Recap:
+See `AGENTS.md` "Sacred files":
 
 - `VoltraLive/Protocol/VoltraProtocol.swift`
 - `VoltraLive/Protocol/TelemetryExtractor.swift`
@@ -82,65 +199,45 @@ New protocol-adjacent code goes in **new files only**.
 
 ## Karpathy method
 
-Before doing anything, **repeat the user's request back** so they can correct
-your understanding. Don't just start executing.
+Before doing anything substantial, **repeat the user's request back** so
+they can correct your understanding. Don't just start executing.
 
-## Cost-awareness convention
+## Mandatory commit discipline
 
-The user wants visibility into how token-heavy each action is, AND prefers
-to run heavy research / model-council prompts on their own Perplexity
-account instead of burning Computer credits.
-
-See **AGENTS.md → "Cost-awareness convention"** for the full rules:
-- Flag medium-or-heavier actions inline (lite / medium / heavy / very heavy)
-- For heavy research and model councils, DRAFT a self-contained prompt at
-  `docs/handoff/COUNCIL_*_PROMPT.md` for the user to run; only execute the
-  heavy work on Computer when the user explicitly says "do it yourself."
-
-Existing council prompts in this repo:
-- (none open right now — the HK council was answered and the prompt
-  deleted in the same commit as the b49 fix, per the "answered →
-  delete" rule.)
+- Append a `CONVERSATION_LOG.md` entry for any new decision, blocker, or
+  deviation from plan, **in the same commit as the code change**.
+- Append a `docs/WORK_LOG.md` entry for any meaningful change, in the
+  same commit.
+- Update the topic doc whose subject area changed
+  (`05_BLE_AND_PROTOCOL.md`, `06_HEALTHKIT.md`,
+  `03_CURRENT_FEATURE_SPEC.md`, etc.) in the same commit.
 
 ## Index of handoff docs
 
 | File | Owns |
 |---|---|
-| `00_START_HERE.md` | This file. Startup sequence. |
+| `00_START_HERE.md` | This file. Startup sequence, branch state, plan, policy. |
+| `CONVERSATION_LOG.md` | Append-only log of decisions, blockers, plan deviations. |
+| `CONTEXT_LEDGER.md` | Rolling 10-turn context summaries (Karpathy method). |
+| `PERPLEXITY_TRANSCRIPT_2026-05-02.md` | Verbatim Perplexity advisory chat transcript for the B74-F11 implementation session. |
+| `SESSION_RECORDER_SPEC.md` | Authoritative B74-F11 spec. |
 | `01_PROJECT_OVERVIEW.md` | What the app is, who it's for, hardware. |
-| `02_CURRENT_STATE.md` | What's shipped, known bugs, build numbers. |
-| `03_ROADMAP.md` | Build 30 plan, deferred work, ordering rationale. |
-| `03_CURRENT_FEATURE_SPEC.md` | Authoritative description of the live-capture screen behavior at the latest ship. |
+| `02_CURRENT_STATE.md` | What's shipped, build numbers, rolling cycle snapshot. |
+| `03_ROADMAP.md` | What's next and why. |
+| `03_CURRENT_FEATURE_SPEC.md` | Live-capture screen behavior at the latest ship. |
 | `04_ARCHITECTURE.md` | Module map, data flow, key types. |
-| `04_DECISIONS_AND_CONSTRAINTS.md` | Append-only decision log. |
-| `05_BLE_AND_PROTOCOL.md` | Wire format, control writes (incl. LOAD/UNLOAD). |
-| `06_HEALTHKIT.md` | HR + active calories streaming, current bugs. |
-| `06_KNOWN_ISSUES.md` | Active KI tracker. Resolved entries move to WORK_LOG before deletion. |
-| `07_DUAL_VOLTRA.md` | Dual-device spec (3-button connect, Independent/Combined). |
-| `08_SUPERSET.md` | Superset spec (deferred to build 31). |
+| `04_DECISIONS_AND_CONSTRAINTS.md` | Append-only decision log (ADRs). |
+| `05_BLE_AND_PROTOCOL.md` | Wire format, control writes. |
+| `06_HEALTHKIT.md` | HR + active calories streaming. |
+| `06_KNOWN_ISSUES.md` | Active KI tracker. |
+| `07_DUAL_VOLTRA.md` | Dual-device spec. |
+| `07_FILE_MAP.md` | Per-feature file placeholders / EXISTS table. |
+| `08_SUPERSET.md` | Superset spec. |
 | `09_RELEASE_AND_SIGNING.md` | Version bumps, tags, CI, secrets (names only). |
-| `09_NEXT_AGENT_PROMPT.md` | UI Layout V4 handoff prompt for fresh-context agents (Karpathy LLM Wiki method). |
+| `09_NEXT_AGENT_PROMPT.md` | Cold-start prompt for fresh-context agents. |
 | `10_OPEN_QUESTIONS.md` | What's blocked on user input right now. |
+| `B74_BUG_QUEUE.md` | Active B74 bug queue (F1–F8, F11). |
 | `QA_LOG.md` | Append-only post-build QA pass log. |
-| `design/force_curve.md` | Force-curve design reference (Tonal-style, P0). |
-| `entities/dropset_state_machine.md` | Atomic concept doc for the DROP tile cascade (b60). |
 
-`docs/WORK_LOG.md` lives one level up — append-only journal of every change.
-
-## Wiki-name mapping (Karpathy targets vs. actual filenames)
-
-The b59 pre-flight in `09_NEXT_AGENT_PROMPT.md` flagged a drift
-between the canonical Karpathy wiki names the prompt expects and
-the actual filenames in this copy. **Do not rename existing
-files** — use this mapping to resolve roles:
-
-| Karpathy role | Actual file(s) in this repo | Notes |
-|---|---|---|
-| `01_PROJECT_STATE` | `01_PROJECT_OVERVIEW.md` + `02_CURRENT_STATE.md` | Overview owns "what the app is"; CurrentState owns the post-ship snapshot. Both should be read. **Both must be updated together on any version bump or cycle change** — Overview carries durable project facts (current shipping build line), CurrentState carries the rolling cycle snapshot. Leaving either stale defeats the wiki mapping. |
-| `02_ARCHITECTURE` | `04_ARCHITECTURE.md` | Single file, just numbered differently. |
-| `05_BUILD_TEST_DEPLOY` | `09_RELEASE_AND_SIGNING.md` | Contains the real `xcodebuild` / `xcodegen` / tag-based release commands. |
-| `07_FILE_MAP` | (not yet authored) | Closest existing equivalent is the `## Project layout` block in `AGENTS.md`. Author when next significant feature lands. |
-| `08_GIT_HISTORY_SUMMARY` | (not yet authored) | Use `git log --oneline` until authored. |
-| `entities/` | `docs/handoff/entities/` | Seeded b60 with `dropset_state_machine.md`. Add per atomic concept as needed. |
-| `screenshots/` | (not yet seeded) | KI-6 tracks the missing `weight-overlap-v3.jpeg`. Drop screenshots here as the user supplies them. |
-| `raw/` (immutable sources) | (not yet seeded) | `docs/research/` and `docs/handoff/B52_DIAGNOSIS.md` are the closest existing raw-style archives. |
+`docs/WORK_LOG.md` lives one level up — append-only journal of every
+change.

@@ -64,6 +64,8 @@ struct SetLogView: View {
         .buildBadgeOverlay()
         // b66 V4.2: page-name badge.
         .pageBadge("SetLogView")
+        // B74-F11: recorder screen tag.
+        .recorderScreen("SetLogView")
         }
 
     // MARK: - Pieces

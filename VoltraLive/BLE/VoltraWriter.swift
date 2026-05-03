@@ -221,6 +221,19 @@ final class VoltraWriter: VoltraWriting {
         let frame = VoltraFrameBuilder.build(cmd: cmd, payload: payload, seq: nextSeq())
         writeFrame(frame)
         log("→ \(label) (\(frame.count)B)")
+        // B74-F11: writer-level write.tx with the high-level intent label
+        // (e.g. "base=120", "ecc=20", "mode→weight"). The BLE manager also
+        // emits a write.tx when the closure-injected writeFrame actually
+        // transmits — intentional layering: this captures the intent, that
+        // captures the bytes leaving the radio.
+        SessionRecorder.shared.record(
+            category: .ble, name: "ble.write.tx",
+            metadata: ["label": .string(label),
+                       "cmd": .hex(String(format: "%02X", cmd))],
+            ble: BLESubrecord(kind: .writeTx, peripheralId: nil, side: nil,
+                              characteristic: nil,
+                              hex: String(frame.hexString.prefix(32)),
+                              length: frame.count, rssi: nil))
     }
 
     /// Try-build wrapper that swallows out-of-range errors and logs them, so
@@ -232,6 +245,17 @@ final class VoltraWriter: VoltraWriting {
             send(payload, label: label)
         } catch {
             log("✗ \(label) skipped: \(error)")
+            // B74-F11: surface the payload-build failure. Range clamping
+            // upstream means this should never fire in practice; if it
+            // does, we want a trace.
+            SessionRecorder.shared.record(
+                category: .ble, name: "ble.error",
+                error: RecorderErrorRecord(
+                    domain: "VoltraWriter", code: 0,
+                    message: "\(label) skipped: \(error)",
+                    isUserVisible: false),
+                ble: BLESubrecord(kind: .error, peripheralId: nil, side: nil,
+                                  characteristic: nil, hex: nil, length: nil, rssi: nil))
         }
     }
 
