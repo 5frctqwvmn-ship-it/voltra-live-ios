@@ -62,7 +62,7 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         DEVELOPMENT_TEAM: "${APPLE_TEAM_ID:-}"
         MARKETING_VERSION: "0.4.52"
-        CURRENT_PROJECT_VERSION: "79"
+        CURRENT_PROJECT_VERSION: "80"
     dependencies:
       - sdk: CoreBluetooth.framework
       - sdk: CloudKit.framework
@@ -90,7 +90,7 @@ targets:
         CFBundleDisplayName: "VOLTRA Live"
         CFBundleName: "VoltraLive"
         CFBundleShortVersionString: "0.4.52"
-        CFBundleVersion: "79"
+        CFBundleVersion: "80"
         # Build 31: per-build feature label shown in the on-screen badge so
         # the user knows exactly which one feature this build is testing.
         VOLTRAFeatureLabel: "Telemetry v2 base weight"

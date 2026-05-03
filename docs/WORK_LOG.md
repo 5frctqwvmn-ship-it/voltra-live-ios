@@ -5777,3 +5777,28 @@ from UNVERIFIED to VERIFIED with a screenshot link.
 - **Sacred files.** Unchanged.
 - **Verification.** Static review only.
 - **Next step.** Push, ship TestFlight, run A1 retest.
+
+## 2026-05-03 22:15 UTC — Build bump 79 → 80 for KI-20 TestFlight ship
+
+- **Goal.** Bump build number to 80 and ship to TestFlight so the KI-20
+  visual bridge fix (commits 08a8b7c + a46d45f) can be hardware-retested.
+- **Exception approved.** User granted one-time explicit approval to edit
+  `project.yml` for the build-number bump only. Scope: lines 65 and 93
+  (`CURRENT_PROJECT_VERSION` / `CFBundleVersion`) `79` → `80`. Marketing
+  version unchanged (`0.4.52`). `project.yml` remains sacred for all
+  non-release-bump changes. Reason: `project.yml` is the repo source of
+  truth for the TestFlight build number per `09_RELEASE_AND_SIGNING.md`.
+- **Files changed.**
+  - `project.yml` — lines 65, 93: `79` → `80`. Lines 64, 92 unchanged
+    (`0.4.52`). No structural, target, or settings changes.
+  - `VoltraLive/Info.plist` — `CFBundleVersion` `79` → `80`.
+    `CFBundleShortVersionString` unchanged (`0.4.52`).
+- **6-line verification.** All 6 canonical version lines confirmed:
+  project.yml:64 MARKETING_VERSION=0.4.52,
+  project.yml:65 CURRENT_PROJECT_VERSION=80,
+  project.yml:92 CFBundleShortVersionString=0.4.52,
+  project.yml:93 CFBundleVersion=80,
+  Info.plist CFBundleShortVersionString=0.4.52,
+  Info.plist CFBundleVersion=80.
+- **Other sacred files.** Unchanged.
+- **Next step.** Commit, tag v0.4.52-build80, push tag to trigger release.yml.
