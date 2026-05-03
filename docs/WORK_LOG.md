@@ -5588,3 +5588,52 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   "implemented-pending-hardware-verification" awaiting hardware
   re-test (unchanged). No TestFlight ship without explicit user
   go-ahead.
+
+## 2026-05-03 20:50 UTC — TestFlight ship: v0.4.52-build79 (Telemetry v2 base weight)
+
+- **Goal:** Ship the Telemetry v2 base-weight verification build
+  (da34cd4 + bdbf91b + 53af938) to TestFlight per the
+  `09_RELEASE_AND_SIGNING.md` documented process.
+- **Files changed (this commit):**
+  - `project.yml` — bumped `MARKETING_VERSION` to `0.4.52`,
+    `CURRENT_PROJECT_VERSION` to `79`; mirror block updated;
+    `VOLTRAFeatureLabel` set to `"Telemetry v2 base weight"`.
+  - `VoltraLive/Info.plist` — `CFBundleShortVersionString`
+    `0.4.52`, `CFBundleVersion` `79`, `VOLTRAFeatureLabel`
+    `"Telemetry v2 base weight"`.
+  - `docs/handoff/06_KNOWN_ISSUES.md` — KI-20 status header
+    updated to "shipped — pending hardware verification" with
+    `v0.4.52-build79` reference; per-commit traceability noted
+    (da34cd4 / bdbf91b / 53af938).
+  - `docs/handoff/QA_LOG.md` — appended b79 skeleton entry per
+    AGENTS.md "Post-build QA checklist", with QA focus areas
+    for MJ on physical VOLTRA.
+- **What changed.** Version bump only; no source edits to the
+  Telemetry v2 slice. Bumped per the documented 6-line policy
+  (3 in `project.yml`, 2 in `Info.plist`,
+  `MARKETING_VERSION/CURRENT_PROJECT_VERSION` source-of-truth in
+  `project.yml` lines 64–65 mirrored to lines 92–93 and into
+  `Info.plist`). Sacred files NOT touched (`VoltraProtocol.swift`,
+  `TelemetryExtractor.swift`, `PacketParser.swift`,
+  `FrameAssembler.swift`, `.github/workflows/build.yml`,
+  `_tmp/archive`).
+- **Verification.**
+  - `grep -n -E 'MARKETING_VERSION|CURRENT_PROJECT_VERSION|CFBundleShortVersionString|CFBundleVersion'`
+    confirms 6 lines all read `0.4.52 / 79`.
+  - macOS CI green on HEAD `53af938` (build.yml run
+    25289913362) before the bump commit.
+- **Risks / what could still go wrong.**
+  - `altool` silent-fail (the b55 signature). Mitigated by the
+    `release.yml` triple-check (failure-marker grep + ≥10 s
+    duration + positive success-marker), then post-run raw-log
+    audit per `09_RELEASE_AND_SIGNING.md` step (4)–(5).
+  - Apple-side processing latency: a "shipped" green run still
+    means TestFlight processing must complete before MJ sees
+    the build.
+- **Next step.** Tag `v0.4.52-build79` and push to trigger
+  `release.yml`; watch run; audit the upload step's job log
+  for both positive success markers and zero `ERROR:` /
+  `Failed to upload package` / `(-NNNNN)` lines; report the run
+  URL + ASC processing status to the user. KI-20 stays at
+  "shipped — pending hardware verification" until MJ confirms
+  on the physical VOLTRA.

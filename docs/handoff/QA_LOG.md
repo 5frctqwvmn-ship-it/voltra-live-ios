@@ -219,3 +219,55 @@ next ship cycle starts)
   pass. Earlier ship cycles (b61-b70) also lack QA_LOG entries;
   the gap is acknowledged but is not retroactively filled here
   to avoid fabricating user responses.
+
+---
+
+## b79 — v0.4.52-build79 — 2026-05-03
+
+### Items shipped
+
+1. **Telemetry v2 base-weight decoder slice (da34cd4).**
+   New BLE frame decoder pipeline:
+   `VoltraDecodedEvent` + `VoltraDecodeTable`
+   (`86 3E XX XX` little-endian param `0x3E86`, uint16 LE) +
+   `VoltraBLEFrameDecoder` (with pending-write correlator) +
+   `DeviceState` reducer + new `RecorderCategory.device`. Wired
+   additively into `VoltraBLEManager` after `ble.notify.rx` so
+   no existing parsing path was disturbed. Outbound base-weight
+   writes registered via `VoltraWriter.onOutboundParam` →
+   `recordOutboundParamWrite` so device echoes are attributed
+   `appRequestConfirmed` vs `deviceUnsolicited`.
+2. **Live capture mirror of device-confirmed base weight
+   (bdbf91b).** `LiveCaptureViewV2` now binds
+   `focusedConfirmedBaseWeight` from
+   `bleManager.deviceState[focusedSlot]` and applies a
+   `.deviceUnsolicited`-only filter via
+   `applyDeviceOriginatedBase(_:)` so unprompted device-side
+   knob turns reflow `LoggingStore.pendingPlannedWeightLb` and
+   re-anchor the cascade. App-originated writes are ignored
+   (echo-suppression). Display calc unchanged.
+3. **CI compile fix (53af938).** Added `case .device:` arm to
+   `SessionRecorderViewer.categoryColor(_:)` exhaustive switch
+   so the new RecorderCategory case compiles under iOS 26 SDK.
+
+### User responses
+
+(pending — fill in via post-build QA pass on physical VOLTRA)
+
+### Actions taken
+
+(pending — fill in alongside user responses)
+
+### QA focus areas for MJ on hardware
+
+- Turn the VOLTRA base-weight knob on the device with the app
+  on Live Capture. The weight cell and pulley calc should
+  reflow within ~1 frame of the device echo. Log lines should
+  show `device.state.change` events with
+  `source = deviceUnsolicited`.
+- Bump weight from the app via the +/- controls. The same
+  device-state event should appear with
+  `source = appRequestConfirmed` (no double-apply, no flicker).
+- Confirm KI-20 disposition: only flip from
+  `implemented-pending-hardware-verification` to closed once MJ
+  confirms above on real hardware.

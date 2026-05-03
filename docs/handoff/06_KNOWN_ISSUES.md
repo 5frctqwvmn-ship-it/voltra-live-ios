@@ -621,17 +621,18 @@ each machine-facing field carries
 `DeviceState`. Migration is one field at a time, base weight
 first.
 
-### KI-20 (post-b78, implemented — pending hardware verification) — Machine-side weight changes do not reliably update app
+### KI-20 (post-b79, shipped — pending hardware verification) — Machine-side weight changes do not reliably update app
 
-**Status.** Implemented; pending hardware verification. Decoder
-+ reducer landed in the first Telemetry v2 slice; the
-LiveCaptureViewV2 → LoggingStore base-weight bridge is now in
-place (single `.onChange` observer on
+**Status.** Shipped on TestFlight in `v0.4.52-build79`; pending
+hardware verification. Decoder + reducer landed in the first
+Telemetry v2 slice (da34cd4); the LiveCaptureViewV2 →
+LoggingStore base-weight bridge is now in place (bdbf91b: single
+`.onChange` observer on
 `focusedBle.deviceState.baseWeightLb?.value`, filtered to
 `.deviceUnsolicited`, mirrored into
-`logging.pendingPlannedWeightLb`). NOT fully closed — needs
-hardware re-verification with the recorder armed before this
-KI is marked resolved.
+`logging.pendingPlannedWeightLb`). CI compile fix in 53af938.
+NOT fully closed — needs hardware re-verification by MJ with
+the recorder armed before this KI is marked resolved.
 
 **What.** User adjusts the dial on the VOLTRA itself. App
 display does not update without manual refresh. Observed in
