@@ -21,7 +21,10 @@ Delivery UUID `08ffc5e4-ca3e-4aba-81a7-6a06bef011ae`.
 **KI-20 CLOSED** after build 81 A1 hardware retest.
 Session `EA473194-40BF-4580-BEEE-8C6033535923`.
 Base weight device→UI now works for single-MDM-slot sessions.
-Chains/eccentric/inverse still open as KI-21.
+
+**KI-21 decoder implemented** (chains `0x3E87`, eccentric `0x3E88`,
+inverse `0x53B0`) — pending TestFlight ship + hardware retest.
+HEAD is now one commit ahead of `278865e`.
 
 **Coaching (RC-01/SC-01)** is present in the binary but feature-flagged
 OFF (`FeatureFlags.coachingCardEnabled = false`). No coaching UI visible.

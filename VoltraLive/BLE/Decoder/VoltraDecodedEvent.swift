@@ -25,7 +25,9 @@ import Foundation
 /// surface via `VoltraDecodedEvent.candidate(rawHex:)` instead.
 enum DeviceStateField: String, Codable, Sendable, Equatable {
     case baseWeight
-    // Future: eccentricWeight, chainsWeight, mode, inverseChain, damperLevel, bandMaxForce
+    case chainsWeight
+    case eccentricWeight
+    case inverseChain
 }
 
 /// Where a confirmation came from. `appRequestConfirmed` matches a

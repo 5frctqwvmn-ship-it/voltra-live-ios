@@ -30,6 +30,10 @@ struct ConfirmedValue<T: Equatable & Codable & Sendable>: Equatable, Codable, Se
 /// don't pretend to know it.
 struct DeviceState: Equatable, Codable, Sendable {
     var baseWeightLb: ConfirmedValue<Int>? = nil
+    var chainsWeightLb: ConfirmedValue<Int>? = nil
+    var eccentricWeightLb: ConfirmedValue<Int>? = nil
+    /// 0 = false, 1 = true. Stored as Int to match VoltraDecodedEvent.lb typing.
+    var inverseChainEnabled: ConfirmedValue<Int>? = nil
 
     static let empty = DeviceState()
 }
@@ -68,22 +72,40 @@ enum DeviceStateReducer {
             case .baseWeight:
                 let priorLb = state.baseWeightLb?.value
                 if priorLb == lb {
-                    // Noop confirmation — keep the existing
-                    // ConfirmedValue (don't churn `at`/`source`).
                     return DeviceStateReduction(newState: state, change: nil)
                 }
                 var next = state
-                next.baseWeightLb = ConfirmedValue(
-                    value: lb, source: source, at: Date()
-                )
-                let change = DeviceStateChange(
-                    field: .baseWeight,
-                    from: priorLb,
-                    to: lb,
-                    source: source,
-                    rawHex: rawHex
-                )
-                return DeviceStateReduction(newState: next, change: change)
+                next.baseWeightLb = ConfirmedValue(value: lb, source: source, at: Date())
+                return DeviceStateReduction(newState: next, change: DeviceStateChange(
+                    field: .baseWeight, from: priorLb, to: lb, source: source, rawHex: rawHex
+                ))
+
+            case .chainsWeight:
+                let prior = state.chainsWeightLb?.value
+                if prior == lb { return DeviceStateReduction(newState: state, change: nil) }
+                var next = state
+                next.chainsWeightLb = ConfirmedValue(value: lb, source: source, at: Date())
+                return DeviceStateReduction(newState: next, change: DeviceStateChange(
+                    field: .chainsWeight, from: prior, to: lb, source: source, rawHex: rawHex
+                ))
+
+            case .eccentricWeight:
+                let prior = state.eccentricWeightLb?.value
+                if prior == lb { return DeviceStateReduction(newState: state, change: nil) }
+                var next = state
+                next.eccentricWeightLb = ConfirmedValue(value: lb, source: source, at: Date())
+                return DeviceStateReduction(newState: next, change: DeviceStateChange(
+                    field: .eccentricWeight, from: prior, to: lb, source: source, rawHex: rawHex
+                ))
+
+            case .inverseChain:
+                let prior = state.inverseChainEnabled?.value
+                if prior == lb { return DeviceStateReduction(newState: state, change: nil) }
+                var next = state
+                next.inverseChainEnabled = ConfirmedValue(value: lb, source: source, at: Date())
+                return DeviceStateReduction(newState: next, change: DeviceStateChange(
+                    field: .inverseChain, from: prior, to: lb, source: source, rawHex: rawHex
+                ))
             }
         }
     }

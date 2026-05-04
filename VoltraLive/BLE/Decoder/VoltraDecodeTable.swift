@@ -97,7 +97,57 @@ enum VoltraDecodeTable {
 
     /// All patterns the decoder recognizes in this build. Order does
     /// not matter — patterns are independent.
+    /// Mirrors `VoltraControlFrames.PARAM_BP_CHAINS_WEIGHT`. uint16 LE, pounds.
+    /// Hypothesis confirmed from session EA473194 (May 2026): bytes 87 3E.
+    static let chainsWeight = VoltraDecodePattern(
+        paramId: 0x3E87,
+        field: .chainsWeight,
+        valueByteCount: 2,
+        decodeValue: { data in
+            guard data.count == 2 else { return nil }
+            let lo = UInt16(data[data.startIndex])
+            let hi = UInt16(data[data.startIndex + 1])
+            let lb = Int(lo | (hi << 8))
+            guard lb >= 0, lb <= 250 else { return nil }
+            return lb
+        }
+    )
+
+    /// Mirrors `VoltraControlFrames.PARAM_BP_ECCENTRIC_WEIGHT`. uint16 LE, pounds.
+    /// Hypothesis confirmed from session EA473194 (May 2026): bytes 88 3E.
+    static let eccentricWeight = VoltraDecodePattern(
+        paramId: 0x3E88,
+        field: .eccentricWeight,
+        valueByteCount: 2,
+        decodeValue: { data in
+            guard data.count == 2 else { return nil }
+            let lo = UInt16(data[data.startIndex])
+            let hi = UInt16(data[data.startIndex + 1])
+            let lb = Int(lo | (hi << 8))
+            guard lb >= 0, lb <= 250 else { return nil }
+            return lb
+        }
+    )
+
+    /// Mirrors `VoltraControlFrames.PARAM_BP_INVERSE_CHAIN`. 1 byte bool.
+    /// Hypothesis confirmed from session EA473194 (May 2026): bytes B0 53.
+    /// Value: 0 = false, 1 = true. Decoded as Int (0 or 1) to match VoltraDecodedEvent.lb typing.
+    static let inverseChain = VoltraDecodePattern(
+        paramId: 0x53B0,
+        field: .inverseChain,
+        valueByteCount: 1,
+        decodeValue: { data in
+            guard data.count == 1 else { return nil }
+            let byte = Int(data[data.startIndex])
+            guard byte == 0 || byte == 1 else { return nil }
+            return byte
+        }
+    )
+
     static let all: [VoltraDecodePattern] = [
-        baseWeight
+        baseWeight,
+        chainsWeight,
+        eccentricWeight,
+        inverseChain
     ]
 }

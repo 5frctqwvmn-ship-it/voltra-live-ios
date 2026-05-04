@@ -158,4 +158,43 @@ ship — user wants local verification first.
 
 ---
 
-*Last updated: 2026-05-03 23:40 CDT*
+### Context health: good (checkpoint updated)
+
+---
+
+## CHECKPOINT UPDATE — 2026-05-04 05:00 UTC — KI-21 decoder implemented
+
+- **Branch:** `feat/ui-v4-2-claude`
+- **HEAD before this commit:** `278865e`
+- **Working tree:** clean after commit
+
+### What changed
+
+KI-21 decoder + state scaffold implemented. No sacred files touched.
+No BLE write path changed. No UI bridge wired yet.
+
+Files modified:
+- `VoltraLive/BLE/Decoder/VoltraDecodedEvent.swift` — 3 new enum cases
+- `VoltraLive/BLE/Decoder/VoltraDecodeTable.swift` — 3 new patterns + .all entries
+- `VoltraLive/BLE/State/DeviceState.swift` — 3 new fields + 3 reducer cases
+
+### KI-21 current status
+
+Decoder + state implemented. `device.state.change` will emit for
+chains/ecc/inverse on next hardware test. UI bridge NOT YET WIRED —
+`VoltraBLEManager` @Published bridges and `LiveCaptureViewV2`
+`.onChange` observers still needed (same pattern as KI-20).
+
+### Next exact action
+
+1. Push → CI → verify compile green.
+2. Bump build 82, ship TestFlight.
+3. Hardware retest: change chains/ecc/inverse on physical VOLTRA,
+   confirm `device.state.change` events appear in session recorder.
+4. If events appear: add @Published bridges + LiveCaptureViewV2
+   .onChange wiring for chains/ecc/inverse. Then build 83.
+5. If events do NOT appear: param IDs are wrong — re-examine raw hex.
+
+### Context health: good
+
+*Last updated: 2026-05-04 00:14 CDT*

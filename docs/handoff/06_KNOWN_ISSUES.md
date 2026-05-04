@@ -688,11 +688,11 @@ the hardware verification session.
 - Eccentric / chains / mode confirmations remain deferred
   (KI-21).
 
-### KI-21 (open — updated build 81) — Chains/eccentric/inverse device state not parsed/applied to UI
+### KI-21 (implemented — pending TestFlight hardware retest)
 
-**Status.** Open. Byte-level evidence collected in build 81 hardware
-session `EA473194-40BF-4580-BEEE-8C6033535923`. Parameter IDs
-hypothesised from notify frame bytes; not yet proven via decoder.
+**Status.** Decoder + state fields implemented. Pending TestFlight
+ship and hardware retest to confirm param IDs. Byte-level evidence
+from build 81 session `EA473194-40BF-4580-BEEE-8C6033535923`.
 
 **What.** When the user changes chains / eccentric / inverse-chains
 values on the physical VOLTRA, the BLE notify arrives and is visible
