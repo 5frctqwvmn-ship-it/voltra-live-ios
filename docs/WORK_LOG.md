@@ -3393,3 +3393,17 @@ from UNVERIFIED to VERIFIED with a screenshot link.
 - **KI-21.** Still open — pending hardware retest.
 - **Next step.** App Store Connect will process the build. Once available in
   TestFlight, run hardware verification per 09_NEXT_AGENT_PROMPT.md.
+
+## 2026-05-04 21:10 UTC — Fix stale 01_PROJECT_OVERVIEW.md (missed on every b79-b82 ship)
+
+- **Goal.** Correct `01_PROJECT_OVERVIEW.md` which still said `v0.4.51 / build 78`
+  despite b79–b82 having shipped. Rule in `00_START_HERE.md` requires both
+  `01_PROJECT_OVERVIEW.md` and `02_CURRENT_STATE.md` to be updated together on every
+  ship — I updated `02` each time but skipped `01`. Acknowledged and corrected.
+- **Files changed.**
+  - `docs/handoff/01_PROJECT_OVERVIEW.md` — top line updated to `v0.4.52 / build 82`.
+  - `docs/handoff/02_CURRENT_STATE.md` — header + latest shipped section updated to
+    reflect b82 as the current shipped build.
+- **Root cause.** Process failure: the `02_CURRENT_STATE.md` update happened on every
+  ship commit but `01_PROJECT_OVERVIEW.md` was never included. Will correct on every
+  future ship.

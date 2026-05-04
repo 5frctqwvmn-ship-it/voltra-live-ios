@@ -1,6 +1,6 @@
 # 02 — Current State
 
-_Last updated: 2026-05-04 (b81 shipped; KI-21 follow-through at 7c02c59; hidden Smart Coach unlock added — pending CI + TestFlight.)_
+_Last updated: 2026-05-04 (b82 shipped; KI-21 follow-through + hidden Smart Coach unlock; release.yml dry-run default fixed.)_
 
 > **Maintenance rule:** this file is overwritten on every ship. The
 > append-only history lives in `docs/WORK_LOG.md`. If you're updating
@@ -12,11 +12,14 @@ _Last updated: 2026-05-04 (b81 shipped; KI-21 follow-through at 7c02c59; hidden 
 
 ## Latest shipped build
 
-**v0.4.52 / build 81** — label "KI-20 topology fix + RC-01 dark" —
-shipped 2026-05-04 03:20 UTC. Tag `v0.4.52-build81` at commit
-`7da4ef2` on `feat/ui-v4-2-claude`.
-release.yml run 25299344681. 5-gate altool: ALL PASS.
-Delivery UUID `08ffc5e4-ca3e-4aba-81a7-6a06bef011ae`.
+**v0.4.52 / build 82** — label "KI-21 bridges + hidden Smart Coach unlock" —
+shipped 2026-05-04 19:18 UTC. Tag `v0.4.52-build82` at commit
+`e91c148` on `feat/ui-v4-2-claude`.
+release.yml run 25337935549 (push / tag-triggered). 5-gate altool: ALL PASS.
+Delivery UUID `496678a7-ab0b-4a7d-b08a-d1077c315fb7`.
+
+*Previous ship: v0.4.52 / build 81 — tag `v0.4.52-build81` at `7da4ef2`.
+run 25299344681. UUID `08ffc5e4-ca3e-4aba-81a7-6a06bef011ae`.*
 
 **KI-20 CLOSED** after build 81 A1 hardware retest.
 Session `EA473194-40BF-4580-BEEE-8C6033535923`.
@@ -33,11 +36,7 @@ and `smartCoachEnabled` are now computed vars backed by
 `UserDefaults("VOLTRASmartCoachUnlocked")`. Default = OFF. Enable by
 4-tapping the version badge.
 
-**NOTE: run 25336582738 was DRY-RUN ONLY.** The `release.yml` `dry_run` input
-defaulted to `'true'`; the altool upload step was skipped. No IPA reached Apple.
-`release.yml` default corrected to `'false'` in the build 82 commit.
-
-**Next TestFlight ship: 0.4.52 (82).** Pending `v0.4.52-build82` tag push.
+**Build 82 shipped.** Corrected the dry-run default in `release.yml` and bumped build.
 `aggressiveRecommendationsEnabled` remains false.
 
 ---
