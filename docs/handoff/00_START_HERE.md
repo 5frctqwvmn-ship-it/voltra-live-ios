@@ -5,6 +5,42 @@
 > the order below **before** writing any code, then summarize the current
 > state back to the user.
 
+---
+
+## ⚠️ CRITICAL — READ THIS BEFORE TOUCHING ANY FILE ⚠️
+
+**`main` is NOT the source of truth for active development.**
+
+`main` is frozen at **v0.4.37 / build 59**. It has not been updated
+since b59 shipped. Do NOT read source files from `main` to understand
+current app behavior, current bug locations, or current API shapes.
+
+**All builds b60 and later live on one branch:**
+
+```
+feat/ui-v4-2-claude
+```
+
+Last verified HEAD: `33f57e64d421946fc9ad16a6e1f5ca480cc7a11d`
+Last shipped to TestFlight from this branch: **v0.4.52 / build 82**
+
+**Every file read, every bug diagnosis, every code write for b83 and
+beyond must target `feat/ui-v4-2-claude`.** If you read a file from
+`main` and use it to make a decision, you are working from code that is
+23+ builds out of date. This has already caused one agent to write 9
+files with the wrong BLE param IDs, duplicate state, and compile errors.
+
+**How to verify you are on the right branch before reading any source
+file:**
+
+1. Check that `project.yml` → `CURRENT_PROJECT_VERSION` is **≥ 60**.
+   If it reads `59`, you are on `main`. Stop and switch to
+   `feat/ui-v4-2-claude`.
+2. Check that `MARKETING_VERSION` is **≥ 0.4.38**.
+   If it reads `0.4.37`, same problem.
+
+---
+
 ## Mandatory startup sequence (read in this order)
 
 1. `AGENTS.md` (repo root) — sacred files, hard constraints, signing.
@@ -34,11 +70,14 @@ explicitly asked.
 **Then summarize state back to the user. Do not edit anything until you
 have done this.**
 
-## Active branch state (Telemetry v2 first slice in flight, post-b78)
+## Active branch state (Telemetry v2 first slice in flight, post-b82)
 
 - **Branch:** `feat/ui-v4-2-claude` (integration branch).
-- **Last shipped to TestFlight:** **v0.4.51 / build 78 — "Session
-  Recorder (launch fix)" — B74-F11.** Tag `v0.4.51-build78`.
+- **Last shipped to TestFlight:** **v0.4.52 / build 82.** Tag
+  `v0.4.52-build82`, TestFlight delivery UUID
+  `496678a7-ab0b-4a7d-b08a-d1077c315fb7`.
+- **`main` is frozen at b59 / v0.4.37.** Do not use it as a source of
+  truth for anything. See the ⚠️ warning at the top of this file.
 - **In flight on the branch (not shipped).**
   - Telemetry v2 docs alignment commit `6a3162b`.
   - BLE characteristic audit commit `2636b49`.
@@ -185,7 +224,11 @@ minimum:
 
 ## Last shipped (informational)
 
-**v0.4.51 / build 78 — "Session Recorder (launch fix)" —
+**v0.4.52 / build 82.** Tag `v0.4.52-build82`. TestFlight delivery UUID
+`496678a7-ab0b-4a7d-b08a-d1077c315fb7`. See `02_CURRENT_STATE.md` for
+the full feature summary and open bug queue.
+
+**Prior shipped: v0.4.51 / build 78 — "Session Recorder (launch fix)" —
 B74-F11 hotfix.** Re-injects `SessionRecorder` env-object directly
 on `SessionRecorderToggle()` inside the root `.overlay` closure in
 `VoltraLiveApp.swift`. b77 shipped a SwiftUI
@@ -196,13 +239,6 @@ do NOT propagate to the overlay's content. New
 `VoltraLiveTests/RecorderLaunchSmokeTests.swift` pins the fix via
 `UIHostingController` mount + force-layout. Tag `v0.4.51-build78`.
 KI-13 in `06_KNOWN_ISSUES.md`.
-
-**Prior shipped (PULLED): v0.4.50 / build 77 — "Session Recorder" —
-B74-F11.** Pulled from TestFlight due to launch crash; fixed in
-b78.
-
-**Prior good: v0.4.49 / build 76 — "Health signal indicator" —
-B74-F8.**
 
 ## Sacred files (do not modify without explicit user approval)
 
