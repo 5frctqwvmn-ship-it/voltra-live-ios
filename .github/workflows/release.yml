@@ -12,11 +12,11 @@ on:
       dry_run:
         description: 'Dry run — build & sign but skip TestFlight upload and GitHub release'
         required: false
-        default: 'true'
+        default: 'false'
         type: choice
         options:
-          - 'true'
           - 'false'
+          - 'true'
 
 permissions:
   contents: write

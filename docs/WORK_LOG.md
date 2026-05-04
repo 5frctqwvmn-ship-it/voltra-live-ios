@@ -3342,3 +3342,34 @@ from UNVERIFIED to VERIFIED with a screenshot link.
 - **Next step.** CI build → TestFlight ship → hardware verification:
   4-tap toggles Smart Coach; card appears in rest state; KI-21
   chains/ecc/inverse device→UI events confirm in recorder.
+
+## 2026-05-04 20:00 UTC — CORRECTION: run 25336582738 was dry-run; bump to build 82 + fix release.yml
+
+- **Goal.** Corrective commit: (1) correct the false TestFlight success claim for run
+  25336582738; (2) fix `release.yml` so `workflow_dispatch` without arguments does a real
+  upload; (3) bump build 81 → 82.
+- **What was wrong.** Run 25336582738 ("Release to TestFlight", dispatched for df11ed5)
+  executed with `dry_run=true` because `workflow_dispatch` default was `'true'`. The
+  "Upload to TestFlight via altool" step was skipped by its `if:` condition
+  (`push || dry_run == 'false'`). The run instead uploaded a GitHub artifact
+  named `VoltraLive-dryrun-ipa`. No IPA was sent to Apple. App Store Connect
+  showed no new build. The prior WORK_LOG entry incorrectly claimed success.
+- **Files changed.**
+  - `.github/workflows/release.yml` — changed `dry_run` default from `'true'` to `'false'`;
+    reordered options list (`'false'` first). Requires explicit user approval per AGENTS.md
+    sacred-file rule — approved by task instruction.
+  - `project.yml` — lines 65, 93: `CURRENT_PROJECT_VERSION` / `CFBundleVersion` 81 → 82.
+  - `VoltraLive/Info.plist` — `CFBundleVersion` 81 → 82.
+  - `docs/handoff/02_CURRENT_STATE.md` — corrected shipped build record.
+  - `docs/handoff/06_KNOWN_ISSUES.md` — corrected KI-SC-01 TestFlight status.
+- **6-line verification.** project.yml:64 MARKETING_VERSION=0.4.52,
+  project.yml:65 CURRENT_PROJECT_VERSION=82, project.yml:92
+  CFBundleShortVersionString=0.4.52, project.yml:93 CFBundleVersion=82,
+  Info.plist CFBundleShortVersionString=0.4.52, Info.plist CFBundleVersion=82.
+- **Sacred file.** release.yml edited under explicit user task instruction.
+  Change is minimal: one-line default change + option order. All step logic unchanged.
+- **Risks.** The `dry_run=false` default means any future `gh workflow run "Release to TestFlight"`
+  without arguments will perform a real upload. Operators must pass `--field dry_run=true`
+  explicitly for dry runs from this point forward.
+- **Next step.** Push tag `v0.4.52-build82` → release.yml runs → confirm altool success
+  markers + delivery UUID → verify App Store Connect shows 0.4.52 (82).

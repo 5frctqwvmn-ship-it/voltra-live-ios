@@ -837,10 +837,11 @@ done.
 
 ---
 
-### KI-SC-01 (open — pending hardware verification) — Smart Coach card rest-state display
+### KI-SC-01 (open — pending TestFlight ship 0.4.52/82 + hardware verification) — Smart Coach card rest-state display
 
-**Status.** Implementation committed. Pending TestFlight ship + hardware
-verification on physical VOLTRA.
+**Status.** Implementation committed at df11ed5. Run 25336582738 was a
+DRY-RUN (did not upload to Apple). Corrected in build 82 commit. Pending
+real TestFlight ship (tag `v0.4.52-build82`) + hardware verification.
 
 **What.** After 4-tapping the version badge to unlock Smart Coach, the
 coaching card should appear in `LiveCaptureViewV2` when the device enters

@@ -28,16 +28,17 @@ LiveCapture apply wiring, `ui.deviceChainsApplied` / `ui.deviceEccentricApplied`
 / `ui.deviceInverseApplied` recorder events. KI-21 remains open pending
 hardware retest (next TestFlight ship).
 
-**Hidden Smart Coach unlock added** — `FeatureFlags.coachingCardEnabled`
+**Hidden Smart Coach unlock added** (df11ed5) — `FeatureFlags.coachingCardEnabled`
 and `smartCoachEnabled` are now computed vars backed by
 `UserDefaults("VOLTRASmartCoachUnlocked")`. Default = OFF. Enable by
-4-tapping the version badge. `BuildBadgeOverlay` has the 4-tap gesture;
-`LiveCaptureViewV2` observes via `coachingCardRuntimeEnabled`.
-Pending CI + TestFlight ship for this commit.
+4-tapping the version badge.
 
-**Coaching (RC-01/SC-01) ship status:** present in binary, off by
-default. Unlock with 4-tap on version badge. `aggressiveRecommendationsEnabled`
-remains false.
+**NOTE: run 25336582738 was DRY-RUN ONLY.** The `release.yml` `dry_run` input
+defaulted to `'true'`; the altool upload step was skipped. No IPA reached Apple.
+`release.yml` default corrected to `'false'` in the build 82 commit.
+
+**Next TestFlight ship: 0.4.52 (82).** Pending `v0.4.52-build82` tag push.
+`aggressiveRecommendationsEnabled` remains false.
 
 ---
 
