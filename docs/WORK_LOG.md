@@ -3373,3 +3373,23 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   explicitly for dry runs from this point forward.
 - **Next step.** Push tag `v0.4.52-build82` → release.yml runs → confirm altool success
   markers + delivery UUID → verify App Store Connect shows 0.4.52 (82).
+
+## 2026-05-04 19:18 UTC — TestFlight ship confirmed: v0.4.52-build82
+
+- **Tag.** `v0.4.52-build82` at commit `e91c148`.
+- **Workflow run.** release.yml run 25337935549 — event: push (tag-triggered).
+  URL: https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25337935549
+  Conclusion: success. Duration: ~10m38s.
+- **5-gate altool verification.**
+  1. Failure-marker grep: PASS — zero real errors.
+  2. Wall-clock: PASS — ~10m38s >> 10s floor.
+  3. Success marker: PASS — "No errors uploading archive at 'build/export/VoltraLive.ipa'."
+  4. No ERROR: lines: PASS.
+  5. Delivery UUID: PASS — `496678a7-ab0b-4a7d-b08a-d1077c315fb7`.
+- **Commits shipped.**
+  - df11ed5 feat: hidden Smart Coach unlock + handoff refresh
+  - e91c148 fix: upload build 82 to TestFlight (build bump + release.yml dry_run fix)
+- **Coaching flags.** All off by default. Unlock with 4-tap on version badge.
+- **KI-21.** Still open — pending hardware retest.
+- **Next step.** App Store Connect will process the build. Once available in
+  TestFlight, run hardware verification per 09_NEXT_AGENT_PROMPT.md.
