@@ -3297,3 +3297,48 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   read/apply/recorder flow.
 - **Next step:** Run build/CI, then ship a later build only when approved for
   TestFlight hardware retest. Do not close KI-21 until that retest passes.
+
+## 2026-05-04 18:30 UTC — Hidden Smart Coach unlock + handoff refresh
+
+- **Goal.** Add hidden 4-tap UserDefaults unlock for Smart Coach card so QA
+  can test without a code-change rebuild. Refresh all handoff docs to
+  eliminate drift accumulated since b81.
+- **Files changed (Swift).**
+  - `VoltraLive/FeatureFlags.swift` — `coachingCardEnabled` / `smartCoachEnabled`
+    converted from `static var = false` to computed vars backed by
+    `UserDefaults.standard.bool(forKey: smartCoachUnlockUserDefaultsKey)`.
+    Added `smartCoachUnlockUserDefaultsKey = "VOLTRASmartCoachUnlocked"`.
+    `aggressiveRecommendationsEnabled` / `hrRecoveryHardLockEnabled` /
+    `telemetryDebugExportEnabled` unchanged (static defaults).
+  - `VoltraLive/Views/BuildBadgeOverlay.swift` — added
+    `@AppStorage(FeatureFlags.smartCoachUnlockUserDefaultsKey) smartCoachUnlocked`
+    and `.onTapGesture(count: 4) { smartCoachUnlocked.toggle() }` declared
+    BEFORE the existing 3-tap and 1-tap. 3-tap (VOLTRARecorderUnlocked) and
+    1-tap (grid cycling) preserved verbatim.
+  - `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — added
+    `@AppStorage(FeatureFlags.smartCoachUnlockUserDefaultsKey) smartCoachUnlocked`
+    and `coachingCardRuntimeEnabled` computed var. Replaced both
+    `FeatureFlags.coachingCardEnabled` gate sites with `coachingCardRuntimeEnabled`.
+    Added `.onChange(of: smartCoachUnlocked)` observer to mount/dismount card
+    live when unlocked during rest state.
+- **Files changed (docs).**
+  `docs/handoff/00_START_HERE.md`, `docs/handoff/02_CURRENT_STATE.md`,
+  `docs/handoff/03_CURRENT_FEATURE_SPEC.md`,
+  `docs/handoff/04_DECISIONS_AND_CONSTRAINTS.md`,
+  `docs/handoff/05_BUILD_TEST_DEPLOY.md`, `docs/handoff/06_KNOWN_ISSUES.md`,
+  `docs/handoff/07_FILE_MAP.md`, `docs/handoff/08_GIT_HISTORY_SUMMARY.md`,
+  `docs/handoff/09_NEXT_AGENT_PROMPT.md`, `docs/handoff/10_OPEN_QUESTIONS.md`.
+- **What changed.** Smart Coach is now togglable at runtime without a code
+  change. Default remains OFF (UserDefaults key absent = false). Unlock
+  contract: 4 taps on version badge toggles `VOLTRASmartCoachUnlocked`.
+- **Verification.** Static + grep only (no Xcode on Windows). All required
+  symbols confirmed present via `git grep`. CI build is the compile gate.
+- **Risks.** `@AppStorage` on a value key shared between BuildBadgeChip and
+  LiveCaptureViewV2 — both observe the same key, so unlock/lock propagates
+  across all mounted views simultaneously. No thread safety concern (both
+  are @MainActor SwiftUI views).
+- **No version/build bump.** No workflow/signing changes. Sacred BLE files
+  untouched. `aggressiveRecommendationsEnabled` remains false.
+- **Next step.** CI build → TestFlight ship → hardware verification:
+  4-tap toggles Smart Coach; card appears in rest state; KI-21
+  chains/ecc/inverse device→UI events confirm in recorder.

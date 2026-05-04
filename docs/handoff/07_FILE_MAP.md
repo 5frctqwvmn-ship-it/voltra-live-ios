@@ -110,3 +110,24 @@ loud guards). All source paths below are `EXISTS`.
    feature's section may be trimmed to a one-line pointer at the
    `EXISTS` table in `04_ARCHITECTURE.md` or `AGENTS.md`'s project
    layout block — whichever owns the file long-term.
+
+---
+
+## RC-01 / SC-01 — Smart Coach Coaching Card (2026-05-04)
+
+| File | Status | Notes |
+|---|---|---|
+| `VoltraLive/FeatureFlags.swift` | EXISTS | `coachingCardEnabled` + `smartCoachEnabled` computed from `UserDefaults("VOLTRASmartCoachUnlocked")`. `aggressiveRecommendationsEnabled` static false. |
+| `VoltraLive/Views/BuildBadgeOverlay.swift` | EXISTS (UPDATED) | 4-tap gesture added before 3-tap + 1-tap. Toggles `smartCoachUnlocked` via `@AppStorage`. |
+| `VoltraLive/Coaching/CoachingConstants.swift` | EXISTS | Debounce (1.5 s), transition (0.25 s), fatigue thresholds (15%/30%), weight caps (+25%/+15%), rounding (5 lb). |
+| `VoltraLive/Coaching/Models/SetPerformanceSnapshot.swift` | EXISTS | Immutable value type for one completed set. per-rep force nil until Telemetry v2. |
+| `VoltraLive/Coaching/Models/ExerciseSessionCursor.swift` | EXISTS | Current session cursor (nextSetIndex, completedSetsToday). |
+| `VoltraLive/Coaching/Models/HistoricalSetMatch.swift` | EXISTS | Prior session lookup result. |
+| `VoltraLive/Coaching/Models/CoachingRecommendation.swift` | EXISTS | Engine output (headline, historyLine, deltaLine, reasonLine, weights, fatigueGate). |
+| `VoltraLive/Coaching/Services/HistoricalWorkoutMatcher.swift` | EXISTS | Groups by workoutSessionID. Excludes current session. |
+| `VoltraLive/Coaching/Services/CoachingEngine.swift` | EXISTS | 7 rules, 5 guardrails, fully explainable. No BLE writes. |
+| `VoltraLive/Coaching/Services/SetSnapshotBuilder.swift` | EXISTS | LoggedSet → SetPerformanceSnapshot adapter. bestRepForceLb nil until per-rep telemetry. |
+| `VoltraLive/Coaching/Views/CoachingCardView.swift` | EXISTS | Rest-state card. minHeight = cardMinHeight. |
+| `VoltraLive/Coaching/Views/CoachingCardButtonRow.swift` | EXISTS | Load/Push/Last/Repeat buttons. All route through adjustWeight(delta:). |
+| `VoltraLive/Coaching/Views/FatigueIndicatorView.swift` | EXISTS | 12pt colored dot (green/yellow/red/gray). |
+| `VoltraLiveTests/CoachingEngineTests.swift` | EXISTS (placeholder) | Placeholder — fill before enabling coaching in TestFlight. |

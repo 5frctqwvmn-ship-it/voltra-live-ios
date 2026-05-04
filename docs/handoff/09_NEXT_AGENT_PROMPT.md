@@ -387,3 +387,40 @@ info:
 
 *This file was last updated: 2026-05-03 23:40 CDT by Perplexity session.*
 *Commit it to the repo in the same push as CONTEXT_LEDGER.md update.*
+
+---
+
+## Update: 2026-05-04 — Post Smart Coach Unlock Commit
+
+**Current HEAD (pre-ship):** new commit on top of `7c02c59` — hidden Smart Coach unlock.
+**TestFlight:** build 81 is latest shipped. Build 82 pending after CI passes on this commit.
+
+**What to verify on physical device (build 82 TestFlight):**
+
+1. **Version badge tap contract:**
+   - 4 taps → toggles Smart Coach (no visible badge change). Verify by entering LiveCapture rest state.
+   - 3 taps → unlocks SessionRecorder (red dot appears).
+   - 1 tap → cycles debug grid.
+
+2. **Smart Coach off by default:**
+   - Fresh install: no coaching card visible in rest state.
+
+3. **Smart Coach unlocked:**
+   - 4-tap version badge → start session → complete one set → rest state.
+   - After ~1.5 s debounce: CoachingCardView appears where ForceChart was.
+   - Tap "Load X lb" → weight tile updates. No BLE write unless user taps +/-.
+
+4. **KI-21 verification:**
+   - Change chains/ecc/inverse on physical VOLTRA.
+   - Session recorder must show `device.state.change source=deviceUnsolicited` for each field.
+   - Session recorder must show `ui.deviceChainsApplied`, `ui.deviceEccentricApplied`, `ui.deviceInverseApplied`.
+
+5. **KI-20 regression check:**
+   - Base weight device→UI must still work (20→15 lb tile update).
+
+**If hardware tests pass:** close KI-21, close KI-SC-01. Plan coaching card
+feature expansion (per-rep fatigue gate, `aggressiveRecommendationsEnabled`).
+
+**Open questions before closing KI-SC-01:**
+- Does card dismiss on weight tap, or wait for device re-load?
+- Correct debounce duration on aggressive mode?

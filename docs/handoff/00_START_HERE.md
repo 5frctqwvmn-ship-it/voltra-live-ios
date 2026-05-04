@@ -259,3 +259,17 @@ they can correct your understanding. Don't just start executing.
 
 `docs/WORK_LOG.md` lives one level up — append-only journal of every
 change.
+
+---
+
+## Smart Coach Unlock Contract (2026-05-04)
+
+| Tap count | Target | Action |
+|---|---|---|
+| 4 taps | Version badge chip | Toggles `VOLTRASmartCoachUnlocked` (UserDefaults). Enables coaching card + Smart Coach. Repeating disables. |
+| 3 taps | Version badge chip | Sets `VOLTRARecorderUnlocked = true`. Enables SessionRecorder. |
+| 1 tap | Version badge chip | Cycles debug grid density. |
+
+Key file: `VoltraLive/FeatureFlags.swift` — `smartCoachUnlockUserDefaultsKey`.
+Spec: `03_CURRENT_FEATURE_SPEC.md` §Smart Coach unlock.
+Current state: `02_CURRENT_STATE.md`.

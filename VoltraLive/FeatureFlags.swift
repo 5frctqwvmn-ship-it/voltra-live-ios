@@ -1,19 +1,35 @@
 // VoltraLive/FeatureFlags.swift
 // RC-01 feature flags — all off by default in production.
-// Set individual flags to true for TestFlight betas.
-// No flag change requires a new binary — adjust and rebuild.
+// Smart Coach is unlocked via hidden 4-tap on the version badge.
+
+import Foundation
 
 enum FeatureFlags {
+
+    // MARK: - Hidden Smart Coach unlock
+
+    /// UserDefaults key written by the 4-tap gesture on BuildBadgeChip.
+    /// Persists across app launches.
+    static let smartCoachUnlockUserDefaultsKey = "VOLTRASmartCoachUnlocked"
+
+    private static var smartCoachUnlocked: Bool {
+        UserDefaults.standard.bool(forKey: smartCoachUnlockUserDefaultsKey)
+    }
+
+    // MARK: - Coaching flags (driven by UserDefaults unlock)
+
     /// Shows the rest-state Coaching Card panel in LiveCapture.
-    /// Off by default — ship dark until A1 hardware retest passes for KI-20.
-    static var coachingCardEnabled: Bool = false
+    /// OFF by default; enabled by the hidden version-badge 4-tap.
+    static var coachingCardEnabled: Bool { smartCoachUnlocked }
 
     /// Enables Smart Coach weight recommendations inside the Coaching Card.
     /// Ignored when coachingCardEnabled is false.
-    static var smartCoachEnabled: Bool = false
+    static var smartCoachEnabled: Bool { smartCoachUnlocked }
 
-    /// Enables the "Push X lb" aggressive option when the coaching engine
-    /// calculates a safe aggressive alternative. Requires smartCoachEnabled.
+    // MARK: - Other flags (static defaults)
+
+    /// Enables the "Push X lb" aggressive option. Keep dark unless explicitly
+    /// enabled in a later task.
     static var aggressiveRecommendationsEnabled: Bool = false
 
     /// When true, prevents starting a set if HR is above recovery threshold.

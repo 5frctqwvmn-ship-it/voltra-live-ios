@@ -834,3 +834,26 @@ done.
   and `ui.deviceInverseApplied` for recorder correlation.
 - No inverse write protocol was changed; current writes still use
   `VoltraModifiers(... inverse: inverseActive)` plus `chainsLb`.
+
+---
+
+### KI-SC-01 (open — pending hardware verification) — Smart Coach card rest-state display
+
+**Status.** Implementation committed. Pending TestFlight ship + hardware
+verification on physical VOLTRA.
+
+**What.** After 4-tapping the version badge to unlock Smart Coach, the
+coaching card should appear in `LiveCaptureViewV2` when the device enters
+rest state (1.5 s debounce after `session.restActive = true`). Weight
+recommendation buttons should update `LoggingStore.pendingPlannedWeightLb`
+via `adjustWeight(delta:)`.
+
+**Verification steps.**
+1. Install TestFlight build.
+2. 4-tap version badge → confirm no visible change.
+3. Start session. Complete one set. Enter rest state.
+4. Expected: coaching card appears after ~1.5 s.
+5. Tap "Load X lb" → confirm weight tile updates.
+6. Re-tap version badge 4 times to disable → card should hide on next rest.
+
+**Do NOT close** until steps 1–6 confirmed on physical device.

@@ -2037,3 +2037,32 @@ test fixture or a hardware capture, and the QA passes A–G are run.
 
 No Swift, no `Info.plist`, no `project.yml`, no entitlements, no
 release-workflow edit, no version bump.
+
+---
+
+## ADR V4-D27 — Smart Coach gated by UserDefaults unlock, not build flag (2026-05-04)
+
+**Decision.** `FeatureFlags.coachingCardEnabled` and `smartCoachEnabled` are
+computed vars backed by `UserDefaults("VOLTRASmartCoachUnlocked")` rather than
+hardcoded `false`. The unlock key is toggled by a 4-tap gesture on the
+version badge chip (`BuildBadgeOverlay`).
+
+**Rationale.** QA can verify the coaching card on physical hardware without
+requiring a code change + rebuild cycle. The feature is still off by default
+on every fresh install and never visible without the explicit gesture.
+
+**Constraints.**
+- `aggressiveRecommendationsEnabled` is NOT driven by the unlock key.
+  It remains `static var = false` and requires a separate explicit enable.
+- The version badge is the only affordance. No Settings UI, no deep link.
+- Unlock persists across app launches via `@AppStorage`.
+- No version/build bump accompanies this change.
+
+## ADR V4-D28 — No version/build bump for hidden-unlock commit (2026-05-04)
+
+**Decision.** The Smart Coach unlock commit ships without bumping
+`CFBundleVersion` or `CFBundleShortVersionString`.
+
+**Rationale.** This is a behavioral-gate change, not a user-visible feature.
+The build-number bump will occur in the next intentional TestFlight ship
+cycle.

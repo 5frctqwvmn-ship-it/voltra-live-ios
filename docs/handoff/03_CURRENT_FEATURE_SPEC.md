@@ -981,3 +981,49 @@ disk writes; no network; no analytics.
 Authoritative spec: [`SESSION_RECORDER_SPEC.md`](SESSION_RECORDER_SPEC.md).
 Per-file map: [`07_FILE_MAP.md`](07_FILE_MAP.md) "B74-F11 — Session
 Recorder (EXISTS)".
+
+---
+
+## Hidden Smart Coach Unlock (2026-05-04)
+
+### Unlock contract
+
+| Gesture | Key | Effect |
+|---|---|---|
+| 4 taps on version badge | `VOLTRASmartCoachUnlocked` | Toggles coaching on/off. Persisted across launches. |
+| 3 taps on version badge | `VOLTRARecorderUnlocked` | Unlocks SessionRecorder. One-way (set to true only). |
+| 1 tap on version badge | `debugGridMode` | Cycles grid density 0→5. |
+
+### Affected files
+
+- `VoltraLive/FeatureFlags.swift` — `coachingCardEnabled` and `smartCoachEnabled`
+  are computed vars: `{ UserDefaults.standard.bool(forKey: smartCoachUnlockUserDefaultsKey) }`.
+  Key: `VOLTRASmartCoachUnlocked`.
+- `VoltraLive/Views/BuildBadgeOverlay.swift` — `BuildBadgeChip` has
+  `@AppStorage(FeatureFlags.smartCoachUnlockUserDefaultsKey) smartCoachUnlocked`
+  and `.onTapGesture(count: 4) { smartCoachUnlocked.toggle() }` declared
+  before the 3-tap and 1-tap handlers.
+- `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — `@AppStorage(...)
+  smartCoachUnlocked` + `coachingCardRuntimeEnabled` computed var replaces
+  the two `FeatureFlags.coachingCardEnabled` gate sites. `.onChange(of:
+  smartCoachUnlocked)` mounts/dismounts card live.
+
+### Invariants
+
+- Smart Coach defaults OFF on every fresh install (UserDefaults key absent = false).
+- `aggressiveRecommendationsEnabled` remains `static var = false` — NOT
+  driven by the unlock key. Must be separately enabled when guardrails are
+  validated.
+- 3-tap SessionRecorder unlock and 1-tap grid cycling are preserved verbatim.
+- No visible UI change when the unlock fires — badge text, layout, colors
+  unchanged.
+
+### Coaching Card rest-state behavior (when unlocked)
+
+1. Device finishes a set → `session.restActive = true` → `onDeviceBecameUnloaded()`.
+2. 1.5 s debounce `DispatchWorkItem` fires → `coachingCardVisible = true`.
+3. `forceChartCard` branch: `coachingCardRuntimeEnabled && coachingCardVisible
+   && exerciseName != nil && activeSession != nil` → `CoachingCardView`.
+4. Buttons call `adjustWeight(delta:)` — no direct BLE write.
+5. Device re-loads → `onDeviceBecameLoaded()` → debounce cancelled,
+   `coachingCardVisible = false` → ForceChartView resumes.

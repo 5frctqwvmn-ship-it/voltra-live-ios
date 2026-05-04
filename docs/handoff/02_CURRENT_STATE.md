@@ -1,6 +1,6 @@
 # 02 — Current State
 
-_Last updated: 2026-05-03 (b78 SHIPPED to TestFlight; docs-only alignment commit on top — current focus is **Authoritative Device State + Telemetry Collector v2** spec prep, no Swift changes in this commit.)_
+_Last updated: 2026-05-04 (b81 shipped; KI-21 follow-through at 7c02c59; hidden Smart Coach unlock added — pending CI + TestFlight.)_
 
 > **Maintenance rule:** this file is overwritten on every ship. The
 > append-only history lives in `docs/WORK_LOG.md`. If you're updating
@@ -22,13 +22,22 @@ Delivery UUID `08ffc5e4-ca3e-4aba-81a7-6a06bef011ae`.
 Session `EA473194-40BF-4580-BEEE-8C6033535923`.
 Base weight device→UI now works for single-MDM-slot sessions.
 
-**KI-21 follow-through implemented locally** (chains `0x3E87`, eccentric
-`0x3E88`, inverse `0x53B0`, manager Published bridges, LiveCapture apply
-wiring, and UI recorder events) — pending build/CI, TestFlight ship, and
-hardware retest. KI-21 is not closed.
+**KI-21 follow-through implemented** at `7c02c59` — chains `0x3E87`,
+eccentric `0x3E88`, inverse `0x53B0`, manager `@Published` bridges,
+LiveCapture apply wiring, `ui.deviceChainsApplied` / `ui.deviceEccentricApplied`
+/ `ui.deviceInverseApplied` recorder events. KI-21 remains open pending
+hardware retest (next TestFlight ship).
 
-**Coaching (RC-01/SC-01)** is present in the binary but feature-flagged
-OFF (`FeatureFlags.coachingCardEnabled = false`). No coaching UI visible.
+**Hidden Smart Coach unlock added** — `FeatureFlags.coachingCardEnabled`
+and `smartCoachEnabled` are now computed vars backed by
+`UserDefaults("VOLTRASmartCoachUnlocked")`. Default = OFF. Enable by
+4-tapping the version badge. `BuildBadgeOverlay` has the 4-tap gesture;
+`LiveCaptureViewV2` observes via `coachingCardRuntimeEnabled`.
+Pending CI + TestFlight ship for this commit.
+
+**Coaching (RC-01/SC-01) ship status:** present in binary, off by
+default. Unlock with 4-tap on version badge. `aggressiveRecommendationsEnabled`
+remains false.
 
 ---
 

@@ -246,3 +246,49 @@ handoff docs were 25+ builds stale, every ship now updates `02`,
 commit as the version bump. See `00_START_HERE.md` "Mandatory ship
 discipline" section. If a ship lands without doc updates, the next
 session should treat that as a bug and back-fill before any new work.
+
+---
+
+## 2026-05-04 additions
+
+### OQ-KI21-A — Hardware verification for KI-21 chains/eccentric/inverse
+
+**Question.** When the user changes chains, eccentric weight, or inverse-chain
+on the physical VOLTRA, do the recorder events
+`device.state.change source=deviceUnsolicited` and
+`ui.deviceChainsApplied` / `ui.deviceEccentricApplied` / `ui.deviceInverseApplied`
+appear in the session export?
+
+**Blocking.** Close KI-21. Evidence: session recorder export from build 82+.
+
+**If events are absent:** Param IDs (`0x3E87`, `0x3E88`, `0x53B0`) are wrong.
+Re-examine raw hex bytes in the session export to find correct IDs.
+
+---
+
+### OQ-SC-01-A — Hardware verification for Smart Coach card rest-state display
+
+**Question.** After the 4-tap unlock, does `CoachingCardView` appear correctly
+in the rest state? Do weight-load buttons update `pendingPlannedWeightLb` via
+`adjustWeight(delta:)`?
+
+**Blocking.** Close KI-SC-01. Evidence: physical device test on build 82+.
+
+---
+
+### OQ-SC-01-B — Smart Coach card dismissal behavior
+
+**Question.** Should the coaching card dismiss immediately when the user taps
+a weight button, or should it wait until the device re-loads?
+
+**Impact.** UX decision affecting `onDeviceBecameLoaded()` call site.
+Currently dismisses only on re-load (device state). Awaiting user preference.
+
+---
+
+### OQ-SC-01-C — Aggressive recommendations gate
+
+**Question.** When should `aggressiveRecommendationsEnabled` be enabled?
+Currently `static var = false`. Not driven by the 4-tap unlock key.
+
+**Impact.** Requires separate guardrail validation before enabling.

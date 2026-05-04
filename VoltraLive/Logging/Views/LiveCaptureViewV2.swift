@@ -123,6 +123,19 @@ struct LiveCaptureViewV2: View {
     /// Pending debounce work item. Cancelled when device re-loads.
     @State private var coachingDebounceWork: DispatchWorkItem? = nil
 
+    // MARK: RC-01 hidden Smart Coach unlock
+    /// Mirrors the UserDefaults key written by the 4-tap version badge gesture.
+    /// When true, the coaching card is shown in the rest state regardless of
+    /// FeatureFlags.coachingCardEnabled.
+    @AppStorage(FeatureFlags.smartCoachUnlockUserDefaultsKey)
+    private var smartCoachUnlocked: Bool = false
+
+    /// True when coaching is enabled either via FeatureFlags (build-time) or
+    /// the hidden 4-tap UserDefaults unlock.
+    private var coachingCardRuntimeEnabled: Bool {
+        FeatureFlags.coachingCardEnabled || smartCoachUnlocked
+    }
+
     /// Hardware LOAD state. Same semantics as V1's @State deviceLoaded.
     /// b56: toggled by tapping the big WEIGHT NUMBER.
     @State private var deviceLoaded: Bool = false
@@ -393,6 +406,16 @@ struct LiveCaptureViewV2: View {
             if nowResting {
                 onDeviceBecameUnloaded()
             } else {
+                onDeviceBecameLoaded()
+            }
+        }
+        // RC-01 Smart Coach unlock: if the user 4-taps the version badge
+        // while already in the rest state, mount the card immediately.
+        // If they tap again to disable, dismount.
+        .onChange(of: smartCoachUnlocked) { _, enabled in
+            if enabled, session.restActive {
+                onDeviceBecameUnloaded()
+            } else if !enabled {
                 onDeviceBecameLoaded()
             }
         }
@@ -1347,7 +1370,7 @@ struct LiveCaptureViewV2: View {
         // RC-01: if coaching card is enabled, debounced-rest is active,
         // and an exercise is selected, show the CoachingCard instead of
         // the force chart. Feature flag is off by default.
-        if FeatureFlags.coachingCardEnabled,
+        if coachingCardRuntimeEnabled,
            coachingCardVisible,
            let exerciseName = logging.activeInstance?.exercise?.name,
            let activeSession = logging.activeSession {
@@ -1441,7 +1464,7 @@ struct LiveCaptureViewV2: View {
     /// Called when the device transitions to unloaded state. Starts
     /// the 1.5 s debounce before showing the coaching card.
     private func onDeviceBecameUnloaded() {
-        guard FeatureFlags.coachingCardEnabled else { return }
+        guard coachingCardRuntimeEnabled else { return }
         coachingDebounceWork?.cancel()
         let work = DispatchWorkItem {
             withAnimation(.easeInOut(duration: CoachingConstants.cardTransitionSeconds)) {

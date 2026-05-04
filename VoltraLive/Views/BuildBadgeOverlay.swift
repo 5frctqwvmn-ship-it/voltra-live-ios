@@ -62,6 +62,11 @@ private struct BuildBadgeChip: View {
     /// b70 / V4-D18 four-state enum (see `DebugGridDensity.from(_:)`).
     @AppStorage("debugGridMode") private var modeRaw: String = DebugGridDensity.off.rawValue
 
+    /// Hidden Smart Coach unlock. Persisted in UserDefaults so the unlock
+    /// survives app launches. Toggled by 4-tap on this chip.
+    @AppStorage(FeatureFlags.smartCoachUnlockUserDefaultsKey)
+    private var smartCoachUnlocked: Bool = false
+
     var body: some View {
         Text(versionString)
             .font(.system(size: 9, weight: .semibold, design: .monospaced))
@@ -81,6 +86,10 @@ private struct BuildBadgeChip: View {
             // contentShape ensures the entire capsule (including the
             // padding) is tappable, not just the rendered glyph rect.
             .contentShape(Capsule())
+            // Hidden Smart Coach unlock: 4-tap toggles VOLTRASmartCoachUnlocked.
+            // Declared FIRST so SwiftUI's tap-count disambiguation resolves it
+            // before the 3-tap and 1-tap handlers. No visible UI change on tap.
+            .onTapGesture(count: 4) { smartCoachUnlocked.toggle() }
             // B74-F11: triple-tap unlocks the SessionRecorder dot.
             // Declared BEFORE the single-tap so SwiftUI's tap-count
             // disambiguation prefers it. A lone single tap still cycles
