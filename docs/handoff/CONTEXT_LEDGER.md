@@ -137,3 +137,139 @@ Authoritative sources remain:
   open PR against `feat/ui-v4-2-claude` with spec-required
   description.
 - **Context health:** good
+
+---
+
+## CHECKPOINT — 2026-05-04 03:15 UTC — Perplexity Computer session
+
+- **Branch:** `feat/ui-v4-2-claude`
+- **HEAD:** `ad3c11b`
+- **Working tree:** CLEAN
+- **Version/build in repo:** 0.4.52 / build 80
+- **Last shipped TestFlight:** v0.4.52-build80 (tag `v0.4.52-build80` → `51908f2`)
+- **HEAD is N commits AHEAD of shipped tag:** 2 commits ahead
+  (`9788d49` focusedBle fix + `ad3c11b` RC-01)
+
+---
+
+### What happened this session (in order)
+
+1. **KI-20 initial visual bridge fix** (`08a8b7c`)
+   Added `@Published deviceOriginatedBaseWeightUpdate` to
+   `VoltraBLEManager`. `LiveCaptureViewV2` observes it via
+   `.onChange` + `.onAppear` reconciliation. Recorder emits
+   `ui.deviceBaseWeightApplied`. Shipped in build 80.
+
+2. **KI-20 event-based patch** (`a46d45f`)
+   Added `deviceOriginatedBaseWeightUpdateID` monotonic counter so
+   repeated same-lb events still fire onChange. Shipped in build 80.
+
+3. **Build 80 shipped** (`51908f2` tag `v0.4.52-build80`)
+   TestFlight release.yml run 25292365029 — SUCCESS.
+   Delivery UUID: `1d4a639d-542a-4a3b-93ec-d640459da0cd`.
+
+4. **A1 hardware test on build 80 — FAILED visual, telemetry PASSED**
+   Session `51674E4E-CBF6-4814-9AED-185826D053E2`.
+   `device.state.change source=deviceUnsolicited to=20/30/35` present.
+   `ui.deviceBaseWeightApplied` MISSING.
+   Root cause discovered via read-only audit: `focusedBle` returned the
+   standalone `ble` manager when only MDM left was connected
+   (`bothVoltrasConnected = false`). `ble` never receives MDM BLE
+   notifications. `deviceOriginatedBaseWeightUpdateID` on `ble` was
+   always 0.
+
+5. **KI-20 focusedBle topology fix** (`9788d49`)
+   Replaced `if !bothVoltrasConnected { return ble }` with topology
+   switch on `(mdm.left.connectionState.isConnected, mdm.right…)`.
+   Routes to `mdm.left` / `mdm.right` / `focusedSlot` / `ble` by
+   connection state only — no peripheral names used.
+   CI run 25293501073 — SUCCESS. NOT yet in any TestFlight build.
+
+6. **RC-01/SC-01 coaching card + Smart Coach** (`ad3c11b`)
+   16 new files. Feature-flagged OFF by default
+   (`FeatureFlags.coachingCardEnabled = false`).
+   Zero visible change in current TestFlight builds.
+   See `docs/specs/RC-01_COACHING_CARD.md` for full spec.
+
+---
+
+### KI-20 current status
+
+**OPEN — pending hardware retest on build 81.**
+
+The topology fix (`9788d49`) has never been in a shipped TestFlight
+build. Build 81 must be shipped and retested with:
+- Set app to 20 lb.
+- Change physical VOLTRA dial to 15 lb.
+- Expected: tile updates to 15 lb.
+- Expected logs: `device.state.change source=deviceUnsolicited to=15`
+  + `ui.deviceBaseWeightApplied to=15`.
+
+Do NOT mark KI-20 closed until MJ confirms.
+
+---
+
+### What is NOT yet done (next agent must do)
+
+1. **Bump build 81 + ship TestFlight** (project.yml exception required,
+   same approval as build 80 — lines 65+93 only: `80` → `81`).
+   Tag: `v0.4.52-build81`.
+   Commit message: `chore(release): bump to 0.4.52 / build 81 — KI-20 topology fix + RC-01 scaffold`
+
+2. **Hardware retest A1** — physical VOLTRA 20→15 lb.
+   Confirm tile updates. Confirm `ui.deviceBaseWeightApplied` log present.
+
+3. **Close KI-20** in `06_KNOWN_ISSUES.md` only after A1 passes.
+
+4. **RC-01 compile verification** — build 81 CI is the first compile
+   check. If CI fails, the failure is most likely in `LiveCaptureViewV2`
+   (`forceChartCard` panel switch uses `AnyView` type erasure). Check
+   that first.
+
+5. **Enable coaching card for build 82** (`coachingCardEnabled = true`)
+   only after KI-20 passes and coaching behavior has been reviewed on
+   device.
+
+6. **CoachingEngineTests** — placeholder only. Must be filled before
+   coaching is enabled in any TestFlight build.
+
+---
+
+### Active open issues
+
+| ID | Status | Summary |
+|---|---|---|
+| KI-20 | OPEN — pending retest | Machine-side weight tile not updating. Fix in `9788d49`, not yet shipped. |
+| RC-01 | IMPLEMENTED — flagged off | Coaching card. Enable after KI-20 passes. |
+| SC-01 | IMPLEMENTED — flagged off | Smart Coach engine. Same gate as RC-01. |
+
+---
+
+### Sacred files (never touch without explicit user approval)
+
+- `VoltraLive/Protocol/VoltraProtocol.swift`
+- `VoltraLive/Protocol/TelemetryExtractor.swift`
+- `VoltraLive/Protocol/PacketParser.swift`
+- `VoltraLive/Protocol/FrameAssembler.swift`
+- `.github/workflows/build.yml`
+- `project.yml` (except build-number lines 65+93 during releases,
+  with explicit per-release user approval)
+
+---
+
+### Key file locations
+
+| Topic | File |
+|---|---|
+| Spec: session recorder | `docs/handoff/SESSION_RECORDER_SPEC.md` |
+| Spec: coaching card | `docs/specs/RC-01_COACHING_CARD.md` |
+| Feature flags | `VoltraLive/FeatureFlags.swift` |
+| KI-20 bridge | `VoltraLive/BLE/VoltraBLEManager.swift` (lines 69–80, 300–310) |
+| focusedBle topology fix | `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` (lines 1437–1451) |
+| Coaching engine | `VoltraLive/Coaching/Services/CoachingEngine.swift` |
+| Snapshot adapter | `VoltraLive/Coaching/Services/SetSnapshotBuilder.swift` |
+| Historical fetch | `VoltraLive/Logging/Persistence/LoggingStore.swift` (`allExerciseInstances(for:)`) |
+
+---
+
+### Context health: DEGRADING → resetting via this checkpoint
