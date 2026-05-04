@@ -671,38 +671,29 @@ the hardware verification session.
   `SessionRecorder` under the new `.device` category.
 
 **Remaining for resolution.**
-- ~~Bind LiveCaptureView's base-weight tile to
-  `VoltraBLEManager.deviceState.baseWeightLb` so the dial
-  update visibly reaches the user.~~ DONE in this commit —
-  `LiveCaptureViewV2` observes `focusedBle.deviceState
-  .baseWeightLb?.value` via a single `.onChange` modifier and
-  routes `.deviceUnsolicited` confirmations into
-  `LoggingStore.pendingPlannedWeightLb`. App-initiated `+/-`
-  taps are unaffected (display continues to read
-  `pendingPlannedWeightLb`; `appRequestConfirmed` echoes are
-  filtered out so they never feed back).
-- Hardware re-verification with the recorder armed to
-  confirm the `device.state.change` event stream matches
-  observed dial movements end-to-end. **Required to close
-  this KI.**
-- Eccentric / chains / mode confirmations remain deferred
-  (KI-21).
+- TestFlight hardware re-verification with the recorder armed to confirm
+  chains (`0x3E87`), eccentric (`0x3E88`), and inverse (`0x53B0`) each
+  emit both `device.state.change` and the corresponding UI-applied event
+  (`ui.deviceChainsApplied`, `ui.deviceEccentricApplied`,
+  `ui.deviceInverseApplied`). **Required to close this KI.**
 
-### KI-21 (implemented — pending TestFlight hardware retest)
+### KI-21 (follow-through implemented — pending TestFlight hardware retest)
 
-**Status.** Decoder + state fields implemented. Pending TestFlight
-ship and hardware retest to confirm param IDs. Byte-level evidence
-from build 81 session `EA473194-40BF-4580-BEEE-8C6033535923`.
+**Status.** Decoder + state fields + manager Published bridges +
+LiveCaptureViewV2 UI apply/recorder wiring implemented. Pending
+TestFlight ship and hardware retest to confirm param IDs and visible UI
+sync. Byte-level evidence from build 81 session
+`EA473194-40BF-4580-BEEE-8C6033535923`.
 
 **What.** When the user changes chains / eccentric / inverse-chains
-values on the physical VOLTRA, the BLE notify arrives and is visible
-in raw telemetry, but:
-- No `device.state.change` event is emitted for these fields.
-- No `ui.*Applied` event fires.
-- The app UI tile does not update.
+values on the physical VOLTRA, the BLE notify should now decode into
+`device.state.change`, publish through the manager bridge, update the
+V2 live UI state, and emit the matching `ui.*Applied` recorder event.
+This is implemented in code but **not yet hardware-verified**.
 
-Base weight (`863e`) now works end-to-end (KI-20 closed). The three
-remaining fields are not yet decoded or bridged.
+Base weight (`863e`) works end-to-end (KI-20 closed). The three KI-21
+fields are still hypotheses until TestFlight hardware retest proves the
+full decoder → bridge → UI → recorder path.
 
 **Hardware evidence (build 81, session EA473194):**
 
@@ -722,29 +713,31 @@ remaining fields are not yet decoded or bridged.
 Note: `19` hex = 25 dec, `1e` hex = 30 dec. Consistent with uint8
 or uint16-LE value encoding matching the base-weight pattern (`863e`).
 
-**Hypothesised param IDs (not yet hardened to code):**
+**Hypothesised param IDs:**
 - `86 3E` = baseWeight ✅ confirmed (KI-20 closed)
-- `87 3E` = chains (hypothesis from build 81 session)
-- `88 3E` = eccentric (hypothesis from build 81 session)
-- `B0 53` = inverse toggle (hypothesis from build 81 session; bit field, not lb value)
+- `87 3E` = chains (implemented; still pending hardware retest)
+- `88 3E` = eccentric (implemented; still pending hardware retest)
+- `B0 53` = inverse toggle (implemented; still pending hardware retest)
 
-**Resolution plan.**
-1. Add `87 3E` decoder in `VoltraBLEFrameDecoder` for chains field.
-2. Add `88 3E` decoder for eccentric field.
-3. Add `B0 53` decoder for inverse toggle (bool, not lb).
-4. Add `DeviceStateField` cases for chains/eccentric/inverse.
-5. Set `deviceOriginatedChainsUpdate`, `deviceOriginatedEccUpdate`,
-   `deviceOriginatedInverseUpdate` published bridges on `VoltraBLEManager`
-   (same pattern as KI-20 baseWeight bridge).
-6. Wire `.onChange` observers + `.onAppear` reconciliation in
-   `LiveCaptureViewV2` for each field.
-7. Emit `ui.chainsApplied`, `ui.eccApplied`, `ui.inverseApplied`
-   recorder events on actual mutation.
+**Implemented follow-through.**
+1. Added `87 3E` decoder for chains field.
+2. Added `88 3E` decoder for eccentric field.
+3. Added `B0 53` decoder for inverse toggle.
+4. Added `DeviceStateField` cases for chains/eccentric/inverse.
+5. Added `deviceOriginatedChainsWeightUpdate`,
+   `deviceOriginatedEccentricWeightUpdate`, and
+   `deviceOriginatedInverseChainUpdate` Published bridges on
+   `VoltraBLEManager` with matching monotonic update IDs.
+6. Wired `.onChange` observers + `.onAppear` reconciliation in
+   `LiveCaptureViewV2` for each field through the existing `focusedBle`
+   topology router.
+7. Emits `ui.deviceChainsApplied`, `ui.deviceEccentricApplied`, and
+   `ui.deviceInverseApplied` recorder events on actual UI mutation.
 
 **Do NOT touch sacred files** (`VoltraProtocol.swift`,
 `TelemetryExtractor.swift`, `PacketParser.swift`, `FrameAssembler.swift`).
-All new decoder work goes in `VoltraBLEFrameDecoder.swift` and
-`DeviceState.swift`.
+KI-21 remains open until a real hardware session proves all three fields
+end-to-end.
 
 ### KI-22 (post-b78, open) — Load drop / unload / cutout not surfaced to app state
 
@@ -825,3 +818,19 @@ against a paired Voltra and pastes results into
 `05_BLE_AND_PROTOCOL.md` "BLE characteristic audit
 (post-b78)". Decoder work cannot finalize before this is
 done.
+
+
+**Follow-through implementation (post-build 81).**
+- `VoltraBLEManager` now publishes device-originated update bridges and
+  monotonic update IDs for `chainsWeight`, `eccentricWeight`, and
+  `inverseChain`, mirroring the KI-20 `baseWeight` bridge pattern.
+- `VoltraWriter` registers existing outbound eccentric/chains/inverse writes
+  with the pending-write tracker so app echoes remain `appRequestConfirmed`.
+- `LiveCaptureViewV2` observes the focused manager's new update IDs and
+  applies physical-device updates into `LoggingStore`'s existing UI state:
+  `upcomingChainsLb/upcomingChainsEnabled`, `upcomingEccLb/upcomingEccEnabled`,
+  and `upcomingInverseEnabled`.
+- UI application emits `ui.deviceChainsApplied`, `ui.deviceEccentricApplied`,
+  and `ui.deviceInverseApplied` for recorder correlation.
+- No inverse write protocol was changed; current writes still use
+  `VoltraModifiers(... inverse: inverseActive)` plus `chainsLb`.

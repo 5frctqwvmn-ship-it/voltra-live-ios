@@ -61,23 +61,26 @@ final class VoltraBLEManager: NSObject, ObservableObject {
     // Runs ALONGSIDE the legacy 0xAA telemetry pipeline (FrameAssembler →
     // PacketParser → TelemetryExtractor). Sees the same assembled frames
     // and looks for param-write confirmations the legacy path ignores.
-    // Currently models base-weight only; eccentric / chains / mode land
-    // in follow-up commits.
     @Published private(set) var deviceState: DeviceState = .empty
     let frameDecoder = VoltraBLEFrameDecoder()
 
-    /// Telemetry v2 UI bridge: the most-recent base-weight update that
-    /// originated from the physical device (not an app write). Set only
-    /// when field == .baseWeight AND source == .deviceUnsolicited.
-    /// LiveCaptureViewV2 observes this directly so the tile updates even
-    /// when the view returns from background or the SwiftUI onChange chain
-    /// would otherwise miss the transition.
+    /// Telemetry v2 UI bridge: most-recent updates that originated from the
+    /// physical device (not an app write). Set only when source ==
+    /// .deviceUnsolicited. LiveCaptureViewV2 observes these directly so the
+    /// tiles update even when the view returns from background or the
+    /// SwiftUI onChange chain would otherwise miss the transition.
     @Published private(set) var deviceOriginatedBaseWeightUpdate: ConfirmedValue<Int>? = nil
+    @Published private(set) var deviceOriginatedChainsWeightUpdate: ConfirmedValue<Int>? = nil
+    @Published private(set) var deviceOriginatedEccentricWeightUpdate: ConfirmedValue<Int>? = nil
+    @Published private(set) var deviceOriginatedInverseChainUpdate: ConfirmedValue<Int>? = nil
 
-    /// Monotonic event token for deviceOriginatedBaseWeightUpdate.
-    /// LiveCaptureViewV2 observes this instead of the lb value so repeated
-    /// same-weight device events still trigger reconciliation.
+    /// Monotonic event tokens for device-originated updates. LiveCaptureViewV2
+    /// observes IDs instead of values so repeated same-value device events still
+    /// trigger reconciliation.
     @Published private(set) var deviceOriginatedBaseWeightUpdateID: Int = 0
+    @Published private(set) var deviceOriginatedChainsWeightUpdateID: Int = 0
+    @Published private(set) var deviceOriginatedEccentricWeightUpdateID: Int = 0
+    @Published private(set) var deviceOriginatedInverseChainUpdateID: Int = 0
 
     // MARK: Private CBCentral state
     private var central: CBCentralManager!
@@ -297,16 +300,13 @@ final class VoltraBLEManager: NSObject, ObservableObject {
                     addLog("Device \(change.field.rawValue): \(change.from.map(String.init) ?? "?") → \(change.to) lb (\(change.source.rawValue))")
 
                     // Telemetry v2 UI bridge: publish device-originated
-                    // base-weight changes on a dedicated @Published so
-                    // LiveCaptureViewV2 can observe it reliably even across
+                    // changes on dedicated @Published fields so
+                    // LiveCaptureViewV2 can observe them reliably even across
                     // foreground/background transitions. Intentionally NOT
                     // set for .appRequestConfirmed — the app already reflects
-                    // those synchronously via pendingPlannedWeightLb.
-                    if change.field == .baseWeight,
-                       change.source == .deviceUnsolicited,
-                       let confirmed = deviceState.baseWeightLb {
-                        deviceOriginatedBaseWeightUpdate = confirmed
-                        deviceOriginatedBaseWeightUpdateID &+= 1
+                    // those synchronously from user controls.
+                    if change.source == .deviceUnsolicited {
+                        publishDeviceOriginatedUpdate(for: change.field)
                     }
                 }
             }
@@ -330,6 +330,28 @@ final class VoltraBLEManager: NSObject, ObservableObject {
                 mergeTelemetry(telem)
                 onTelemetry?(telem)
             }
+        }
+    }
+
+
+    private func publishDeviceOriginatedUpdate(for field: DeviceStateField) {
+        switch field {
+        case .baseWeight:
+            guard let confirmed = deviceState.baseWeightLb else { return }
+            deviceOriginatedBaseWeightUpdate = confirmed
+            deviceOriginatedBaseWeightUpdateID &+= 1
+        case .chainsWeight:
+            guard let confirmed = deviceState.chainsWeightLb else { return }
+            deviceOriginatedChainsWeightUpdate = confirmed
+            deviceOriginatedChainsWeightUpdateID &+= 1
+        case .eccentricWeight:
+            guard let confirmed = deviceState.eccentricWeightLb else { return }
+            deviceOriginatedEccentricWeightUpdate = confirmed
+            deviceOriginatedEccentricWeightUpdateID &+= 1
+        case .inverseChain:
+            guard let confirmed = deviceState.inverseChainEnabled else { return }
+            deviceOriginatedInverseChainUpdate = confirmed
+            deviceOriginatedInverseChainUpdateID &+= 1
         }
     }
 

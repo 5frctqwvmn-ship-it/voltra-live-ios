@@ -3262,3 +3262,38 @@ from UNVERIFIED to VERIFIED with a screenshot link.
 - **Next step.** Push → CI → TestFlight ship for hardware retest.
   Then add `@Published` bridges + `LiveCaptureViewV2` `.onChange` wiring
   for chains/ecc/inverse (same pattern as KI-20 baseWeight).
+
+
+## 2026-05-04 16:40 UTC — KI-21 follow-through bridges + LiveCapture apply wiring
+
+- **Goal.** Finish KI-21 follow-through after the decoder/state-field commit:
+  device-originated chains, eccentric, and inverse confirmations now reach the
+  V2 live UI and recorder timeline. KI-21 remains pending hardware retest.
+- **Files changed:**
+  - `VoltraLive/BLE/VoltraBLEManager.swift`
+  - `VoltraLive/Logging/Views/LiveCaptureViewV2.swift`
+  - `VoltraLive/BLE/VoltraWriter.swift`
+  - `docs/handoff/06_KNOWN_ISSUES.md`
+  - `docs/handoff/02_CURRENT_STATE.md`
+  - `docs/WORK_LOG.md`
+- **What changed:** Added `@Published` bridge values + monotonic update IDs for
+  `deviceOriginatedChainsWeightUpdate`, `deviceOriginatedEccentricWeightUpdate`,
+  and `deviceOriginatedInverseChainUpdate`, mirroring the KI-20 base-weight
+  pattern. `VoltraWriter` now registers existing outbound eccentric/chains/
+  inverse writes with the pending-write tracker so app echoes stay
+  `appRequestConfirmed` and do not feed the device-originated UI bridge.
+  `LiveCaptureViewV2` now observes the focused BLE manager's new update IDs,
+  applies device-originated changes into existing `LoggingStore` state, and
+  records `ui.deviceChainsApplied`, `ui.deviceEccentricApplied`, and
+  `ui.deviceInverseApplied`.
+- **Verification:** `git diff --check` PASS. Grep verified all three new event
+  names and the original `ui.deviceBaseWeightApplied` path are present. Grep
+  verified new manager update IDs and outbound pending-tracker registrations.
+  `xcodebuild -version` unavailable in the local execution environment, so the
+  compile gate remains Xcode/CI. No TestFlight ship in this commit.
+- **Risks:** KI-21 param IDs remain hardware hypotheses until a TestFlight
+  recorder session confirms `device.state.change` + `ui.*Applied` for each field.
+  Inverse write behavior is intentionally unchanged; this patch only bridges
+  read/apply/recorder flow.
+- **Next step:** Run build/CI, then ship a later build only when approved for
+  TestFlight hardware retest. Do not close KI-21 until that retest passes.

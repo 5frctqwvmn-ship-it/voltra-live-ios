@@ -160,6 +160,7 @@ final class VoltraWriter: VoltraWriting {
                 send(VoltraControlFrames.setInverseChainsPayload(target.modifiers.inverse),
                      cmd: VoltraControlFrames.CMD_PARAM_WRITE,
                      label: "inverse=\(target.modifiers.inverse)")
+                onOutboundParam?(.inverseChain, target.modifiers.inverse ? 1 : 0)
             }
             // Base weight (always sent in weight mode).
             if prior?.weights.baseLb != target.weights.baseLb || prior?.mode != .weight {
@@ -182,6 +183,7 @@ final class VoltraWriter: VoltraWriting {
                 trySend("ecc=\(clamped)") {
                     try VoltraControlFrames.setEccentricWeightPayload(clamped)
                 }
+                onOutboundParam?(.eccentricWeight, clamped)
             }
             // Chains weight, only if either chain modifier is engaged.
             let chainsLb = (target.modifiers.chains || target.modifiers.inverse)
@@ -192,6 +194,7 @@ final class VoltraWriter: VoltraWriting {
                 trySend("chains=\(clamped)") {
                     try VoltraControlFrames.setChainsWeightPayload(clamped)
                 }
+                onOutboundParam?(.chainsWeight, clamped)
             }
         case .band:
             if prior?.weights.bandMaxForceLb != target.weights.bandMaxForceLb || prior?.mode != .band {

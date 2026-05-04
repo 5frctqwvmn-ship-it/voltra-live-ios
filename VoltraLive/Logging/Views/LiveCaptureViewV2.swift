@@ -316,6 +316,9 @@ struct LiveCaptureViewV2: View {
             // not fire when the view first mounts or re-mounts if the
             // value was already set before the observer attached.
             applyDeviceOriginatedBase(focusedBle.deviceOriginatedBaseWeightUpdate)
+            applyDeviceOriginatedChains(focusedBle.deviceOriginatedChainsWeightUpdate)
+            applyDeviceOriginatedEccentric(focusedBle.deviceOriginatedEccentricWeightUpdate)
+            applyDeviceOriginatedInverse(focusedBle.deviceOriginatedInverseChainUpdate)
         }
         // b71 (V4-D21): mirror V1 LiveCaptureView.swift:250 — keep
         // cascade math + Combined parity in sync if the user
@@ -373,6 +376,15 @@ struct LiveCaptureViewV2: View {
         // this onChange reliably regardless of foreground/background state.
         .onChange(of: focusedDeviceOriginatedBaseWeightUpdateID) { _, _ in
             applyDeviceOriginatedBase(focusedBle.deviceOriginatedBaseWeightUpdate)
+        }
+        .onChange(of: focusedDeviceOriginatedChainsWeightUpdateID) { _, _ in
+            applyDeviceOriginatedChains(focusedBle.deviceOriginatedChainsWeightUpdate)
+        }
+        .onChange(of: focusedDeviceOriginatedEccentricWeightUpdateID) { _, _ in
+            applyDeviceOriginatedEccentric(focusedBle.deviceOriginatedEccentricWeightUpdate)
+        }
+        .onChange(of: focusedDeviceOriginatedInverseChainUpdateID) { _, _ in
+            applyDeviceOriginatedInverse(focusedBle.deviceOriginatedInverseChainUpdate)
         }
         // RC-01: debounce coaching card on restActive transitions.
         // restActive is set synchronously in finalizeSet() / tapRestTile()
@@ -1587,13 +1599,7 @@ struct LiveCaptureViewV2: View {
         }
     }
 
-    // MARK: - Telemetry v2: machine → app base-weight bridge
-
-    /// Telemetry v2 bridge: last confirmed base weight from the focused
-    /// device. Used for machine → app sync, not as the direct display source.
-    private var focusedConfirmedBaseWeight: ConfirmedValue<Int>? {
-        focusedBle.deviceState.baseWeightLb
-    }
+    // MARK: - Telemetry v2: machine → app parameter bridges
 
     /// Telemetry v2 UI bridge: direct published value from the focused
     /// VoltraBLEManager that is only set for device-originated changes.
@@ -1603,6 +1609,18 @@ struct LiveCaptureViewV2: View {
     /// changed since the last observation.
     private var focusedDeviceOriginatedBaseWeightUpdateID: Int {
         focusedBle.deviceOriginatedBaseWeightUpdateID
+    }
+
+    private var focusedDeviceOriginatedChainsWeightUpdateID: Int {
+        focusedBle.deviceOriginatedChainsWeightUpdateID
+    }
+
+    private var focusedDeviceOriginatedEccentricWeightUpdateID: Int {
+        focusedBle.deviceOriginatedEccentricWeightUpdateID
+    }
+
+    private var focusedDeviceOriginatedInverseChainUpdateID: Int {
+        focusedBle.deviceOriginatedInverseChainUpdateID
     }
 
     /// Only mirror machine-originated changes into local planned weight.
@@ -1631,6 +1649,83 @@ struct LiveCaptureViewV2: View {
                 "field":  .string("baseWeight"),
                 "source": .string(DeviceStateChangeSource.deviceUnsolicited.rawValue),
                 "to":     .int(Int64(lb))
+            ])
+    }
+
+
+    private func applyDeviceOriginatedChains(_ confirmed: ConfirmedValue<Int>?) {
+        guard let confirmed else { return }
+        guard confirmed.source == .deviceUnsolicited else { return }
+
+        let lb = confirmed.value
+        guard lb >= 0, lb <= 200 else { return }
+
+        if logging.upcomingInverseEnabled {
+            let current = Int(logging.upcomingInverseLb.rounded())
+            guard current != lb else { return }
+            logging.upcomingInverseLb = Double(lb)
+        } else {
+            let current = Int(logging.upcomingChainsLb.rounded())
+            let shouldEnable = lb > 0
+            guard current != lb || logging.upcomingChainsEnabled != shouldEnable else { return }
+            logging.upcomingChainsLb = Double(lb)
+            logging.upcomingChainsEnabled = shouldEnable
+        }
+
+        SessionRecorder.shared.record(
+            category: .ui, name: "ui.deviceChainsApplied",
+            metadata: [
+                "field":  .string("chainsWeight"),
+                "source": .string(DeviceStateChangeSource.deviceUnsolicited.rawValue),
+                "to":     .int(Int64(lb))
+            ])
+    }
+
+    private func applyDeviceOriginatedEccentric(_ confirmed: ConfirmedValue<Int>?) {
+        guard let confirmed else { return }
+        guard confirmed.source == .deviceUnsolicited else { return }
+
+        let lb = confirmed.value
+        guard lb >= 0, lb <= 400 else { return }
+
+        let current = Int(logging.upcomingEccLb.rounded())
+        let shouldEnable = lb > 0
+        guard current != lb || logging.upcomingEccEnabled != shouldEnable else { return }
+
+        logging.upcomingEccLb = Double(lb)
+        logging.upcomingEccEnabled = shouldEnable
+
+        SessionRecorder.shared.record(
+            category: .ui, name: "ui.deviceEccentricApplied",
+            metadata: [
+                "field":  .string("eccentricWeight"),
+                "source": .string(DeviceStateChangeSource.deviceUnsolicited.rawValue),
+                "to":     .int(Int64(lb))
+            ])
+    }
+
+    private func applyDeviceOriginatedInverse(_ confirmed: ConfirmedValue<Int>?) {
+        guard let confirmed else { return }
+        guard confirmed.source == .deviceUnsolicited else { return }
+
+        let enabled = confirmed.value != 0
+        guard logging.upcomingInverseEnabled != enabled else { return }
+
+        if enabled {
+            if logging.upcomingInverseLb <= 0 {
+                let fallback = logging.upcomingChainsLb > 0 ? logging.upcomingChainsLb : 30
+                logging.upcomingInverseLb = fallback
+            }
+            logging.upcomingChainsEnabled = false
+        }
+        logging.upcomingInverseEnabled = enabled
+
+        SessionRecorder.shared.record(
+            category: .ui, name: "ui.deviceInverseApplied",
+            metadata: [
+                "field":  .string("inverseChain"),
+                "source": .string(DeviceStateChangeSource.deviceUnsolicited.rawValue),
+                "to":     .int(Int64(confirmed.value))
             ])
     }
 

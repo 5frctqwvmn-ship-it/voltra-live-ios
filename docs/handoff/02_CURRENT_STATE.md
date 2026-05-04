@@ -22,9 +22,10 @@ Delivery UUID `08ffc5e4-ca3e-4aba-81a7-6a06bef011ae`.
 Session `EA473194-40BF-4580-BEEE-8C6033535923`.
 Base weight device→UI now works for single-MDM-slot sessions.
 
-**KI-21 decoder implemented** (chains `0x3E87`, eccentric `0x3E88`,
-inverse `0x53B0`) — pending TestFlight ship + hardware retest.
-HEAD is now one commit ahead of `278865e`.
+**KI-21 follow-through implemented locally** (chains `0x3E87`, eccentric
+`0x3E88`, inverse `0x53B0`, manager Published bridges, LiveCapture apply
+wiring, and UI recorder events) — pending build/CI, TestFlight ship, and
+hardware retest. KI-21 is not closed.
 
 **Coaching (RC-01/SC-01)** is present in the binary but feature-flagged
 OFF (`FeatureFlags.coachingCardEnabled = false`). No coaching UI visible.
