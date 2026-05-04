@@ -1,53 +1,62 @@
 # tasks/todo.md — active task plan
 
 > Plan-first working file for the **current** task only.
-> Required by `docs/handoff/AGENT_WORKFLOW.md` Task Management
-> #1 / #3 / #5.
->
-> **Lifecycle per task:**
->
-> 1. Agent writes the plan here as a markdown checklist BEFORE
->    writing any code (Plan Node Default, AGENT_WORKFLOW.md §1).
-> 2. Agent checks in with the user, gets plan approval (Task
->    Management #2 "Verify Plan").
-> 3. Agent ticks items as it works (`- [x]`).
-> 4. When the task is done, agent appends a `## Review` section
->    summarizing what shipped, what was deferred, and any
->    surprises (Task Management #5).
-> 5. The next task **replaces** the active plan (move the old
->    plan + review into `docs/handoff/CONVERSATION_LOG.md` so
->    history isn't lost, then start fresh here).
->
-> Empty `## Active task` block below means no task is in flight.
 
 ---
 
 ## Active task
 
-KI-20 visual bridge fix — `fix: apply device-originated base weight in live capture`
+RC-01 / SC-01 — Rest-state Coaching Card + Smart Coach integration
+
+## Repo state at task start
+
+- Branch: feat/ui-v4-2-claude
+- HEAD: 9788d49 (focusedBle topology fix — NOT yet in TestFlight)
+- Working tree: clean
+- Version/build: 0.4.52 / build 80 (build 80 shipped; build 81 not yet bumped)
+- KI-20: OPEN — pending hardware retest on build 81
+
+## Key constraints discovered
+
+1. `LoggedSet` has `peakForceLb` + `avgForceLb` only — NO per-rep force/power
+   fields. SetSnapshotBuilder must use `peakForceLb` as proxy for
+   `bestRepForceLb` and treat `lastRepForceLb` as nil. Fatigue gate will
+   be `.unknown` for all sets until per-rep telemetry lands (acceptable for
+   RC-01 beta).
+2. Coaching buttons MUST call `adjustWeight(_:)`, NOT write directly to
+   `pendingPlannedWeightLb`. `adjustWeight` enforces CombinedParity and
+   reanchor. Buttons compute the delta: `Int(targetLb.rounded()) - cur`.
+3. `session.restActive` is the correct panel-switch trigger (set
+   synchronously in `finalizeSet()` and `tapRestTile()`).
+4. `setNumberForCurrentInstance` is 1-based next-set ordinal.
+   `nextSetIndex` (0-based) = `setNumberForCurrentInstance - 1`.
+5. `WorkoutSession.id` is the `currentWorkoutSessionID` for the cursor.
+6. All feature flags start `false` in production — `coachingCardEnabled`
+   must be `false` by default so this ships dark.
 
 ## Plan
 
-- [x] Read AGENTS.md + AGENT_WORKFLOW.md + handoff docs
-- [x] Read DeviceState.swift, VoltraBLEManager.swift, LiveCaptureViewV2.swift
-- [x] Add `@Published deviceOriginatedBaseWeightUpdate` to VoltraBLEManager
-- [x] Set bridge in handleNotification for `.deviceUnsolicited` only
-- [x] Replace old `focusedConfirmedBaseWeightValue` onChange with `focusedDeviceOriginatedBaseWeightUpdateValue` onChange
-- [x] Add `.onAppear` reconciliation call inside existing onAppear
-- [x] Add `ui.deviceBaseWeightApplied` recorder event in applyDeviceOriginatedBase
-- [x] Update 03_CURRENT_FEATURE_SPEC.md, 04_ARCHITECTURE.md, 06_KNOWN_ISSUES.md, QA_LOG.md
-- [x] Append WORK_LOG.md entry
-- [x] Update tasks/lessons.md
-- [x] Commit locally (no push, no TestFlight)
+- [x] Read all required docs — done
+- [x] Write plan to tasks/todo.md — done
+- [ ] Create docs/incoming/ staging files
+- [ ] Split into 11 target app files
+- [ ] Write SetSnapshotBuilder (adapts LoggedSet → SetPerformanceSnapshot)
+- [ ] Wire LiveCaptureViewV2:
+      - isDeviceRestingDebounced state + DispatchWorkItem
+      - panel switch (ForceChart ↔ CoachingCard)
+      - snapshot builder calls
+      - HistoricalWorkoutMatcher init
+- [x] Create docs/specs/RC-01_COACHING_CARD.md
+- [x] Update handoff docs
+- [x] Commit
 
 ## Review
 
-Committed locally as `fix: apply device-originated base weight in live capture`.
-Files changed: `VoltraBLEManager.swift`, `LiveCaptureViewV2.swift`,
-`docs/handoff/03_CURRENT_FEATURE_SPEC.md`, `docs/handoff/04_ARCHITECTURE.md`,
-`docs/handoff/06_KNOWN_ISSUES.md`, `docs/handoff/QA_LOG.md`,
-`docs/handoff/CONVERSATION_LOG.md`, `docs/WORK_LOG.md`,
-`tasks/todo.md`, `tasks/lessons.md`.
+All 11 target files created. LiveCaptureViewV2 panel switch wired behind
+`FeatureFlags.coachingCardEnabled` (default false). `allExerciseInstances(for:)`
+added to LoggingStore. Staging files in docs/incoming/. Spec at
+docs/specs/RC-01_COACHING_CARD.md. All docs updated.
 
-KI-20 status: fix implemented + event-based patch applied — pending hardware retest.
-Next: push, ship to TestFlight, run A1 test (20→15 lb), confirm tile updates.
+Key constraint: fatigue gate always .unknown until per-rep telemetry lands.
+Feature ships dark — no TestFlight visible change until flag enabled.
+Next: commit, push, CI. Then build 81 hardware retest for KI-20.

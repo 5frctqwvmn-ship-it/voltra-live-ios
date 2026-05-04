@@ -508,3 +508,43 @@ echo \u2192 decoder \u2192 reducer \u2192 publish). The bridge into
 machine-side dial moves win.
 
 **KI-20 remains OPEN.** Pending hardware retest with the new build.
+
+---
+
+## 2026-05-04 — RC-01/SC-01 coaching card integration
+
+**Context.** Operator supplied `VoltraCoaching_v3.swift` single-file source
+for the rest-state Coaching Card + Smart Coach rule engine. Task was to
+split it into target files and wire it into LiveCaptureViewV2.
+
+**Key decisions.**
+
+1. All `FeatureFlags` default `false`. `coachingCardEnabled` must be
+   manually set to `true` to see any coaching UI. Ships dark until KI-20
+   retest passes and coaching is explicitly enabled for a TestFlight build.
+
+2. Fatigue gate will always be `.unknown` until `LoggedSet` gains per-rep
+   force fields (`bestRepForceLb`, `lastRepForceLb`). This is correct
+   and intentional — `.unknown` gate suppresses aggressive option and
+   sets confidence to `.low`. Engine still provides useful recommendations
+   based on weight history alone.
+
+3. Buttons route through `adjustWeight(delta:)` not direct property write.
+   `adjustWeight` enforces `CombinedParity` + `reanchorCascadeIfActive`.
+
+4. `allExerciseInstances(for:)` added to `LoggingStore` — fetches all
+   `ExerciseInstance` rows then filters in Swift to avoid SwiftData
+   `#Predicate` issues with optional relationship traversal on
+   `inst.exercise?.name`.
+
+5. `SetSnapshotBuilder` fills `bestRepForceLb/lastRepForceLb` with `nil`
+   (not synthesized from `peakForceLb`) — keeping the fatigue gate honest.
+
+6. Panel switch uses `AnyView` type erasure inside `forceChartCard`
+   (`some View` computed var with two branches of different concrete type).
+
+7. Debounce trigger is `session.restActive` onChange, not device force
+   level — consistent with how `phaseOrRestBar` already works.
+
+**What was NOT changed.** Sacred files. KI-20 topology fix. focusedBle
+routing. Existing telemetry/recorder. BLE write path. project.yml.

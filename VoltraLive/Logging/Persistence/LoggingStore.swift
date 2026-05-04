@@ -1565,6 +1565,21 @@ final class LoggingStore: ObservableObject {
         return inst.orderedSets
     }
 
+    // MARK: - RC-01 coaching history
+
+    /// Returns all ExerciseInstances for the named exercise across all
+    /// sessions. Used by the coaching engine's historical workout matcher
+    /// to build SetPerformanceSnapshots. Read-only; does not modify state.
+    func allExerciseInstances(for exerciseName: String) -> [ExerciseInstance] {
+        guard let ctx = modelContext else { return [] }
+        let lower = exerciseName.lowercased()
+        // Fetch all instances then filter in Swift — avoids SwiftData
+        // #Predicate limitations with optional relationship traversal.
+        let descriptor = FetchDescriptor<ExerciseInstance>()
+        let all = (try? ctx.fetch(descriptor)) ?? []
+        return all.filter { $0.exercise?.name.lowercased() == lower }
+    }
+
     /// One-stop convenience: build a SetSuggestion for the next set the user
     /// is about to log on the active instance.
     func nextSetSuggestion() -> SetSuggestion {

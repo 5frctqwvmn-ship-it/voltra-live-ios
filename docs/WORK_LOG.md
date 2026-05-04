@@ -5852,3 +5852,53 @@ from UNVERIFIED to VERIFIED with a screenshot link.
 - **Sacred files.** Unchanged.
 - **Verification.** Static review only (no Xcode available).
 - **Next step.** Commit, bump build 81, ship TestFlight, run A1 retest.
+
+## 2026-05-04 03:00 UTC — RC-01 / SC-01 coaching card integration (feature-flagged OFF)
+
+- **Goal.** Integrate rest-state Coaching Card + Smart Coach rule engine from
+  operator-supplied VoltraCoaching_v3 source into the VOLTRA Live iOS repo.
+  Feature-flagged off by default. No BLE writes. No auto weight changes.
+- **Files created (new).**
+  - `VoltraLive/FeatureFlags.swift` — all flags default false.
+  - `VoltraLive/Coaching/CoachingConstants.swift`
+  - `VoltraLive/Coaching/Models/SetPerformanceSnapshot.swift`
+  - `VoltraLive/Coaching/Models/ExerciseSessionCursor.swift`
+  - `VoltraLive/Coaching/Models/HistoricalSetMatch.swift`
+  - `VoltraLive/Coaching/Models/CoachingRecommendation.swift`
+  - `VoltraLive/Coaching/Services/HistoricalWorkoutMatcher.swift`
+  - `VoltraLive/Coaching/Services/CoachingEngine.swift`
+  - `VoltraLive/Coaching/Services/SetSnapshotBuilder.swift` (adapter)
+  - `VoltraLive/Coaching/Views/CoachingCardView.swift`
+  - `VoltraLive/Coaching/Views/CoachingCardButtonRow.swift`
+  - `VoltraLive/Coaching/Views/FatigueIndicatorView.swift`
+  - `VoltraLiveTests/CoachingEngineTests.swift` (placeholder)
+  - `docs/incoming/VoltraCoaching_v3.swift` (staging)
+  - `docs/incoming/CoachingEngineTests_v4.swift` (staging)
+  - `docs/specs/RC-01_COACHING_CARD.md` (spec)
+- **Files modified.**
+  - `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — added
+    `@State coachingCardVisible/coachingDebounceWork`, panel switch in
+    `forceChartCard`, `onDeviceBecameUnloaded/Loaded()` helpers,
+    `buildCoachingCursor/History()` helpers,
+    `.onChange(of: session.restActive)` debounce observer.
+  - `VoltraLive/Logging/Persistence/LoggingStore.swift` — added
+    `allExerciseInstances(for:)` fetch method.
+  - `tasks/todo.md` — updated.
+- **Key design decisions.**
+  1. `coachingCardEnabled` defaults `false` — ships dark until KI-20 passes.
+  2. Buttons call `adjustWeight(delta:)`, not direct `pendingPlannedWeightLb` —
+     preserves `CombinedParity` + reanchor.
+  3. Fatigue gate always `.unknown` for now — `LoggedSet` has no per-rep force
+     fields. Gate resolves when Telemetry v2 per-rep data lands.
+  4. `allExerciseInstances(for:)` fetches all instances and filters in Swift —
+     avoids SwiftData `#Predicate` issues with optional relationship traversal.
+  5. Panel switch uses `AnyView` type erasure — `forceChartCard` is a computed
+     `some View` property; the two branches have different concrete types.
+  6. Debounce trigger is `session.restActive`, not device force level —
+     consistent with existing `phaseOrRestBar` logic.
+- **What did NOT change.** Sacred files. KI-20 fix. focusedBle topology.
+  Existing telemetry/recorder behavior. BLE write path.
+- **Verification.** Static review only. No Xcode/CI available in this env.
+  Build 81 CI will be the compile verification gate.
+- **Next step.** Build 81 push + CI. KI-20 hardware retest. If KI-20 passes,
+  enable `coachingCardEnabled = true` for build 82 coaching TestFlight.

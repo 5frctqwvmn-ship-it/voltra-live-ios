@@ -115,6 +115,14 @@ struct LiveCaptureViewV2: View {
     /// Drives the rest-over blink. Toggled at 1Hz while we're over preset.
     @State private var blinkOn: Bool = false
 
+    // MARK: RC-01 coaching card debounce state
+    /// True only after the device has been continuously unloaded for
+    /// CoachingConstants.restingDebounceSeconds. Prevents card flicker
+    /// during brief unloaded moments within an active set.
+    @State private var coachingCardVisible: Bool = false
+    /// Pending debounce work item. Cancelled when device re-loads.
+    @State private var coachingDebounceWork: DispatchWorkItem? = nil
+
     /// Hardware LOAD state. Same semantics as V1's @State deviceLoaded.
     /// b56: toggled by tapping the big WEIGHT NUMBER.
     @State private var deviceLoaded: Bool = false
@@ -365,6 +373,16 @@ struct LiveCaptureViewV2: View {
         // this onChange reliably regardless of foreground/background state.
         .onChange(of: focusedDeviceOriginatedBaseWeightUpdateID) { _, _ in
             applyDeviceOriginatedBase(focusedBle.deviceOriginatedBaseWeightUpdate)
+        }
+        // RC-01: debounce coaching card on restActive transitions.
+        // restActive is set synchronously in finalizeSet() / tapRestTile()
+        // so this observer fires reliably at the exact rest/work boundary.
+        .onChange(of: session.restActive) { _, nowResting in
+            if nowResting {
+                onDeviceBecameUnloaded()
+            } else {
+                onDeviceBecameLoaded()
+            }
         }
         // b66 V4.2: page-name badge — bottom-leading, faint mint,
         // Swift type name verbatim. Always visible in TestFlight.
@@ -1314,29 +1332,70 @@ struct LiveCaptureViewV2: View {
     // borders / nested cards.
 
     private var forceChartCard: some View {
-        // Sample source — V1-verbatim:
-        //   currentSet.samples while a set is in flight, then
-        //   lastFinalizedSamples after finalize so the chart KEEPS
-        //   displaying the rep pattern through the rest period instead
-        //   of blanking. Cleared on next set.
+        // RC-01: if coaching card is enabled, debounced-rest is active,
+        // and an exercise is selected, show the CoachingCard instead of
+        // the force chart. Feature flag is off by default.
+        if FeatureFlags.coachingCardEnabled,
+           coachingCardVisible,
+           let exerciseName = logging.activeInstance?.exercise?.name,
+           let activeSession = logging.activeSession {
+
+            let cursor = buildCoachingCursor(
+                exerciseName: exerciseName,
+                sessionID: activeSession.id
+            )
+            let history = buildCoachingHistory(
+                exerciseName: exerciseName,
+                excludingSession: activeSession.id,
+                cursor: cursor
+            )
+            let recommendation = CoachingEngine().recommend(
+                cursor: cursor,
+                history: history
+            )
+
+            return AnyView(
+                CoachingCardView(
+                    recommendation: recommendation,
+                    onLoadRecommended: {
+                        let cur = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
+                        let delta = Int(recommendation.recommendedWeightLb.rounded()) - cur
+                        if delta != 0 { adjustWeight(delta) }
+                    },
+                    onLoadAggressive: {
+                        guard let agg = recommendation.aggressiveWeightLb else { return }
+                        let cur = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
+                        let delta = Int(agg.rounded()) - cur
+                        if delta != 0 { adjustWeight(delta) }
+                    },
+                    onLoadAnchor: {
+                        guard let anchor = recommendation.anchorWeightLb else { return }
+                        let cur = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
+                        let delta = Int(anchor.rounded()) - cur
+                        if delta != 0 { adjustWeight(delta) }
+                    },
+                    onRepeatCurrent: {
+                        // safe weight = current; delta is 0, but still
+                        // route through adjustWeight to trigger reanchor.
+                        let cur = Int((logging.pendingPlannedWeightLb ?? 0).rounded())
+                        let delta = Int(recommendation.safeWeightLb.rounded()) - cur
+                        if delta != 0 { adjustWeight(delta) }
+                    }
+                )
+                .frame(minHeight: CoachingConstants.cardMinHeight)
+                .transition(.opacity)
+            )
+        }
+
+        // Default: V1 force chart (canonical renderer, unchanged).
         let samples = session.currentSet?.samples
             ?? session.lastFinalizedSamples
         let peak = session.currentSet?.peakLb
             ?? session.lastFinalizedPeakLb
         let m = logging.pulleyMultiplier
-        // Planned ceiling computed in EFFECTIVE space (pulley-multiplied)
-        // so a 50 lb device under 2× pulley reads as 100 lb on the y-axis,
-        // matching the smoothed sample values the chart will plot. Verbatim
-        // from `LiveCaptureView.forceChart` (V1 line ~1052).
         let planned = ((logging.pendingPlannedWeightLb ?? 0) + logging.upcomingEccLb) * m
             + (logging.upcomingAddedLoadLb ?? 0)
 
-        // b49 superset secondary trace — V1-verbatim. When a 2+ exercise
-        // chain is active, pull the OTHER exercise's most-recent finalized
-        // force trace out of `SessionStore.lastFinalizedByExercise` and
-        // pass it as a secondary (dashed, dimmed) trace so the user can
-        // compare both exercises in one chart. Labels come from the chain
-        // entries.
         var secondarySamples: [ForceSample]? = nil
         var primaryLabel: String? = nil
         var secondaryLabel: String? = nil
@@ -1351,16 +1410,94 @@ struct LiveCaptureViewV2: View {
             }
         }
 
-        return ForceChartView(
-            samples: samples,
-            peakLb: peak,
-            plannedCeilingLb: planned > 0 ? planned : nil,
-            forceMultiplier: m,
-            secondarySamples: secondarySamples,
-            primaryLabel: primaryLabel,
-            secondaryLabel: secondaryLabel
+        return AnyView(
+            ForceChartView(
+                samples: samples,
+                peakLb: peak,
+                plannedCeilingLb: planned > 0 ? planned : nil,
+                forceMultiplier: m,
+                secondarySamples: secondarySamples,
+                primaryLabel: primaryLabel,
+                secondaryLabel: secondaryLabel
+            )
+            .frame(minHeight: 280)
         )
-        .frame(minHeight: 280)
+    }
+
+    // MARK: - RC-01 debounce helpers
+
+    /// Called when the device transitions to unloaded state. Starts
+    /// the 1.5 s debounce before showing the coaching card.
+    private func onDeviceBecameUnloaded() {
+        guard FeatureFlags.coachingCardEnabled else { return }
+        coachingDebounceWork?.cancel()
+        let work = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: CoachingConstants.cardTransitionSeconds)) {
+                coachingCardVisible = true
+            }
+        }
+        coachingDebounceWork = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + CoachingConstants.restingDebounceSeconds,
+            execute: work
+        )
+    }
+
+    /// Called when the device transitions to loaded state. Cancels any
+    /// pending debounce and hides the card immediately.
+    private func onDeviceBecameLoaded() {
+        coachingDebounceWork?.cancel()
+        coachingDebounceWork = nil
+        if coachingCardVisible {
+            withAnimation(.easeInOut(duration: CoachingConstants.cardTransitionSeconds)) {
+                coachingCardVisible = false
+            }
+        }
+    }
+
+    // MARK: - RC-01 snapshot helpers
+
+    /// Build an ExerciseSessionCursor for the current session’s exercise.
+    private func buildCoachingCursor(
+        exerciseName: String,
+        sessionID: UUID
+    ) -> ExerciseSessionCursor {
+        // Find the active instance for this exercise in the current session.
+        let todaySets: [SetPerformanceSnapshot] = {
+            guard let inst = logging.activeInstance else { return [] }
+            return SetSnapshotBuilder.buildAll(from: inst)
+        }()
+
+        return ExerciseSessionCursor(
+            exerciseName: exerciseName,
+            currentWorkoutSessionID: sessionID,
+            completedSetsToday: todaySets
+        )
+    }
+
+    /// Build a HistoricalSetMatch by fetching all prior instances from
+    /// SwiftData through LoggingStore’s model context.
+    private func buildCoachingHistory(
+        exerciseName: String,
+        excludingSession sessionID: UUID,
+        cursor: ExerciseSessionCursor
+    ) -> HistoricalSetMatch {
+        // Fetch all ExerciseInstances for this exercise via LoggingStore.
+        let allInstances = logging.allExerciseInstances(for: exerciseName)
+        let priorInstances = allInstances.filter {
+            $0.session?.id != sessionID
+        }
+        let allSnapshots = priorInstances.flatMap { SetSnapshotBuilder.buildAll(from: $0) }
+
+        let matcher = DefaultHistoricalWorkoutMatcher { allSnapshots }
+        return matcher.mostRecentMatch(
+            for: exerciseName,
+            excluding: sessionID,
+            nextSetIndex: cursor.nextSetIndex,
+            lastCompletedSetIndex: cursor.lastCompletedSetIndex >= 0
+                ? cursor.lastCompletedSetIndex
+                : nil
+        )
     }
 
     // MARK: - Helpers

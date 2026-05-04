@@ -86,3 +86,31 @@ pattern: dedicated `@Published` on the BLE manager, set only for
 `.deviceUnsolicited`, observed + onAppear-reconciled in the view.
 Use a monotonic event ID (`&+=`) as the onChange key — not the lb
 value — so repeated same-weight device events still fire reconciliation.
+
+---
+
+## 2026-05-04 — rc01-coaching-feature-flag
+
+**Lesson:** When adding a large greenfield feature (coaching card), all
+feature flags must default `false`. The new code path was behind a
+`FeatureFlags.coachingCardEnabled` guard immediately so it ships dark
+and cannot affect existing TestFlight behavior before hardware retest.
+
+**Rule for next time:** Any new UI panel or behavior that changes the
+live-capture view MUST be behind a named feature flag defaulting false.
+The flag name, default, and purpose must be documented in the spec file
+and in `FeatureFlags.swift` comments before the code is committed.
+
+---
+
+## 2026-05-04 — rc01-adjustweight-routing
+
+**Lesson:** Coaching card buttons must call `adjustWeight(delta:)`, not
+write to `logging.pendingPlannedWeightLb` directly. `adjustWeight`
+enforces `CombinedParity` (required for dual-VOLTRA sessions) and calls
+`reanchorCascadeIfActive`. Direct writes bypass both.
+
+**Rule for next time:** Any weight-setting action in `LiveCaptureViewV2`
+must go through `adjustWeight(_:)`. Compute `delta = target - current`
+and call `adjustWeight(delta)`. Never assign `pendingPlannedWeightLb`
+directly from UI callbacks.
