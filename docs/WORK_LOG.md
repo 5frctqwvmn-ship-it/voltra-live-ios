@@ -5902,3 +5902,28 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   Build 81 CI will be the compile verification gate.
 - **Next step.** Build 81 push + CI. KI-20 hardware retest. If KI-20 passes,
   enable `coachingCardEnabled = true` for build 82 coaching TestFlight.
+
+## 2026-05-04 03:20 UTC — Build bump 80 → 81 for KI-20 topology fix + RC-01 dark ship
+
+- **Goal.** Ship build 81 containing KI-20 focusedBle topology fix
+  (9788d49) + RC-01/SC-01 coaching scaffold (ad3c11b, all flags false).
+- **Exception approved.** Same one-time project.yml exception as build 80.
+  Scope: lines 65 + 93 only. CURRENT_PROJECT_VERSION + CFBundleVersion
+  80 → 81. Marketing version unchanged (0.4.52).
+- **Coaching flags.** All false. coachingCardEnabled=false,
+  smartCoachEnabled=false, aggressiveRecommendationsEnabled=false,
+  hrRecoveryHardLockEnabled=false, telemetryDebugExportEnabled=false.
+  No coaching UI visible in this build.
+- **Files changed.** project.yml lines 65+93, VoltraLive/Info.plist.
+- **6-line verification.** project.yml:64 MARKETING_VERSION=0.4.52,
+  project.yml:65 CURRENT_PROJECT_VERSION=81,
+  project.yml:92 CFBundleShortVersionString=0.4.52,
+  project.yml:93 CFBundleVersion=81,
+  Info.plist CFBundleShortVersionString=0.4.52,
+  Info.plist CFBundleVersion=81.
+- **KI-20 status.** Pending hardware retest on this build.
+  A1 test: set app 20 lb, change physical VOLTRA to 15 lb.
+  Expected: tile updates to 15 lb.
+  Expected logs: device.state.change source=deviceUnsolicited to=15
+  + ui.deviceBaseWeightApplied to=15.
+  Do NOT close KI-20 until confirmed.

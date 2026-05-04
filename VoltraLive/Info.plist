@@ -19,7 +19,7 @@
     <key>CFBundleShortVersionString</key>
     <string>0.4.52</string>
     <key>CFBundleVersion</key>
-    <string>80</string>
+    <string>81</string>
     <!-- Build 31: short label for the single feature this build is testing.
          Shown next to the build badge in every screen so the user knows
          exactly what to focus on. Update this each build to match the one
