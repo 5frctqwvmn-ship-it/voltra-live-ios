@@ -273,3 +273,42 @@ Do NOT mark KI-20 closed until MJ confirms.
 ---
 
 ### Context health: DEGRADING → resetting via this checkpoint
+
+---
+
+## CHECKPOINT UPDATE — 2026-05-04 04:20 UTC — KI-20 closed, KI-21 opened
+
+- **Branch:** `feat/ui-v4-2-claude`
+- **HEAD (before this commit):** `bae9e7a`
+- **Working tree:** CLEAN (docs-only commit follows)
+
+### KI-20 — CLOSED
+
+Build 81 hardware A1 retest PASSED.
+Session `EA473194-40BF-4580-BEEE-8C6033535923`.
+
+```
+23:14:08.639 device.state.change field=baseWeight from=50 source=deviceUnsolicited to=45
+23:14:08.662 ui.deviceBaseWeightApplied field=baseWeight source=deviceUnsolicited to=45
+```
+Repeated for 45→40, 40→35, 35→30. Tile updated visually. KI-20 CLOSED.
+
+### KI-21 — OPEN (updated with byte evidence)
+
+Same session revealed chains/eccentric/inverse device echoes arrive but
+are not decoded or applied to UI. Byte-level evidence:
+
+| Param | Hex fragment | Hypothesised ID |
+|---|---|---|
+| chains | `87 3E xx` | `87 3E` |
+| eccentric | `88 3E xx` | `88 3E` |
+| inverse | `B0 53 01` | `B0 53` (bool) |
+
+### Next exact action
+
+Implement KI-21: add decoder + bridge + UI apply for chains (`87 3E`),
+eccentric (`88 3E`), inverse (`B0 53`) using same pattern as KI-20
+baseWeight. All new code in `VoltraBLEFrameDecoder.swift` and
+`DeviceState.swift`. Do NOT touch sacred files.
+
+### Context health: good (checkpoint updated)

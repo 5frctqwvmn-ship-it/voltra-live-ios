@@ -621,21 +621,30 @@ each machine-facing field carries
 `DeviceState`. Migration is one field at a time, base weight
 first.
 
-### KI-20 (post-b79 — fix implemented after failed A1 visual test — pending retest)
+### KI-20 (CLOSED — build 81 — baseWeight device→UI sync fixed)
 
-**Status.** Fix implemented locally (NOT yet shipped to TestFlight);
-pending hardware retest on physical VOLTRA. The A1 hardware test
-(20 lb → 15 lb on physical VOLTRA) confirmed telemetry decode and
-`device.state.change` recorder emission passed, but the LiveCapture
-tile did NOT visually update. Root cause: computed `.onChange` on
-`deviceState.baseWeightLb?.value` was insufficient across
-foreground/background transitions. This commit implements the direct
-published bridge fix:
-- `VoltraBLEManager.deviceOriginatedBaseWeightUpdate` new
-  `@Published private(set)` set only for `.deviceUnsolicited` base-weight changes.
-- `LiveCaptureViewV2` observes it via `.onChange` and `.onAppear` reconciliation.
-- `ui.deviceBaseWeightApplied` recorder event emitted on each actual mutation.
-Do NOT close until MJ confirms tile updates on physical VOLTRA.
+**Status.** CLOSED. Confirmed passing on build 81 (v0.4.52).
+Session `EA473194-40BF-4580-BEEE-8C6033535923`.
+
+Full fix history:
+- `08a8b7c` — initial `@Published deviceOriginatedBaseWeightUpdate` bridge
+- `a46d45f` — event-based ID so repeated same-lb events still fire
+- `9788d49` — **root cause**: `focusedBle` returned standalone `ble`
+  manager when only one MDM slot was connected (`bothVoltrasConnected =
+  false`). Replaced with topology switch on
+  `(mdm.left.connectionState.isConnected, mdm.right…)`.
+
+A1 hardware evidence (build 81, session EA473194):
+```
+23:14:08.639 device.state.change field=baseWeight from=50 source=deviceUnsolicited to=45
+23:14:08.662 ui.deviceBaseWeightApplied field=baseWeight source=deviceUnsolicited to=45
+```
+Pattern repeated for 45→40, 40→35, 35→30. Both events present for all
+changes. Tile updated visually. **KI-20 is closed.**
+
+Note: chains/eccentric/inverse device-side changes were also observed
+in this session but do NOT emit parsed/apply events. That gap is
+tracked in KI-21 (renamed/expanded below).
 
 **What.** User adjusts the dial on the VOLTRA itself. App
 display does not update without manual refresh. Observed in
@@ -679,22 +688,63 @@ the hardware verification session.
 - Eccentric / chains / mode confirmations remain deferred
   (KI-21).
 
-### KI-21 (post-b78, open) — Eccentric/concentric/chains can drift between hardware and app
+### KI-21 (open — updated build 81) — Chains/eccentric/inverse device state not parsed/applied to UI
 
-**Status.** Open. Targeted by Telemetry v2 (deferred until
-BLE characteristic audit + decoder validation).
+**Status.** Open. Byte-level evidence collected in build 81 hardware
+session `EA473194-40BF-4580-BEEE-8C6033535923`. Parameter IDs
+hypothesised from notify frame bytes; not yet proven via decoder.
 
-**What.** When the user changes ecc / conc / chains values on
-the machine itself, the app's in-memory model can drift. Byte
-positions for these fields in device-state frames are
-**unknown**. The decoder cannot fix this until those positions
-are validated on hardware.
+**What.** When the user changes chains / eccentric / inverse-chains
+values on the physical VOLTRA, the BLE notify arrives and is visible
+in raw telemetry, but:
+- No `device.state.change` event is emitted for these fields.
+- No `ui.*Applied` event fires.
+- The app UI tile does not update.
 
-**Resolution plan.** Until validated, the UI greys those
-fields and the recorder emits
-`device.state.change(field=..., status=unknown)` so we can see
-the frame arrived but couldn't decode it. Promotion to
-`confirmed` waits on hardware validation.
+Base weight (`863e`) now works end-to-end (KI-20 closed). The three
+remaining fields are not yet decoded or bridged.
+
+**Hardware evidence (build 81, session EA473194):**
+
+| Action | Time | Raw hex fragment | Hypothesised param ID |
+|---|---|---|---|
+| App write chains=25 | 23:14:21.617 | (ble.write.tx) | — |
+| Device echo chains=25 | 23:14:21.870 | `873e19` | `87 3E` = chains |
+| App write chains=30 | 23:14:23.700 | (ble.write.tx) | — |
+| Device echo chains=30 | 23:14:23.999 | `873e1e` | `87 3E` = chains |
+| App write ecc=30 | 23:14:37.324 | (ble.write.tx) | — |
+| Device echo ecc=30 | 23:14:37.620 | `883e1e` | `88 3E` = eccentric |
+| App write ecc=25 | 23:14:50.695 | (ble.write.tx) | — |
+| Device echo ecc=25 | 23:14:50.943 | `883e19` | `88 3E` = eccentric |
+| App write inverse=true | 23:14:53.079 | `b05301` | `B0 53` = inverse toggle |
+| Device echo inverse | (no parsed event) | — | not yet decoded |
+
+Note: `19` hex = 25 dec, `1e` hex = 30 dec. Consistent with uint8
+or uint16-LE value encoding matching the base-weight pattern (`863e`).
+
+**Hypothesised param IDs (not yet hardened to code):**
+- `86 3E` = baseWeight ✅ confirmed (KI-20 closed)
+- `87 3E` = chains (hypothesis from build 81 session)
+- `88 3E` = eccentric (hypothesis from build 81 session)
+- `B0 53` = inverse toggle (hypothesis from build 81 session; bit field, not lb value)
+
+**Resolution plan.**
+1. Add `87 3E` decoder in `VoltraBLEFrameDecoder` for chains field.
+2. Add `88 3E` decoder for eccentric field.
+3. Add `B0 53` decoder for inverse toggle (bool, not lb).
+4. Add `DeviceStateField` cases for chains/eccentric/inverse.
+5. Set `deviceOriginatedChainsUpdate`, `deviceOriginatedEccUpdate`,
+   `deviceOriginatedInverseUpdate` published bridges on `VoltraBLEManager`
+   (same pattern as KI-20 baseWeight bridge).
+6. Wire `.onChange` observers + `.onAppear` reconciliation in
+   `LiveCaptureViewV2` for each field.
+7. Emit `ui.chainsApplied`, `ui.eccApplied`, `ui.inverseApplied`
+   recorder events on actual mutation.
+
+**Do NOT touch sacred files** (`VoltraProtocol.swift`,
+`TelemetryExtractor.swift`, `PacketParser.swift`, `FrameAssembler.swift`).
+All new decoder work goes in `VoltraBLEFrameDecoder.swift` and
+`DeviceState.swift`.
 
 ### KI-22 (post-b78, open) — Load drop / unload / cutout not surfaced to app state
 

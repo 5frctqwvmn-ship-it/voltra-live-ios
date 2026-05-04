@@ -12,9 +12,25 @@ _Last updated: 2026-05-03 (b78 SHIPPED to TestFlight; docs-only alignment commit
 
 ## Latest shipped build
 
-**v0.4.51 / build 78** — label "Session Recorder (launch fix)" —
-shipped 2026-05-03 03:17 UTC. Tag `v0.4.51-build78` at merge
-commit `32f9300` on `feat/ui-v4-2-claude`. Tag-triggered
+**v0.4.52 / build 81** — label "KI-20 topology fix + RC-01 dark" —
+shipped 2026-05-04 03:20 UTC. Tag `v0.4.52-build81` at commit
+`7da4ef2` on `feat/ui-v4-2-claude`.
+release.yml run 25299344681. 5-gate altool: ALL PASS.
+Delivery UUID `08ffc5e4-ca3e-4aba-81a7-6a06bef011ae`.
+
+**KI-20 CLOSED** after build 81 A1 hardware retest.
+Session `EA473194-40BF-4580-BEEE-8C6033535923`.
+Base weight device→UI now works for single-MDM-slot sessions.
+Chains/eccentric/inverse still open as KI-21.
+
+**Coaching (RC-01/SC-01)** is present in the binary but feature-flagged
+OFF (`FeatureFlags.coachingCardEnabled = false`). No coaching UI visible.
+
+---
+
+*Previous: v0.4.51 / build 78 — label "Session Recorder (launch fix)" —*
+*shipped 2026-05-03 03:17 UTC. Tag `v0.4.51-build78` at merge*
+*commit `32f9300` on `feat/ui-v4-2-claude`.* Tag-triggered
 [`release.yml` run 25268455532](https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25268455532)
 green in 7m40s. 5-gate altool verify per `09_RELEASE_AND_SIGNING.md`:
 ALL PASS. altool wall-clock 28s, success markers

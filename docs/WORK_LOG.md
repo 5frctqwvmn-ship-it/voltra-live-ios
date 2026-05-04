@@ -5948,3 +5948,26 @@ from UNVERIFIED to VERIFIED with a screenshot link.
 - **Coaching flags.** All false. No coaching UI visible.
 - **KI-20 status.** Pending hardware A1 retest on this build.
   DO NOT close KI-20 until MJ confirms tile updates to 15 lb.
+
+## 2026-05-04 04:20 UTC — KI-20 closed, KI-21 documented
+
+- **Goal.** Document build 81 A1 hardware retest results. Close KI-20.
+  Open/expand KI-21 with byte-level evidence for chains/ecc/inverse.
+- **Session.** `EA473194-40BF-4580-BEEE-8C6033535923`. App 0.4.52 build 81.
+- **KI-20 result.** CLOSED. baseWeight device→UI confirmed passing.
+  device.state.change source=deviceUnsolicited + ui.deviceBaseWeightApplied
+  both present for all device-side dial changes (50→45→40→35→30 lb).
+- **KI-21 result.** OPEN. Chains/eccentric/inverse notify frames arrive
+  in raw hex but no parsed/apply events emitted:
+  - `87 3E` = chains (hypothesis)
+  - `88 3E` = eccentric (hypothesis)
+  - `B0 53` = inverse toggle (hypothesis)
+- **Files changed (docs only).**
+  - `docs/handoff/06_KNOWN_ISSUES.md` — KI-20 marked CLOSED with evidence;
+    KI-21 expanded with byte table + full resolution plan.
+  - `docs/handoff/QA_LOG.md` — build 81 A1 PASS + mode-param FAIL entries.
+  - `docs/handoff/02_CURRENT_STATE.md` — latest shipped updated to build 81.
+  - `docs/handoff/CONTEXT_LEDGER.md` — checkpoint updated.
+- **Sacred files.** Unchanged. No code touched.
+- **Next step.** Implement KI-21: decoder + bridge + UI apply for
+  chains (87 3E), eccentric (88 3E), inverse (B0 53).

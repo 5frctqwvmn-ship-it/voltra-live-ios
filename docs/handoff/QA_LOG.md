@@ -305,3 +305,44 @@ next ship cycle starts)
   bridge added to `VoltraBLEManager`; `.onChange` + `.onAppear`
   reconciliation added in `LiveCaptureViewV2`.
 - KI-20 remains OPEN — requires hardware retest with new build.
+
+---
+
+## b81 — v0.4.52-build81 — 2026-05-03 — Hardware A1 retest + mode parameter observation
+
+### Items tested
+
+- **A1 test (KI-20):** Physical VOLTRA base weight changed device-side:
+  50→45→40→35→30 lb.
+- **Mode parameter observation:** App-side writes for chains=25, chains=30,
+  ecc=30, ecc=25, inverse=true. Device echoes observed in raw telemetry.
+
+### Results
+
+- **A1 — baseWeight device→UI: PASS. KI-20 CLOSED.**
+  Session `EA473194-40BF-4580-BEEE-8C6033535923`.
+  Key log sequence:
+  ```
+  23:14:08.639 device.state.change field=baseWeight from=50 source=deviceUnsolicited to=45
+  23:14:08.662 ui.deviceBaseWeightApplied field=baseWeight source=deviceUnsolicited to=45
+  ```
+  Pattern confirmed for 45→40, 40→35, 35→30. Tile updated visually.
+  focusedBle topology fix (9788d49) confirmed working.
+
+- **Mode parameters (chains/ecc/inverse) device→UI: FAIL / OPEN → KI-21.**
+  Session `EA473194-40BF-4580-BEEE-8C6033535923`.
+  Raw notify frames arrive (873e, 883e, b053 bytes present in hex logs)
+  but no `device.state.change` or `ui.*Applied` events emitted for
+  chains, eccentric, or inverse fields.
+  Hypothesised param IDs from this session:
+  - `87 3E` = chains
+  - `88 3E` = eccentric
+  - `B0 53` = inverse toggle
+
+### Actions taken
+
+- KI-20 marked CLOSED in `06_KNOWN_ISSUES.md`.
+- KI-21 updated with byte-level evidence and full resolution plan.
+- `02_CURRENT_STATE.md` updated to reflect build 81 as current shipped.
+- `CONTEXT_LEDGER.md` updated.
+- No code changes — docs only.
