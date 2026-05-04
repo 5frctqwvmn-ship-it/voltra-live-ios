@@ -5927,3 +5927,24 @@ from UNVERIFIED to VERIFIED with a screenshot link.
   Expected logs: device.state.change source=deviceUnsolicited to=15
   + ui.deviceBaseWeightApplied to=15.
   Do NOT close KI-20 until confirmed.
+
+## 2026-05-04 03:26 UTC — TestFlight ship: v0.4.52-build81
+
+- **Tag.** `v0.4.52-build81` at commit `7da4ef2`.
+- **Workflow run.** release.yml run 25299344681.
+  URL: https://github.com/5frctqwvmn-ship-it/voltra-live-ios/actions/runs/25299344681
+  Conclusion: success. Duration: ~5m27s.
+- **5-gate altool verification.**
+  1. Failure-marker grep: PASS — zero real error lines.
+  2. Wall-clock duration: PASS — ~5m27s.
+  3. Positive success marker: PASS — "No errors uploading archive at 'build/export/VoltraLive.ipa'."
+  4. No ERROR: lines: PASS.
+  5. Delivery UUID: PASS — 08ffc5e4-ca3e-4aba-81a7-6a06bef011ae.
+- **Commits shipped.**
+  - 9788d49 fix: route focusedBle by connection topology
+  - ad3c11b feat: RC-01/SC-01 coaching scaffold (all flags false)
+  - 5b8d978 docs: context checkpoint
+  - 7da4ef2 chore(release): bump to 0.4.52/build81
+- **Coaching flags.** All false. No coaching UI visible.
+- **KI-20 status.** Pending hardware A1 retest on this build.
+  DO NOT close KI-20 until MJ confirms tile updates to 15 lb.
