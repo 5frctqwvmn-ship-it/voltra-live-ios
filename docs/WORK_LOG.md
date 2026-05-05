@@ -3464,3 +3464,12 @@ from UNVERIFIED to VERIFIED with a screenshot link.
 - **Next step.** CI build (manual dispatch) → hardware verification of:
   (1) DebugView coaching toggle, (2) inverse reconnect replay,
   (3) Session Tracker bottom-left indicator, (4) Viewer summary bar.
+
+## 2026-05-05 04:10 UTC — Bump to 0.4.52 / build 83 for TestFlight ship
+
+- **Goal.** Bump build 82 → 83 and ship to TestFlight.
+- **Commits shipped.**
+  - ed5d76d feat: coaching toggle, inverse reconnect, session tracker, viewer summary
+- **Files changed.** project.yml (lines 65+93), VoltraLive/Info.plist.
+- **Sacred files.** Unchanged.
+- **Next step.** Hardware QA per checklist in ship report.
