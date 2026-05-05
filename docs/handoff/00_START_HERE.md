@@ -224,9 +224,10 @@ minimum:
 
 ## Last shipped (informational)
 
-**v0.4.52 / build 82.** Tag `v0.4.52-build82`. TestFlight delivery UUID
-`496678a7-ab0b-4a7d-b08a-d1077c315fb7`. See `02_CURRENT_STATE.md` for
-the full feature summary and open bug queue.
+**v0.4.52 / build 82 — "KI-21 device bridges + hidden Smart Coach unlock" —
+tag `v0.4.52-build82`, commit `e91c148`.** Delivered to Apple 2026-05-04 19:18 UTC.
+Delivery UUID `496678a7-ab0b-4a7d-b08a-d1077c315fb7`. See `02_CURRENT_STATE.md`
+for the full feature summary and open bug queue.
 
 **Prior shipped: v0.4.51 / build 78 — "Session Recorder (launch fix)" —
 B74-F11 hotfix.** Re-injects `SessionRecorder` env-object directly

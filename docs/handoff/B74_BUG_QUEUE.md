@@ -1,4 +1,13 @@
-# B74 Bug Queue — opened May 1 2026 (CDT)
+# B74 Bug Queue — HISTORICAL / STALE
+
+> **ARCHIVED — 2026-05-04.** This queue was opened at b73. The project is now at b82.
+> Most items here were shipped or superseded. Do NOT use this file as a live
+> tracking document. Active issues live in `docs/handoff/06_KNOWN_ISSUES.md`.
+> This file is retained for historical reference only.
+
+---
+
+# Original content (archived)
 
 > Post-b73 ship feedback batch. Cycle target: TBD on the next
 > feature branch the GPT-5 implementation agent opens against

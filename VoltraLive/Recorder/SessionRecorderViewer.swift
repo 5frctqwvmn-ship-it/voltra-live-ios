@@ -23,6 +23,10 @@ struct SessionRecorderViewer: View {
     @State private var sharePayload: SharePayload? = nil
     @State private var isReloading: Bool = false
 
+    // b82: per-category event counts, computed once on reload so the
+    // summary bar does not iterate filteredEvents on every render.
+    @State private var categoryCounts: [RecorderCategory: Int] = [:]
+
     private struct SharePayload: Equatable {
         let txtURL: URL
         let jsonURL: URL
@@ -34,6 +38,7 @@ struct SessionRecorderViewer: View {
                 VoltraColor.bg.ignoresSafeArea()
                 VStack(spacing: 0) {
                     header
+                    if !categoryCounts.isEmpty { summaryBar }
                     filterBar
                     Divider().background(VoltraColor.border)
                     eventList
@@ -224,12 +229,56 @@ struct SessionRecorderViewer: View {
         }
     }
 
+    // MARK: b82 — Summary bar (derived from existing recorder data only)
+
+    /// Horizontal band showing per-category event counts. Tapping a chip
+    /// selects that category filter. Data source: recorder.snapshot() —
+    /// no new persistence model.
+    private var summaryBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(RecorderCategory.allCases, id: \.self) { cat in
+                    if let count = categoryCounts[cat], count > 0 {
+                        Button {
+                            selectedCategory = selectedCategory == cat ? nil : cat
+                        } label: {
+                            VStack(spacing: 1) {
+                                Text("\(count)")
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .foregroundColor(categoryColor(cat))
+                                Text(cat.rawValue)
+                                    .font(.system(size: 8, design: .monospaced))
+                                    .foregroundColor(VoltraColor.textFaint)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(categoryColor(cat).opacity(
+                                        selectedCategory == cat ? 0.2 : 0.07
+                                    ))
+                            )
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+    }
+
     // MARK: Loading + share prep
 
     private func reload() async {
         isReloading = true
         let snap = await recorder.snapshot()
         events = snap
+        // b82: compute per-category counts for summary bar
+        var counts: [RecorderCategory: Int] = [:]
+        for event in snap {
+            counts[event.category, default: 0] += 1
+        }
+        categoryCounts = counts
         await prepareShare()
         isReloading = false
     }

@@ -39,4 +39,19 @@ enum FeatureFlags {
     /// Appends coaching recommendation inputs/outputs to the session recorder
     /// debug JSON export. Requires telemetry debug export to be unlocked.
     static var telemetryDebugExportEnabled: Bool = false
+
+    // MARK: - Session Tracker
+
+    /// Shows the bottom-left Session Tracker indicator when a VOLTRA device
+    /// is connected (i.e. a live session is active).
+    /// Defaults ON for validation builds — set to false to hide.
+    /// AppStorage key: "VOLTRASessionTrackerEnabled".
+    static let sessionTrackerUserDefaultsKey = "VOLTRASessionTrackerEnabled"
+
+    static var sessionTrackerEnabled: Bool {
+        // Default true if key has never been set (UserDefaults returns false
+        // for an absent Bool key; we treat absence as enabled).
+        let stored = UserDefaults.standard.object(forKey: sessionTrackerUserDefaultsKey)
+        return stored == nil ? true : UserDefaults.standard.bool(forKey: sessionTrackerUserDefaultsKey)
+    }
 }
