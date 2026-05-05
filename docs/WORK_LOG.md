@@ -3407,3 +3407,60 @@ from UNVERIFIED to VERIFIED with a screenshot link.
 - **Root cause.** Process failure: the `02_CURRENT_STATE.md` update happened on every
   ship commit but `01_PROJECT_OVERVIEW.md` was never included. Will correct on every
   future ship.
+
+## 2026-05-05 04:00 UTC — b82 merge pass: coaching toggle, inverse reconnect, session tracker, viewer, docs
+
+- **Goal.** Merge-only pass against b82 HEAD. Add only missing behavior
+  identified in gap audit of paste.txt against existing code. No
+  architectural rewrites. No build bump. No push.
+- **Files changed (Swift).**
+  - `VoltraLive/FeatureFlags.swift` — added `sessionTrackerUserDefaultsKey`
+    and `sessionTrackerEnabled` computed var (defaults ON via nil-check).
+  - `VoltraLive/Logging/Views/DebugView.swift` — added `@AppStorage
+    smartCoachDebugUnlocked` property + "COACHING FEATURES" section with
+    a Toggle wired to `VOLTRASmartCoachUnlocked`. Mirrors 4-tap badge
+    gesture. No FeatureFlagStore introduced.
+  - `VoltraLive/Logging/Views/LiveCaptureViewV2.swift` — expanded
+    `handleConnectionChange()` to call `pushUpcomingStateToDevice()` when
+    `anyDeviceConnected == true && activeSession != nil &&
+    pendingPlannedWeightLb != nil`. Emits `ble.reconnect.statePushed`
+    recorder event with base/ecc/chains/inverse metadata.
+  - `VoltraLive/Recorder/SessionTrackerIndicator.swift` — NEW. Bottom-left
+    20×20 stroke-ring indicator (visually distinct from recorder dot).
+    Visible when any VOLTRA is connected. Tap opens `SessionRecorderViewer`.
+    Gated by `FeatureFlags.sessionTrackerEnabled`.
+  - `VoltraLive/VoltraLiveApp.swift` — added `.overlay(alignment:
+    .bottomLeading) { SessionTrackerIndicator() ... }` with env-objects
+    re-injected per KI-13 / AGENTS.md E5.
+  - `VoltraLive/Recorder/SessionRecorderViewer.swift` — added
+    `categoryCounts` state + `summaryBar` computed var. Summary bar shows
+    per-category event counts as tappable filter chips. Computed from
+    `recorder.snapshot()` — no new persistence model.
+- **Files changed (docs).**
+  - `docs/handoff/00_START_HERE.md` — last-shipped line + section
+    corrected to b82.
+  - `docs/handoff/03_ROADMAP.md` — last-updated updated; builds 79-82
+    added to Done table.
+  - `docs/handoff/B74_BUG_QUEUE.md` — ARCHIVED header added.
+  - `docs/handoff/06_KNOWN_ISSUES.md` — KI-ST-01 (deferred saved-reports
+    browser) and KI-INV-01 (inverse reconnect unverified) added.
+- **What preserved (not changed).**
+  - `FeatureFlags.swift` enum architecture — unchanged.
+  - `CoachingEngine.swift`, `CoachingCardView.swift`, all RC-01 files — unchanged.
+  - KI-21 bridge (`VoltraBLEManager`, `DeviceState`, `VoltraDecodeTable`) — unchanged.
+  - `SessionRecorder`, `RecorderExporter` — no new duplicates.
+  - No new `@Model` or SwiftData schema.
+  - Sacred files — all unchanged.
+- **Verification.** Static + grep only (no Xcode on Windows). All symbols
+  confirmed present. `git diff --check` passes. No sacred file in diff.
+- **Risks.**
+  - Inverse reconnect replay: fires on EVERY connectionState change while
+    session is active (including the first connect). The `pendingPlannedWeightLb
+    != nil` guard prevents spurious writes on first connect before the user
+    has set a weight. Hardware verification still needed (KI-INV-01).
+  - SessionTrackerIndicator mounts on top of all screens. If a full-screen
+    sheet or alert covers the safe area, the indicator may be obscured. Low
+    risk — same behavior as existing recorder dot.
+- **Next step.** CI build (manual dispatch) → hardware verification of:
+  (1) DebugView coaching toggle, (2) inverse reconnect replay,
+  (3) Session Tracker bottom-left indicator, (4) Viewer summary bar.

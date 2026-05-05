@@ -37,8 +37,7 @@ have done this.**
 ## Active branch state (Telemetry v2 first slice in flight, post-b78)
 
 - **Branch:** `feat/ui-v4-2-claude` (integration branch).
-- **Last shipped to TestFlight:** **v0.4.51 / build 78 — "Session
-  Recorder (launch fix)" — B74-F11.** Tag `v0.4.51-build78`.
+- **Last shipped to TestFlight:** **v0.4.52 / build 82 — "KI-21 device bridges + hidden Smart Coach unlock".** Tag `v0.4.52-build82`.
 - **In flight on the branch (not shipped).**
   - Telemetry v2 docs alignment commit `6a3162b`.
   - BLE characteristic audit commit `2636b49`.
@@ -185,8 +184,12 @@ minimum:
 
 ## Last shipped (informational)
 
-**v0.4.51 / build 78 — "Session Recorder (launch fix)" —
-B74-F11 hotfix.** Re-injects `SessionRecorder` env-object directly
+**v0.4.52 / build 82 — "KI-21 device bridges + hidden Smart Coach unlock" —
+tag `v0.4.52-build82`, commit `e91c148`.** Delivered to Apple 2026-05-04 19:18 UTC.
+Delivery UUID `496678a7-ab0b-4a7d-b08a-d1077c315fb7`.
+
+*Previous: v0.4.51 / build 78 — "Session Recorder (launch fix)" —
+B74-F11 hotfix.* Re-injects `SessionRecorder` env-object directly
 on `SessionRecorderToggle()` inside the root `.overlay` closure in
 `VoltraLiveApp.swift`. b77 shipped a SwiftUI
 `EnvironmentObject.error()` launch crash because

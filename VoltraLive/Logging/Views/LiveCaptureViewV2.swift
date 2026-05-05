@@ -2076,10 +2076,32 @@ struct LiveCaptureViewV2: View {
     /// telemetry. postPair demo (manually engaged from home with a
     /// device already paired) is left alone — that path is intentional.
     private func handleConnectionChange() {
-        guard demo.isActive,
-              demo.entrySource == .prePair,
-              anyDeviceConnected else { return }
-        _ = demo.exit()
+        // Exit pre-pair demo when a device connects.
+        if demo.isActive, demo.entrySource == .prePair, anyDeviceConnected {
+            _ = demo.exit()
+        }
+
+        // b82: Reconnect state replay. When a device reconnects mid-session,
+        // re-push the full upcoming state (base, ecc, chains, inverse) so the
+        // hardware mirrors the app's in-memory configuration. Without this,
+        // inverse-chain mode and modifier weights are lost on a brief disconnect.
+        //
+        // Guard: session must be active (activeSession != nil) and a planned
+        // weight must exist (pendingPlannedWeightLb != nil). This avoids
+        // spurious writes on first connection before the user has set a weight.
+        if anyDeviceConnected,
+           logging.activeSession != nil,
+           logging.pendingPlannedWeightLb != nil {
+            SessionRecorder.shared.record(
+                category: .ble, name: "ble.reconnect.statePushed",
+                metadata: [
+                    "baseLb":    .int(Int64((logging.pendingPlannedWeightLb ?? 0).rounded())),
+                    "inverse":   .bool(logging.upcomingInverseEnabled),
+                    "chainsLb":  .int(Int64(logging.upcomingChainsLb.rounded())),
+                    "eccLb":     .int(Int64(logging.upcomingEccLb.rounded()))
+                ])
+            pushUpcomingStateToDevice()
+        }
     }
 
     // MARK: - Device state push

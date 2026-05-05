@@ -36,6 +36,12 @@ struct DebugView: View {
     @State private var importStats: HistoryImporter.ImportStats = HistoryImporter.ImportStats()
     @State private var importError: String? = nil
 
+    // b82: reactive binding for the coaching unlock toggle. Uses the same
+    // UserDefaults key as FeatureFlags.smartCoachUnlockUserDefaultsKey and
+    // the 4-tap BuildBadgeChip gesture so all three paths stay in sync.
+    @AppStorage(FeatureFlags.smartCoachUnlockUserDefaultsKey)
+    private var smartCoachDebugUnlocked: Bool = false
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -175,6 +181,32 @@ struct DebugView: View {
                             Text("If heart-rate or calories aren't showing during a workout, the in-app button can't always re-prompt iOS. Use the Settings button above to flip access on under Privacy & Security → Health → VOLTRA Live, then return to the app.")
                                 .font(.system(size: 12))
                                 .foregroundColor(VoltraColor.textDim)
+                        }
+
+                        // b82: hidden coaching toggle. Mirrors the same
+                        // VOLTRASmartCoachUnlocked UserDefaults key used by
+                        // the 4-tap badge gesture. Toggle here provides an
+                        // accessible debug path without requiring muscle-memory
+                        // of the tap sequence. FeatureFlags enum unchanged.
+                        section("COACHING FEATURES") {
+                            HStack {
+                                Text("Smart Coach Unlocked")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(VoltraColor.text)
+                                Spacer()
+                                Toggle("", isOn: $smartCoachDebugUnlocked)
+                                    .labelsHidden()
+                                    .tint(VoltraColor.accent)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .background(VoltraColor.bgElev)
+
+                            Text("When ON: Coaching Card appears in LiveCapture rest state. Mirrors 4-tap badge gesture.")
+                                .font(.system(size: 11))
+                                .foregroundColor(VoltraColor.textFaint)
+                                .padding(.horizontal, 14)
+                                .padding(.bottom, 8)
                         }
 
                         section("ACTIONS") {

@@ -858,3 +858,44 @@ via `adjustWeight(delta:)`.
 6. Re-tap version badge 4 times to disable → card should hide on next rest.
 
 **Do NOT close** until steps 1–6 confirmed on physical device.
+
+---
+
+### KI-ST-01 (open — deferred) — Saved session reports / historical browser not yet built
+
+**Status.** Deferred. Scope decision: this pass (b82 scope) adds only
+`SessionTrackerIndicator` (bottom-left indicator) and a summary bar in
+the existing `SessionRecorderViewer`. A full historical session browser
+(list of past recorded sessions, per-session summaries, searchable)
+requires a new SwiftData persistence model for recorder snapshots.
+
+**What's present.** `SessionRecorderViewer` shows the current/last
+session's event timeline and exports `.txt` + `.json` via `ShareLink`.
+The b82 summary bar adds per-category event counts. This is sufficient
+for hardware validation.
+
+**What's deferred.**
+- A list screen browsing all past recorder sessions.
+- Per-session workout summaries (volume, peak force, set count, etc.).
+- Any new `@Model` / SwiftData schema for persisting recorder output.
+
+**Do not close** until a dedicated saved-reports feature is built and
+tested on device.
+
+---
+
+### KI-INV-01 (open — unverified) — Inverse reconnect replay not yet hardware-tested
+
+**Status.** b82 adds `pushUpcomingStateToDevice()` call in
+`handleConnectionChange()` when `anyDeviceConnected == true` and a
+session is active. This should re-push base/ecc/chains/inverse to the
+device on reconnect.
+
+**Not yet hardware-verified.** Must be confirmed on physical VOLTRA:
+- Set inverse chains active in LiveCapture.
+- Disconnect and reconnect the device (power-cycle or Bluetooth toggle).
+- Expected: device receives the inverse state automatically.
+- Expected log: `ble.reconnect.statePushed` in session recorder with
+  `inverse=true`.
+
+**Do not close** until MJ confirms inverse state is replayed on reconnect.

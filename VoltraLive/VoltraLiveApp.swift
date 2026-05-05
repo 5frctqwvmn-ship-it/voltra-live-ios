@@ -358,6 +358,16 @@ struct VoltraLiveApp: App {
                     SessionRecorderToggle()
                         .environmentObject(recorder)
                 }
+                // b82: bottom-left Session Tracker indicator. Visible when
+                // a VOLTRA is connected. Tapping opens SessionRecorderViewer.
+                // Env-objects re-injected per KI-13 / AGENTS.md E5:
+                // .overlay content does not inherit parent env-objects.
+                .overlay(alignment: .bottomLeading) {
+                    SessionTrackerIndicator()
+                        .environmentObject(bleManager)
+                        .environmentObject(multi)
+                        .environmentObject(recorder)
+                }
         }
         .modelContainer(modelContainer)
     }
